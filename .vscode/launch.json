@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug auth-service",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/auth-service",
+      "env": {
+        "FORWARD_SA": "quiz-access",
+        "FORWARD_SA_NAMESPACE": "present"
+      }
+    }
+  ]
+}

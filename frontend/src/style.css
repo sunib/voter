@@ -1,0 +1,90 @@
+@import "tailwindcss";
+
+/*
+  Attendee-first theme tokens.
+  - Warm off-white background
+  - Near-black ink
+  - Single “electric” accent
+*/
+:root {
+  --bg: 247 246 240; /* warm paper */
+  --ink: 16 16 14;
+  --muted: 107 107 98;
+  --card: 255 255 252;
+  --stroke: 0 0 0;
+  --accent: 0 214 255; /* electric cyan */
+
+  /* Typography (brutalist)
+     - Body: mono, dense, utilitarian
+     - Display: tall condensed, loud headlines
+  */
+  --font-body: "Azeret Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  --font-display: "Teko", ui-sans-serif, system-ui, sans-serif;
+
+  --radius: 14px;
+
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: rgb(var(--bg));
+  color: rgb(var(--ink));
+  font-family: var(--font-body);
+  line-height: 1.35;
+}
+
+/*
+  PrimeVue theming alignment
+  Keep PrimeVue components feeling like they belong in our paper/ink system.
+  (PrimeUIX Aura provides the base; these are light-touch overrides.)
+*/
+:root {
+  --p-border-radius: var(--radius);
+}
+
+/* Cards */
+.p-card {
+  background: rgb(var(--card));
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.06);
+}
+
+/* Inputs */
+.p-inputtext,
+.p-textarea,
+.p-inputnumber-input {
+  border-radius: var(--radius);
+}
+
+/* Focus ring in our electric accent */
+.p-inputtext:focus,
+.p-textarea:focus,
+.p-inputnumber-input:focus,
+.p-checkbox-box.p-focus,
+.p-slider .p-slider-handle:focus {
+  box-shadow: 0 0 0 4px rgba(var(--accent), 0.18);
+}
+
+/* Headings */
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+/* Default container behavior */
+#app {
+  min-height: 100%;
+}

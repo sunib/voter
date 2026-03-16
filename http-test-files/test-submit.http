@@ -1,0 +1,32 @@
+# httpyac examples/quizsubmission.http
+# install with: npm i -g httpyac
+### Set these variables for your cluster/API access
+@base = https://present.z65.nl
+@apiPrefix = /apis/examples.configbutler.ai/v1alpha1
+@ns = present
+@session = kubecon-2026
+
+### Submit answers (use with REST Client / httpyac / IntelliJ HTTP)
+POST {{base}}{{apiPrefix}}/namespaces/{{ns}}/quizsubmissions
+Content-Type: application/json
+
+{
+  "apiVersion": "examples.configbutler.ai/v1alpha1",
+  "kind": "QuizSubmission",
+  "metadata": {
+    "generateName": "{{session}}-"
+  },
+  "spec": {
+    "sessionRef": {
+      "name": "{{session}}"
+    },
+    "submittedAt": "2026-02-05T12:34:00Z",
+    "answers": [
+      { "questionId": "q1", "singleChoice": "Yes" },
+      { "questionId": "q2", "multiChoice": ["Kubernetes", "Traefik"] },
+      { "questionId": "q3", "number": 7 },
+      { "questionId": "q4", "number": 42 },
+      { "questionId": "q5", "freeText": "Loved it." }
+    ]
+  }
+}

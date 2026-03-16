@@ -1,0 +1,39 @@
+@base = http://localhost:5173
+@apiPrefix = /apis/examples.configbutler.ai/v1alpha1
+@ns = demo
+@session = kubecon-2026
+@code = demo-join-code
+
+### (1) Bootstrap device session + read session
+GET {{base}}{{apiPrefix}}/namespaces/{{ns}}/quizsessions/{{session}}
+X-Join-Code: {{code}}
+
+### (2) Read session again (paste Cookie from response if not using a cookie jar)
+GET {{base}}{{apiPrefix}}/namespaces/{{ns}}/quizsessions/{{session}}
+
+### (3) Submit answers
+POST {{base}}{{apiPrefix}}/namespaces/{{ns}}/quizsubmissions
+Content-Type: application/json
+
+{
+  "apiVersion": "examples.configbutler.ai/v1alpha1",
+  "kind": "QuizSubmission",
+  "metadata": {
+    "generateName": "{{session}}-"
+  },
+  "spec": {
+    "sessionRef": {
+      "group": "examples.configbutler.ai",
+      "kind": "QuizSession",
+      "name": "{{session}}"
+    },
+    "submittedAt": "2026-01-01T00:00:00.000Z",
+    "answers": [
+      { "questionId": "q1", "singleChoice": "Yes" },
+      { "questionId": "q2", "multiChoice": ["Kubernetes", "Traefik"] },
+      { "questionId": "q3", "number": 7 },
+      { "questionId": "q4", "number": 42 },
+      { "questionId": "q5", "freeText": "Loved it." }
+    ]
+  }
+}

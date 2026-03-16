@@ -1,0 +1,17 @@
+@base = http://localhost:8080
+@apiPrefix = /apis/examples.configbutler.ai/v1alpha1
+@ns = present
+@session = kubecon-2026
+@joinCode = k28i
+
+### (1) Start session via ForwardAuth using join code
+# Use the /auth endpoint to resolve the session and receive both cookies.
+# VS Code REST Client automatically stores cookies in its cookie jar.
+GET {{base}}/auth
+X-Join-Code: {{joinCode}}
+X-Forwarded-Uri: {{apiPrefix}}/namespaces/{{ns}}/quizsessions/{{session}}
+
+### (2) Get current session info
+# Cookies from (1) are automatically sent via VS Code's cookie jar.
+# No manual Cookie header needed - it just works!
+GET {{base}}/session-info
