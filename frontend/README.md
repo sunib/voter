@@ -20,7 +20,7 @@ docker run --rm -p 8080:8080 present-yaml-frontend
 ```
 docker build . -t zot.z65.nl/present/auth-service:v1
 docker push zot.z65.nl/present/auth-service:v1
-kubectl create secret docker-registry zot-pull   --docker-server=zot.z65.nl   --docker-username=admin   --docker-password='6LQnb6dUu18vhdEQfWRB' -n present
+kubectl create secret docker-registry zot-pull   --docker-server=zot.z65.nl   --docker-username=admin   --docker-password='---replace---' -n vote
 
 ## Join flow
 
