@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 type tokenCacheEntry struct {
@@ -14,10 +16,13 @@ type tokenCacheEntry struct {
 type tokenCache struct {
 	mu      sync.Mutex
 	entries map[string]tokenCacheEntry
+	group   singleflight.Group
 }
 
 func newTokenCache() *tokenCache {
-	return &tokenCache{entries: map[string]tokenCacheEntry{}}
+	return &tokenCache{
+		entries: map[string]tokenCacheEntry{},
+	}
 }
 
 func (c *tokenCache) get(key string, now time.Time, skew time.Duration) (string, bool) {
@@ -50,12 +55,25 @@ func getOrRequestToken(cache *tokenCache, requester tokenRequester, key string, 
 		return tokenToUse, nil
 	}
 
-	reqCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	defer cancel()
-	token, exp, err := requester.requestToken(reqCtx, saNamespace, saName, audiences, ttlSeconds)
+	result, err, _ := cache.group.Do(key, func() (any, error) {
+		if tokenToUse, ok := cache.get(key, time.Now(), skew); ok {
+			return tokenToUse, nil
+		}
+
+		reqCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+		defer cancel()
+
+		token, exp, err := requester.requestToken(reqCtx, saNamespace, saName, audiences, ttlSeconds)
+		if err != nil {
+			return "", err
+		}
+		cache.set(key, token, exp)
+		return token, nil
+	})
 	if err != nil {
 		return "", err
 	}
-	cache.set(key, token, exp)
+
+	token, _ := result.(string)
 	return token, nil
 }

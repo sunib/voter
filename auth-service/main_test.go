@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -163,18 +164,39 @@ func TestJoinCodeStoreResolveAndRotate(t *testing.T) {
 }
 
 type stubKubeClient struct {
-	calls              int
-	token              string
-	exp                time.Time
-	tokenErr           error
+	mu                  sync.Mutex
+	calls               int
+	token               string
+	exp                 time.Time
+	tokenErr            error
+	requestStarted      chan struct{}
+	releaseRequest      chan struct{}
 	reviewAuthenticated bool
-	reviewUsername     string
-	reviewErr          error
+	reviewUsername      string
+	reviewErr           error
 }
 
 func (s *stubKubeClient) requestToken(_ context.Context, _, _ string, _ []string, _ int64) (string, time.Time, error) {
+	s.mu.Lock()
 	s.calls++
-	return s.token, s.exp, s.tokenErr
+	token := s.token
+	exp := s.exp
+	tokenErr := s.tokenErr
+	started := s.requestStarted
+	release := s.releaseRequest
+	s.mu.Unlock()
+
+	if started != nil {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+	}
+	if release != nil {
+		<-release
+	}
+	return token, exp, tokenErr
 }
 
 func (s *stubKubeClient) getQuizSession(_ context.Context, _ sessionRef) (quizSessionSpec, error) {
@@ -225,6 +247,53 @@ func TestTokenCacheRenewAfterExpiry(t *testing.T) {
 	}
 	if stub.calls != 2 {
 		t.Fatalf("expected 2 token requests, got %d", stub.calls)
+	}
+}
+
+func TestGetOrRequestTokenCoalescesConcurrentMisses(t *testing.T) {
+	now := time.Now()
+	cache := newTokenCache()
+	stub := &stubKubeClient{
+		token:          "tok-1",
+		exp:            now.Add(10 * time.Minute),
+		requestStarted: make(chan struct{}),
+		releaseRequest: make(chan struct{}),
+	}
+
+	const callers = 64
+	tokens := make(chan string, callers)
+	errs := make(chan error, callers)
+
+	var wg sync.WaitGroup
+	wg.Add(callers)
+	for i := 0; i < callers; i++ {
+		go func() {
+			defer wg.Done()
+			token, err := getOrRequestToken(cache, stub, "shared", now, 20*time.Second, "vote", "quiz-access", nil, 300, context.Background())
+			if err != nil {
+				errs <- err
+				return
+			}
+			tokens <- token
+		}()
+	}
+
+	<-stub.requestStarted
+	close(stub.releaseRequest)
+	wg.Wait()
+	close(tokens)
+	close(errs)
+
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors, got %d", len(errs))
+	}
+	if stub.calls != 1 {
+		t.Fatalf("expected exactly 1 token request, got %d", stub.calls)
+	}
+	for token := range tokens {
+		if token != "tok-1" {
+			t.Fatalf("unexpected token: got %q want %q", token, "tok-1")
+		}
 	}
 }
 
@@ -510,10 +579,10 @@ func TestForwardAuthBearerPassthrough(t *testing.T) {
 			wantCode:            http.StatusUnauthorized,
 		},
 		{
-			name:      "token review error returns 500",
+			name:       "token review error returns 500",
 			authHeader: "Bearer error-token",
-			reviewErr: errors.New("kube unavailable"),
-			wantCode:  http.StatusInternalServerError,
+			reviewErr:  errors.New("kube unavailable"),
+			wantCode:   http.StatusInternalServerError,
 		},
 		{
 			name:       "no bearer token falls through to session check (no session → 401)",
