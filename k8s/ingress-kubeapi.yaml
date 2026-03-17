@@ -31,7 +31,9 @@ spec:
   entryPoints:
     - websecure
   routes:
-    - match: Host(`voter.z65.nl`) && PathPrefix(`/apis/examples.configbutler.ai/`)  # This is an extra indepth layer, but probably not the 'long' term solution since kubectl needs access to /apis for example to discover stuff...
+    # All Kubernetes API paths. auth-forwarder handles both browser (mints a token via
+    # session cookie / join code) and kubectl (validates and passes through bearer token).
+    - match: Host(`vote.reversegitops.dev`) && (PathPrefix(`/api`) || PathPrefix(`/apis`) || PathPrefix(`/openapi`))
       kind: Rule
       middlewares:
         - name: auth-forwarder

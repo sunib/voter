@@ -1,230 +1,245 @@
-# Design: Audience kubectl Access
+# Audience kubectl Access
 
-## Context
+## What we built
 
-The browser frontend currently reaches the Kubernetes API through Traefik's ForwardAuth middleware — tokens are minted server-side by the auth-service and never reach the browser. The audience can already *use* the Kubernetes API indirectly.
+The audience can get a working `kubectl` session using the same join code shown on screen for the voting app.
 
-The goal here is to give audience members direct `kubectl` access so they can introspect the same CRDs (QuizSession, QuizSubmission) from their own terminal, live during the talk. This turns the demo from "trust me, it's Kubernetes" into "try it yourself".
+**The one-liner:**
+```sh
+export KUBECONFIG=<(curl -s "https://vote.reversegitops.dev/auth/kubeconfig?code=XXXX")
+kubectl get quizsessions.examples.configbutler.ai
+kubectl get quizsubmissions.examples.configbutler.ai
+```
+
+Or for multiple commands on macOS (where process substitution with `export` can be flaky):
+```sh
+curl -s "https://vote.reversegitops.dev/auth/kubeconfig?code=XXXX" > /tmp/voter.yaml
+export KUBECONFIG=/tmp/voter.yaml
+kubectl get quizsessions.examples.configbutler.ai
+```
+
+The session cookie also works — if they've already joined in the browser:
+```sh
+curl -s "https://vote.reversegitops.dev/auth/kubeconfig" --cookie "auth_session=..." > /tmp/voter.yaml
+```
 
 ---
 
-## Prerequisite: Ingress Coverage
+## How it works
 
-The current Traefik IngressRoute only covers `/apis/examples.configbutler.ai/`.
+### `/public/kubeconfig` endpoint
 
-kubectl discovery calls:
-- `/api` and `/apis` — API group enumeration
-- `/apis/examples.configbutler.ai/` — our group ✅
-- `/apis/examples.configbutler.ai/v1alpha1/` — resources in group ✅
+`GET /auth/kubeconfig?code=XXXX` (or with a session cookie) goes through `requireSessionMiddleware` — the same validation path as every other `/public/` endpoint. On success it mints a short-lived token (~10 min) via the `quiz-access` ServiceAccount and returns a complete kubeconfig YAML.
 
-Without the top-level `/api` and `/apis` paths being proxied, `kubectl get quizsessions` will fail with a discovery error. There are two ways around this:
+The returned kubeconfig points at `https://vote.reversegitops.dev`, which Traefik proxies to the Kubernetes API server.
 
-### N1 — Expand the Ingress (Recommended for kubectl UX)
+### Ingress
 
-Add an IngressRoute rule for `PathPrefix(/apis/)` and `PathPrefix(/api)` pointing at the K8s API server, behind the same `auth-forwarder` middleware.
+All Kubernetes API paths are exposed through Traefik behind the `auth-forwarder` middleware:
 
-Pros:
-- Standard `kubectl get quizsessions -n voter` just works
-- Looks clean in a demo
-
-Cons:
-- Slightly larger attack surface (more K8s API surface exposed, but still RBAC-gated)
-- The token used is still scoped to `quiz-access` Role, so blast radius is bounded
-
-### N2 — Workaround: Explicit API Group in kubectl
-
-Audience uses:
 ```
-kubectl get quizsessions.examples.configbutler.ai -n voter
-```
-…with the `--server-side-apply` flag or a patched kubeconfig that sets a custom `extensions` block.
-
-In practice this is unreliable — kubectl still attempts discovery. **Not recommended for a live demo.**
-
-### N3 — Direct K8s API with curl/httpie
-
-Skip kubectl entirely. Audience uses:
-```
-curl -H "Authorization: Bearer $TOKEN" \
-  https://voter.z65.nl/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/quizsessions
+PathPrefix(/api) || PathPrefix(/apis) || PathPrefix(/openapi)
 ```
 
-Works today without any ingress changes. Good for showing raw API calls, but loses the `kubectl` narrative.
+This covers kubectl's discovery calls (`/api`, `/apis`) as well as the actual resource paths.
+
+### auth-forwarder: two paths
+
+The `forward-auth-decision` handler handles both browser and kubectl traffic:
+
+- **Browser** (no bearer token): validates session cookie / join code, mints a token, injects it.
+- **kubectl** (bearer token present): calls the Kubernetes **TokenReview API** to validate the token, then passes it straight through. Invalid tokens are rejected with 401 before reaching K8s.
+
+The auth-service RBAC includes `create` on `tokenreviews.authentication.k8s.io` for this.
 
 ---
 
-## Token Distribution Options
+## User identity in Kubernetes
 
-Regardless of networking choice, audience members need a bearer token. Options:
+Right now all audience traffic authenticates as `system:serviceaccount:vote:quiz-access` — every submission looks the same in audit logs. There are a few Kubernetes-native ways to attach a human identity.
 
----
+### Option I — Kubernetes Impersonation headers
 
-### Option A — Static Shared Token (Simplest)
+The auth service already sits between the browser and K8s with the ability to inject headers. Kubernetes supports impersonation headers:
 
-**How it works:**
+```
+Impersonate-User: alice@example.com
+Impersonate-Extra-displayname: Alice
+```
 
-1. Before the talk, mint a long-lived token for the `quiz-access` ServiceAccount:
-   ```
-   kubectl -n voter create token quiz-access --duration=4h
-   ```
-2. Bundle this token into a kubeconfig file hosted at a public URL or shown as a QR code.
-3. Audience downloads: `curl https://voter.z65.nl/kubeconfig.yaml -o kc.yaml`
-   Then: `kubectl --kubeconfig kc.yaml get quizsessions -n voter`
+If the audience provides a name/email at join time (stored in the encrypted session cookie), the auth service can inject these headers for every forwarded request. K8s audit logs would then record both the auth-service SA and the impersonated identity.
 
-**kubeconfig template:**
+**What's needed:**
+- Join flow: collect optional display name / email (could be a step after the QR code scan)
+- Store in session cookie (already encrypted/signed)
+- Auth service RBAC: add `impersonate` verb on `users` and `userextras` to the ClusterRole
+- Inject `Impersonate-User` / `Impersonate-Extra-*` headers in `forward-auth-decision` before forwarding
+
+**Kubernetes audit log would show:**
+```json
+"user": {
+  "username": "system:serviceaccount:vote:auth-service",
+  "impersonatedUser": {
+    "username": "alice@example.com",
+    "extra": { "displayname": ["Alice"] }
+  }
+}
+```
+
+**Limitation for kubectl users:** the kubeconfig token bypasses the auth service session, so no impersonation headers are injected for kubectl — it shows as `quiz-access` SA. To fix this, the kubeconfig endpoint could embed the display name claim in the audience field of the TokenRequest, but K8s doesn't expose custom claims in TokenReview responses, so it would need a separate side-channel (e.g. store name→token mapping in the auth service).
+
+### Option II — Per-user ServiceAccounts
+
+Create a short-lived ServiceAccount per audience member at join time (named after their email or a slug). Mint a token for that SA. Delete the SA at the end of the talk.
+
+This gives each person their own identity in K8s audit logs without impersonation, and you can revoke individuals by deleting their SA.
+
+**What's needed:**
+- Auth service RBAC: `create`/`delete` on `serviceaccounts` and `serviceaccounts/token`
+- RBAC binding for each new SA to the `quiz-access` Role
+- Cleanup job / TTL controller to remove SAs after the session closes
+
+**Trade-off:** more K8s object churn; requires cluster-admin-level RBAC on the auth service to create RoleBindings.
+
+### Option III — OIDC with audience-specific tokens
+
+With OIDC, **no ServiceAccounts are needed at all**. The identity lives entirely in the JWT token itself — K8s extracts the username directly from a claim (typically `email`). RBAC then binds to those usernames or to a group claim. This is the cleanest model: every audience member is a first-class Kubernetes user.
+
+#### How Dex fits in
+
+[Dex](https://dexidp.io) is an OIDC identity provider that sits in front of upstream IdPs (GitHub, Google, LDAP, etc.) or can issue tokens from its own connectors. K8s is configured to trust Dex as its OIDC issuer; Dex is configured to trust whatever the audience uses to prove identity.
+
+```
+Audience browser/terminal
+        │
+        ▼
+   Dex (OIDC IdP)  ←── connector ──► GitHub / Google / join-code flow
+        │
+        │  issues signed JWT with email, name, groups claims
+        ▼
+   kubectl / browser
+        │
+        │  Authorization: Bearer <JWT>
+        ▼
+   Traefik → Kubernetes API server
+               └── validates JWT against Dex JWKS endpoint
+               └── extracts username from `email` claim
+               └── RBAC checks Role/ClusterRole bindings
+```
+
+#### K8s API server configuration
+
 ```yaml
-apiVersion: v1
-kind: Config
-clusters:
-- name: voter
-  cluster:
-    server: https://voter.z65.nl
-    insecure-skip-tls-verify: true   # or embed CA
+# kube-apiserver flags (or k3s config)
+oidc-issuer-url: https://dex.vote.reversegitops.dev
+oidc-client-id: kubectl
+oidc-username-claim: email
+oidc-groups-claim: groups
+oidc-username-prefix: "oidc:"   # avoids collisions with SA names
+```
+
+#### RBAC — group binding instead of per-user
+
+Rather than a RoleBinding per person, Dex adds a `groups` claim to every token it issues (e.g. `audience:voter`). One RoleBinding covers everyone:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: quiz-access-oidc
+  namespace: vote
+subjects:
+- kind: Group
+  name: "audience:voter"       # Dex group claim
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: quiz-access
+  apiGroup: rbac.authorization.k8s.io
+```
+
+No per-user ServiceAccounts, no per-user RoleBindings. K8s audit logs show `oidc:alice@example.com` for every request.
+
+#### The audience flow (device flow — most conference-friendly)
+
+The OAuth 2.0 device flow (RFC 8628) is designed for situations where the user can't easily type a URL into the current terminal — perfect for a conference demo.
+
+1. Audience installs [`kubelogin`](https://github.com/int128/kubelogin) (or `kubectl oidc-login`)
+2. Dex is configured with a connector: GitHub OAuth, Google, or a custom one that accepts a join code + self-declared email
+3. Their kubeconfig uses an exec credential plugin:
+
+```yaml
 users:
 - name: audience
   user:
-    token: <minted-token>
-contexts:
-- name: voter
-  context:
-    cluster: voter
-    user: audience
-    namespace: voter
-current-context: voter
+    exec:
+      apiVersion: client.authentication.k8s.io/v1beta1
+      command: kubectl
+      args:
+      - oidc-login
+      - get-token
+      - --oidc-issuer-url=https://dex.vote.reversegitops.dev
+      - --oidc-client-id=kubectl
+      - --grant-type=device-code   # prints a short URL + code, no browser redirect needed
 ```
 
-**Pros:**
-- Zero extra infrastructure — works with what exists today
-- Easy to put on a slide or QR code
-- Everyone gets the same experience instantly
+4. On first `kubectl get`, a device code is printed:
+   ```
+   Open https://dex.vote.reversegitops.dev/device and enter: ABCD-1234
+   ```
+5. Audience opens that URL, authenticates (e.g. "Continue with Google"), approves
+6. Token is cached locally; subsequent `kubectl` calls are instant until expiry
+7. K8s sees `oidc:alice@example.com` for every request from Alice
 
-**Cons:**
-- Single shared token — no per-audience attribution
-- Token persists after the talk unless you rotate the ServiceAccount
-- Anyone who grabs the token could use it beyond the demo window (mitigated by short `--duration`)
-- Cannot revoke individual audience members
+#### Custom Dex connector: join-code as the authenticator
 
-**Verdict:** Best choice for a conference talk where speed of setup and reliability matter most.
+For a fully self-contained demo with no Google/GitHub dependency, you could write a custom Dex connector that accepts the talk's join code + a self-declared email address as "authentication". This means:
+- No external IdP
+- The join code acts as proof you're in the room
+- Email is self-declared (not verified) but shows up in audit logs
+- Dex issues a JWT with that email as the `email` claim
+
+This is architecturally similar to what the auth service already does with join codes, but produces a standard OIDC token rather than a K8s ServiceAccount token.
+
+#### Comparison with Option I (impersonation)
+
+| | Option I — Impersonation | Option III — OIDC/Dex |
+|---|---|---|
+| Identity source | Stored in session cookie, injected by auth service | In the JWT itself, validated by K8s |
+| ServiceAccounts needed | One shared `quiz-access` SA | None |
+| Audit log identity | Auth-service SA + impersonated user | `oidc:alice@example.com` directly |
+| kubectl support | Works with any kubectl + our kubeconfig | Requires `kubelogin` or similar plugin |
+| K8s API server changes | None | OIDC flags must be set at cluster bootstrap |
+| Infrastructure | Nothing new | Dex deployment + possible custom connector |
+| Token refresh | Auth service handles it | kubelogin handles it transparently |
+
+**Trade-off:** OIDC gives cleaner identity (no impersonation indirection, identity is in the token itself) but requires configuring the API server at bootstrap time and asking the audience to install `kubelogin`. Impersonation is deployable to any existing cluster without touching the API server flags.
+
+### Recommendation for the talk
+
+**Option I (impersonation)** is the most interesting for the demo narrative — you can show the K8s audit log with real email addresses in it while the audience is voting, which is a powerful illustration of Kubernetes-as-a-platform. It only requires:
+1. Adding an optional name/email step to the join flow
+2. One extra RBAC rule (`impersonate`)
+3. Three extra lines in `forward-auth-decision`
 
 ---
 
-### Option B — Per-Session Token Download (via Auth Service)
+## Design options considered (archive)
 
-**How it works:**
+The implementation above is Option C from the original design exploration. Options A, B, and D were also considered:
 
-1. Audience member joins the quiz in their browser (gets a valid device session cookie).
-2. A new endpoint `/public/kubeconfig` is added to the auth-service.
-3. The endpoint validates the session cookie, mints a short-lived token (10 min, the K8s minimum), and returns a ready-to-use kubeconfig.
-4. Audience runs:
-   ```
-   curl -b cookies.txt https://voter.z65.nl/auth/kubeconfig -o kc.yaml
-   kubectl --kubeconfig kc.yaml get quizsubmissions -n voter
-   ```
-   Or provide a shell one-liner shown on the talk slides.
-
-**Auth Service changes needed:**
-- New handler: `GET /public/kubeconfig` — requires `requireSessionMiddleware`
-- Calls `tokens.GetOrRefresh()` (already exists) to get a short-lived token
-- Returns kubeconfig YAML as `application/x-yaml` with `Content-Disposition: attachment`
-
-**Pros:**
-- Token is tied to their existing device session
-- Same 10-minute TTL as browser — expires naturally
-- Demonstrates the full auth flow as part of the talk narrative
-- Still no token ever visible in the browser
-
-**Cons:**
-- Requires cookie-aware curl (most audiences won't have their browser cookies accessible from terminal)
-- Two-step flow: browser join → terminal download — adds friction
-- Need to implement the new endpoint
-
-**Verdict:** Architecturally elegant and great for the talk narrative, but the cookie-bridge between browser and terminal is awkward in practice. Good if you can simplify the UX (e.g. a "Download kubeconfig" button in the browser UI that returns the file directly).
+| Option | Approach | Why not chosen |
+|--------|----------|---------------|
+| **A** — Static shared token | Pre-mint a long-lived token, distribute as QR code | No per-audience attribution; token persists after talk |
+| **B** — Session cookie download | Browser join → "Download kubeconfig" button | Cookie-bridge between browser and terminal is awkward |
+| **C** — Join-code exchange | `curl .../auth/kubeconfig?code=XXXX` | ✅ **Chosen** — join code is already on screen, pure terminal flow |
+| **D** — kubectl credential plugin | Custom binary with auto-refresh | Requires audience to pre-install a binary |
 
 ---
 
-### Option C — Join-Code Token Exchange (No Cookie Required)
+## Security notes
 
-**How it works:**
-
-1. Add a new endpoint: `GET /public/token?code=<join-code>`
-2. Validates the join code (same logic as the browser join flow)
-3. Returns a JSON response:
-   ```json
-   { "token": "<short-lived-token>", "expires_in": 600 }
-   ```
-4. Audience can use this directly or pipe into a kubeconfig:
-   ```sh
-   TOKEN=$(curl -s "https://voter.z65.nl/auth/token?code=AB3X" | jq -r .token)
-   kubectl --token=$TOKEN --server=https://voter.z65.nl get quizsessions -n voter
-   ```
-   Or as an env var:
-   ```sh
-   export KUBECONFIG=<(curl -s ".../auth/kubeconfig?code=AB3X")
-   ```
-
-**Join code display:** The rotating code is already logged and shown in the talk, so audience can see it on screen.
-
-**Pros:**
-- No browser needed — pure terminal flow
-- Join code is already a first-class concept in the talk narrative
-- Short-lived tokens, same as browser path
-- Shows the join code as a multi-purpose credential
-
-**Cons:**
-- Exposes token in terminal history / curl output (less than ideal, but acceptable for a conference demo)
-- Join code rotation (every 15s) means audience needs to move fast
-- Rate limiting on the code endpoint is important (already exists on join flow)
-- Need to implement the new endpoint
-
-**Verdict:** Best fit for a terminal-first demo moment. The join code is already displayed, so this extends it naturally. The `export KUBECONFIG=<(...)` one-liner is a memorable demo moment.
-
----
-
-### Option D — kubectl Credential Plugin
-
-**How it works:**
-
-A small binary (`kubectl-voter-auth`) is distributed (e.g. via a GitHub release) and acts as a [kubectl exec credential plugin](https://kubernetes.io/docs/reference/access-authn-authz/authentication/#client-go-credential-plugins). It calls Option B or C internally to get a fresh token, handles refresh automatically.
-
-**Pros:**
-- `kubectl get quizsessions` just works, tokens refresh transparently
-- Most "production-like" demo
-
-**Cons:**
-- Requires audience to install a binary before the talk — unrealistic for a live conference slot
-- Significant implementation effort
-
-**Verdict:** Cool but impractical for a live conference setting.
-
----
-
-## Recommendation
-
-| Goal | Recommended Option |
-|------|-------------------|
-| Simplest possible, works in 30 seconds | **A** (static shared token, QR code kubeconfig) |
-| Best demo narrative, terminal-first | **C** (join-code token exchange) |
-| Tied to browser auth flow | **B** (kubeconfig download endpoint) |
-| Production-like for a workshop (not a talk) | **D** (credential plugin) |
-
-**For KubeConEU 2026:**
-
-Use **Option A** as the baseline with **Option C** as the highlight moment:
-
-1. Pre-generate a short-duration kubeconfig (Option A) and put it on a slide/QR code — this is the fallback that always works.
-2. During the talk, demo Option C live: show the rotating join code on screen, then run `export KUBECONFIG=<(curl ...)` in your terminal to show that the same join code that your phone uses to vote is also how your terminal gets credentials.
-
-This requires:
-1. **Ingress**: Add `PathPrefix(/api)` and `PathPrefix(/apis/)` routes to ingress-kubeapi.yaml (with the same `auth-forwarder` middleware).
-2. **Auth service**: New `GET /public/token?code=<code>` endpoint that validates the join code and returns a short-lived token + ready-to-use kubeconfig YAML.
-3. **Rate limiting**: Ensure the new endpoint is covered by existing rate limiting (it should be, since it goes through Traefik).
-
----
-
-## Security Considerations
-
-- `quiz-access` RBAC is already minimal (get/list/watch/create on CRDs in `voter` namespace only) — kubectl access is not more powerful than browser access.
-- Short token TTL (10 min) limits the blast radius of any leaked token.
-- The join code rotating every 15 seconds means a token exchange window is tight.
-- No new ServiceAccounts or RBAC changes are needed for Options A–C.
-- Consider: after the talk, rotate/delete the `quiz-access` ServiceAccount token secret to invalidate any static tokens from Option A.
+- `quiz-access` RBAC is minimal: `get`/`list`/`watch`/`create` on CRDs in the `vote` namespace only. kubectl access has identical permissions to browser access.
+- Token TTL is ~10 minutes (Kubernetes minimum for TokenRequest).
+- Tokens returned in kubeconfig are validated by TokenReview on each request through `forward-auth-decision`.
+- The join code rotates every 15 seconds; a token exchange must happen within the TTL window (60s by default).

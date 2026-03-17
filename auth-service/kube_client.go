@@ -32,11 +32,12 @@ type quizSessionSummary struct {
 	Title     string
 }
 
-// kubeHandler is the interface used by HTTP handlers — the two operations
+// kubeHandler is the interface used by HTTP handlers — the operations
 // handlers need from the Kubernetes client. kubeClient satisfies it.
 type kubeHandler interface {
 	requestToken(ctx context.Context, namespace, serviceAccount string, audiences []string, ttlSeconds int64) (string, time.Time, error)
 	getQuizSession(ctx context.Context, ref sessionRef) (quizSessionSpec, error)
+	reviewToken(ctx context.Context, token string) (authenticated bool, username string, err error)
 }
 
 type kubeClient struct {
@@ -121,6 +122,19 @@ func (c kubeClient) requestToken(ctx context.Context, namespace, serviceAccount 
 		return "", time.Time{}, errors.New("token request returned empty token")
 	}
 	return token, result.Status.ExpirationTimestamp.Time, nil
+}
+
+func (c kubeClient) reviewToken(ctx context.Context, token string) (bool, string, error) {
+	tr := &authenticationv1.TokenReview{
+		Spec: authenticationv1.TokenReviewSpec{
+			Token: token,
+		},
+	}
+	result, err := c.clientset.AuthenticationV1().TokenReviews().Create(ctx, tr, metav1.CreateOptions{})
+	if err != nil {
+		return false, "", fmt.Errorf("token review failed: %w", err)
+	}
+	return result.Status.Authenticated, result.Status.User.Username, nil
 }
 
 func (c kubeClient) getQuizSession(ctx context.Context, ref sessionRef) (quizSessionSpec, error) {

@@ -82,23 +82,49 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 	}))
 
 	// Traefik forwardAuth endpoint.
-	// Flow: join code (replaces session) → fallback to cookie → verify URI → issue token
-	// Note: We trust the signed session cookie without re-fetching the QuizSession
-	// on every request. The cookie has its own expiry and is cryptographically signed.
-	mux.HandleFunc("/private/forward-auth-decision", requireSessionMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
-		forwardedURI := r.Header.Get("X-Forwarded-Uri")
-		if forwardedURI == "" {
-			http.Error(w, "missing X-Forwarded-Uri header", http.StatusBadRequest)
+	// Two paths:
+	//   1. Bearer token already present (kubectl with kubeconfig) → pass it straight through to K8s.
+	//   2. No bearer token (browser) → resolve session via join code / cookie and mint a short-lived token.
+	mux.HandleFunc("/private/forward-auth-decision", func(w http.ResponseWriter, r *http.Request) {
+		// Path 1: kubectl / direct API access — request carries a bearer token from the kubeconfig.
+		// Validate it via TokenReview before forwarding; don't blindly pass through arbitrary tokens.
+		if auth := strings.TrimSpace(r.Header.Get("Authorization")); strings.HasPrefix(auth, "Bearer ") {
+			token := strings.TrimPrefix(auth, "Bearer ")
+			ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+			authenticated, username, err := deps.kube.reviewToken(ctx, token)
+			cancel()
+			if err != nil {
+				log.Printf("forward-auth-decision: token review error ip=%s: %v", clientIP(r), err)
+				http.Error(w, "token review failed", http.StatusInternalServerError)
+				return
+			}
+			if !authenticated {
+				log.Printf("forward-auth-decision: token not authenticated ip=%s ua=%q", clientIP(r), r.UserAgent())
+				http.Error(w, "invalid token", http.StatusUnauthorized)
+				return
+			}
+			log.Printf("forward-auth-decision: passthrough bearer user=%s ip=%s ua=%q", username, clientIP(r), r.UserAgent())
+			w.Header().Set("Authorization", auth)
+			w.Header().Set("X-Auth-Forwarder", "passthrough")
+			w.WriteHeader(http.StatusOK)
 			return
 		}
 
-		forwardedMethod := r.Header.Get("X-Forwarded-Method")
-		if forwardedMethod == "" {
-			http.Error(w, "missing X-Forwarded-Method header", http.StatusBadRequest)
-			return
-		}
+		// Path 2: browser flow — require a session (join code or cookie) and mint a token.
+		requireSessionMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
+			forwardedURI := r.Header.Get("X-Forwarded-Uri")
+			if forwardedURI == "" {
+				http.Error(w, "missing X-Forwarded-Uri header", http.StatusBadRequest)
+				return
+			}
 
-		log.Printf("forward-auth-decision: %s X-Forwarded-Uri=%s ip=%s ua=%q", forwardedMethod, forwardedURI, clientIP(r), r.UserAgent())
+			forwardedMethod := r.Header.Get("X-Forwarded-Method")
+			if forwardedMethod == "" {
+				http.Error(w, "missing X-Forwarded-Method header", http.StatusBadRequest)
+				return
+			}
+
+			log.Printf("forward-auth-decision: %s X-Forwarded-Uri=%s ip=%s ua=%q", forwardedMethod, forwardedURI, clientIP(r), r.UserAgent())
 
 		// So we want to limit what it can create: the name should be limited
 		// Check it here
@@ -139,7 +165,8 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 		// And only then we bring the data into a bigger set... -> Let's see what people try to do?
 
 		// It becomes more acceptable: but still is a liability, should I have 'default' patterns for allowing people to self create? Could also limit the amount of resources that you create at once?
-	}))
+		})(w, r)
+	})
 
 	// Returns a ready-to-use kubeconfig for kubectl access.
 	// Accepts a join code (?code=XXXX) or an existing session cookie — same as all other /public/ endpoints.

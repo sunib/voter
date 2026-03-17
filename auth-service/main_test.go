@@ -163,10 +163,13 @@ func TestJoinCodeStoreResolveAndRotate(t *testing.T) {
 }
 
 type stubKubeClient struct {
-	calls        int
-	token        string
-	exp          time.Time
-	tokenErr     error
+	calls              int
+	token              string
+	exp                time.Time
+	tokenErr           error
+	reviewAuthenticated bool
+	reviewUsername     string
+	reviewErr          error
 }
 
 func (s *stubKubeClient) requestToken(_ context.Context, _, _ string, _ []string, _ int64) (string, time.Time, error) {
@@ -176,6 +179,10 @@ func (s *stubKubeClient) requestToken(_ context.Context, _, _ string, _ []string
 
 func (s *stubKubeClient) getQuizSession(_ context.Context, _ sessionRef) (quizSessionSpec, error) {
 	return quizSessionSpec{}, nil
+}
+
+func (s *stubKubeClient) reviewToken(_ context.Context, _ string) (bool, string, error) {
+	return s.reviewAuthenticated, s.reviewUsername, s.reviewErr
 }
 
 func TestTokenCacheRenewAfterExpiry(t *testing.T) {
@@ -461,6 +468,101 @@ func TestExtractJoinCodeFromForwardedURI(t *testing.T) {
 				}
 				if gotViaCode != tc.wantViaCode {
 					t.Errorf("resolved via join code: got %v, want %v", gotViaCode, tc.wantViaCode)
+				}
+			}
+		})
+	}
+}
+
+func TestForwardAuthBearerPassthrough(t *testing.T) {
+	cfg := config{
+		JoinCodeRotate:    15 * time.Second,
+		JoinCodeTTL:       60 * time.Second,
+		JoinCodeLength:    4,
+		SessionCookieName: "auth_session",
+		CookieSecure:      false,
+	}
+	store := newJoinCodeStore(cfg)
+	hashKey, blockKey, _ := generateCookieKeys()
+	sc, _ := newSessionSecureCookie(hashKey, blockKey)
+
+	cases := []struct {
+		name                string
+		authHeader          string
+		reviewAuthenticated bool
+		reviewUsername      string
+		reviewErr           error
+		wantCode            int
+		wantAuthForwarder   string
+	}{
+		{
+			name:                "valid token is passed through",
+			authHeader:          "Bearer good-token",
+			reviewAuthenticated: true,
+			reviewUsername:      "system:serviceaccount:vote:quiz-access",
+			wantCode:            http.StatusOK,
+			wantAuthForwarder:   "passthrough",
+		},
+		{
+			name:                "invalid token is rejected",
+			authHeader:          "Bearer bad-token",
+			reviewAuthenticated: false,
+			wantCode:            http.StatusUnauthorized,
+		},
+		{
+			name:      "token review error returns 500",
+			authHeader: "Bearer error-token",
+			reviewErr: errors.New("kube unavailable"),
+			wantCode:  http.StatusInternalServerError,
+		},
+		{
+			name:       "no bearer token falls through to session check (no session → 401)",
+			authHeader: "",
+			wantCode:   http.StatusUnauthorized,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubKubeClient{
+				reviewAuthenticated: tc.reviewAuthenticated,
+				reviewUsername:      tc.reviewUsername,
+				reviewErr:           tc.reviewErr,
+			}
+			deps := handlerDeps{
+				cfg:           cfg,
+				codes:         store,
+				kube:          stub,
+				sessionCookie: sc,
+				forwardSaName: "quiz-access",
+				forwardSaNS:   "vote",
+				tokenTTL:      600,
+			}
+
+			mux := http.NewServeMux()
+			registerHandlers(mux, deps)
+
+			req := httptest.NewRequest(http.MethodGet, "http://auth-service/private/forward-auth-decision", nil)
+			req.Header.Set("X-Forwarded-Uri", "/apis/examples.configbutler.ai/v1alpha1/namespaces/vote/quizsessions")
+			req.Header.Set("X-Forwarded-Method", "GET")
+			if tc.authHeader != "" {
+				req.Header.Set("Authorization", tc.authHeader)
+			}
+
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantCode {
+				t.Errorf("status: got %d, want %d (body: %q)", rec.Code, tc.wantCode, rec.Body.String())
+			}
+			if tc.wantAuthForwarder != "" {
+				if got := rec.Header().Get("X-Auth-Forwarder"); got != tc.wantAuthForwarder {
+					t.Errorf("X-Auth-Forwarder: got %q, want %q", got, tc.wantAuthForwarder)
+				}
+			}
+			if tc.wantCode == http.StatusOK && tc.authHeader != "" {
+				if got := rec.Header().Get("Authorization"); got != tc.authHeader {
+					t.Errorf("Authorization echoed back: got %q, want %q", got, tc.authHeader)
 				}
 			}
 		})
