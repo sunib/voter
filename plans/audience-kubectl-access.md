@@ -191,15 +191,102 @@ users:
 6. Token is cached locally; subsequent `kubectl` calls are instant until expiry
 7. K8s sees `oidc:alice@example.com` for every request from Alice
 
-#### Custom Dex connector: join-code as the authenticator
+#### Can the auth service call Dex in the background to get the JWT?
 
-For a fully self-contained demo with no Google/GitHub dependency, you could write a custom Dex connector that accepts the talk's join code + a self-declared email address as "authentication". This means:
-- No external IdP
-- The join code acts as proof you're in the room
-- Email is self-declared (not verified) but shows up in audit logs
-- Dex issues a JWT with that email as the `email` claim
+Yes — but it leads somewhere more interesting than Dex.
 
-This is architecturally similar to what the auth service already does with join codes, but produces a standard OIDC token rather than a K8s ServiceAccount token.
+The OAuth2 **Resource Owner Password Credentials (ROPC)** grant lets a trusted server call Dex's `/token` endpoint with a username + password on behalf of the user, without any browser redirect:
+
+```
+POST https://dex.vote.reversegitops.dev/token
+grant_type=password
+&username=alice@example.com   ← self-declared at join time
+&password=<join-code>         ← proves they're in the room
+&client_id=auth-service
+&client_secret=...
+```
+
+Dex would call a custom connector to validate the join code (which calls back to the auth service), then issue a signed JWT with `email: alice@example.com` and `groups: ["audience:voter"]`. The auth service embeds that JWT in the kubeconfig and returns it — no `kubelogin` needed, kubectl just works.
+
+**The circular dependency problem:** Dex → custom connector → auth service → join code store. Dex and the auth service are now tightly coupled. You're also relying on ROPC, which OAuth 2.1 deprecates and many providers are dropping.
+
+#### Better: auth service as its own OIDC issuer
+
+The insight is that K8s doesn't care *who* issues the JWT — it just needs to verify the signature against a JWKS endpoint. The auth service can *be* the OIDC issuer:
+
+```
+Browser/terminal                Auth service                  K8s API
+      │                               │                           │
+      │  GET /auth/kubeconfig         │                           │
+      │    ?code=XXXX                 │                           │
+      │  ──────────────────────────►  │                           │
+      │                               │  validate join code       │
+      │                               │  sign JWT with own key    │
+      │  ◄──────────────────────────  │                           │
+      │  kubeconfig with JWT          │                           │
+      │                               │                           │
+      │  kubectl get quizsessions     │                           │
+      │  Authorization: Bearer <JWT>  │                           │
+      │  ────────────────────────────────────────────────────►    │
+      │                               │  GET /auth/jwks.json ◄──  │
+      │                               │  ──────────────────────►  │
+      │                               │  (cached after first req) │
+      │                               │                           │
+      │  ◄────────────────────────────────────────────────────    │
+      │  quizsessions list            │                           │
+```
+
+**What the auth service needs to add:**
+
+1. Generate an ECDSA key pair at startup, stored in a K8s Secret (same pattern as the session cookie keys)
+2. Expose two new endpoints:
+   - `GET /.well-known/openid-configuration` — OIDC discovery doc pointing at the JWKS URL
+   - `GET /jwks.json` — the public key in JWK format for K8s to verify signatures
+3. At `/auth/kubeconfig`, instead of a K8s ServiceAccount token, sign and return a JWT:
+
+```json
+{
+  "iss": "https://vote.reversegitops.dev/auth",
+  "sub": "alice@example.com",
+  "email": "alice@example.com",
+  "groups": ["audience:voter"],
+  "exp": 1773745256,
+  "iat": 1773744656
+}
+```
+
+4. The kubeconfig carries this JWT as a static token — no plugin, no refresh dance.
+
+**K8s API server configuration** (one-time, set at bootstrap):
+
+```yaml
+# k3s: /etc/rancher/k3s/config.yaml
+kube-apiserver-arg:
+  - "oidc-issuer-url=https://vote.reversegitops.dev/auth"
+  - "oidc-client-id=kubectl"
+  - "oidc-username-claim=email"
+  - "oidc-username-prefix=oidc:"
+  - "oidc-groups-claim=groups"
+```
+
+**RBAC** stays the same single group binding:
+
+```yaml
+subjects:
+- kind: Group
+  name: "audience:voter"
+  apiGroup: rbac.authorization.k8s.io
+```
+
+**What this gives you at the talk:**
+
+- `kubectl get quizsessions.examples.configbutler.ai` just works, no plugins
+- K8s audit logs show `oidc:alice@example.com` directly
+- No Dex, no external IdP, no `kubelogin`
+- Token expiry and signing all handled by the auth service using the same patterns already in place (key storage in K8s Secrets)
+- The join code + self-declared email flows seamlessly into a real OIDC credential
+
+The main cost is that the kube-apiserver `--oidc-*` flags have to be set when the cluster is created (they can't be changed at runtime on managed clusters). For a dedicated demo cluster this is fine.
 
 #### Comparison with Option I (impersonation)
 
