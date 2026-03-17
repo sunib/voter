@@ -1,21 +1,36 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/gorilla/securecookie"
 )
 
+//go:embed kubeconfig.tmpl
+var kubeconfigTemplateStr string
+
+var kubeconfigTmpl = template.Must(template.New("kubeconfig").Parse(kubeconfigTemplateStr))
+
+type kubeconfigData struct {
+	ServerURL string
+	Token     string
+	Namespace string
+	ExpiresAt string
+}
+
 type handlerDeps struct {
 	cfg           config
 	codes         *joinCodeStore
-	kube          kubeClient
+	kube          kubeHandler
 	sessionCookie *securecookie.SecureCookie
 	tokens        *tokenCache
 	forwardSaName string
@@ -126,11 +141,63 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 		// It becomes more acceptable: but still is a liability, should I have 'default' patterns for allowing people to self create? Could also limit the amount of resources that you create at once?
 	}))
 
+	// Returns a ready-to-use kubeconfig for kubectl access.
+	// Accepts a join code (?code=XXXX) or an existing session cookie — same as all other /public/ endpoints.
+	//
+	// Usage (one-liner for the talk):
+	//   export KUBECONFIG=<(curl -s "https://<host>/auth/kubeconfig?code=XXXX")
+	//   kubectl get quizsessions.examples.configbutler.ai -n voter
+	mux.HandleFunc("/public/kubeconfig", requireSessionMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		ref, _ := getSessionRef(r)
+		log.Printf("kubeconfig: minting token for session=%s/%s ip=%s", ref.namespace, ref.name, clientIP(r))
+
+		ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+		defer cancel()
+		token, expiresAt, err := deps.kube.requestToken(ctx, deps.forwardSaNS, deps.forwardSaName, nil, deps.tokenTTL)
+		if err != nil {
+			log.Printf("kubeconfig: token request failed: %v", err)
+			http.Error(w, "token request failed", http.StatusInternalServerError)
+			return
+		}
+
+		// Derive server URL from the incoming request (Traefik sets X-Forwarded-* headers).
+		host := r.Host
+		if fh := r.Header.Get("X-Forwarded-Host"); fh != "" {
+			host = fh
+		}
+		proto := "https"
+		if fp := r.Header.Get("X-Forwarded-Proto"); fp != "" {
+			proto = fp
+		}
+		serverURL := fmt.Sprintf("%s://%s", proto, host)
+
+		var buf bytes.Buffer
+		if err := kubeconfigTmpl.Execute(&buf, kubeconfigData{
+			ServerURL: serverURL,
+			Token:     token,
+			Namespace: ref.namespace,
+			ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
+		}); err != nil {
+			log.Printf("kubeconfig: template execution failed: %v", err)
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/x-yaml")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(buf.Bytes())
+	}))
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/" {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("auth-forwarder prototype\n\nEndpoints:\n- GET /healthz\n- GET|POST /private/forward-auth-decision (Traefik ForwardAuth)\n\n- GET|POST /public/session-info (Get info on current sessions)\n"))
+			_, _ = w.Write([]byte("auth-forwarder prototype\n\nEndpoints:\n- GET /healthz\n- GET|POST /private/forward-auth-decision (Traefik ForwardAuth)\n- GET|POST /public/session-info (Get info on current sessions)\n- GET /public/kubeconfig?code=XXXX (Download kubeconfig for kubectl access)\n"))
 			return
 		}
 		http.NotFound(w, r)

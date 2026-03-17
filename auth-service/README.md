@@ -1,69 +1,82 @@
-# auth-service (ForwardAuth prototype)
+# auth-service
 
-This is a minimal **Traefik ForwardAuth** helper.
+Traefik ForwardAuth service for the voter demo. Validates join codes, manages encrypted session cookies, and mints short-lived Kubernetes tokens so the browser can talk to the Kubernetes API without ever seeing a token.
 
-Prototype behavior:
+## Endpoints
 
-- Always returns `200`.
-- Always returns `Authorization: Bearer <STATIC_BEARER_TOKEN>` so Traefik can inject it upstream.
-- If the request does not have a `device_session` cookie, sets one (you must configure Traefik to forward auth cookies back to the browser).
-- Supports join-code-only auth via `X-Join-Code`, resolving the session and persisting it in a signed/encrypted cookie.
-- Logs rolling join codes for live sessions every `JOIN_CODE_ROTATE_SECONDS`.
-- Exposes `/public/session-info` to return the current session metadata for the session cookie.
+| Path | Description |
+|------|-------------|
+| `GET /healthz` | Health check |
+| `GET /public/session-info` | Returns current session metadata (namespace/name/state/title) |
+| `GET /public/kubeconfig` | Returns a ready-to-use kubeconfig for `kubectl` access |
+| `POST /private/forward-auth-decision` | Traefik ForwardAuth endpoint — validates session, injects token |
+
+All `/public/` endpoints accept either a `?code=XXXX` join code or an existing session cookie.
+
+## Audience kubectl access
+
+Once you have the join code on screen, the audience can get `kubectl` access with a single command:
+
+```sh
+# One-liner — no file written
+KUBECONFIG=<(curl -s "https://vote.reversegitops.dev/auth/kubeconfig?code=XXXX") \
+  kubectl get quizsessions.examples.configbutler.ai
+
+# Multi-command version (more reliable on macOS)
+curl -s "https://vote.reversegitops.dev/auth/kubeconfig?code=XXXX" > /tmp/voter.yaml
+export KUBECONFIG=/tmp/voter.yaml
+kubectl get quizsessions.examples.configbutler.ai
+kubectl get quizsubmissions.examples.configbutler.ai
+```
+
+The returned kubeconfig uses the same `quiz-access` ServiceAccount as the browser and contains a token valid for ~10 minutes.
 
 ## Run locally
 
 ```bash
 cd auth-service
-STATIC_BEARER_TOKEN=demo-token COOKIE_SECURE=false go run ./main.go
+FORWARD_SA=quiz-access FORWARD_SA_NAMESPACE=voter COOKIE_SECURE=false go run .
 ```
 
-Health:
+Health check:
 
 ```bash
 curl -i http://localhost:8080/healthz
 ```
 
-ForwardAuth endpoint:
-
-```bash
-curl -i http://localhost:8080/private/forward-auth-decision
-```
-
 ## Environment variables
 
-- `HOST` (default `0.0.0.0`)
-- `PORT` (default `8080`)
-- `STATIC_BEARER_TOKEN` (default `demo-token`)
-- `COOKIE_NAME` (default `device_session`)
-- `COOKIE_SECURE` (default `false`)
-- `COOKIE_MAX_AGE_SECONDS` (default `3600`)
-- `SESSION_COOKIE_NAME` (default `auth_session`)
-- `SESSION_COOKIE_MAX_AGE_SECONDS` (default `3600`)
-- `JOIN_CODE_ROTATE_SECONDS` (default `15s`)
-- `JOIN_CODE_TTL_SECONDS` (default `60s`)
-- `JOIN_CODE_LENGTH` (default `4`)
-- `FORWARD_SA` (required)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HOST` | `0.0.0.0` | Listen address |
+| `PORT` | `8080` | Listen port |
+| `FORWARD_SA` | *(required)* | ServiceAccount name to mint tokens for |
+| `FORWARD_SA_NAMESPACE` | *(required)* | Namespace of that ServiceAccount |
+| `COOKIE_NAME` | `device_session` | Device session cookie name |
+| `COOKIE_SECURE` | `false` | Set `Secure` flag on cookies (use `true` in production) |
+| `COOKIE_MAX_AGE_SECONDS` | `3600` | Device session cookie lifetime |
+| `SESSION_COOKIE_NAME` | `auth_session` | Session reference cookie name |
+| `SESSION_COOKIE_MAX_AGE_SECONDS` | `3600` | Session cookie lifetime |
+| `JOIN_CODE_ROTATE_SECONDS` | `15s` | How often join codes rotate |
+| `JOIN_CODE_TTL_SECONDS` | `60s` | How long an old code stays valid after rotation |
+| `JOIN_CODE_LENGTH` | `4` | Join code character length |
 
-## Traefik (Kubernetes CRD) example
+## How it works
 
-The key bits are:
+### Join flow
 
-- `authResponseHeaders: ["Authorization"]` so Traefik copies the header from the auth response into the upstream request.
-- `addAuthCookiesToResponse: ["device_session", "auth_session"]` so the cookies set by this service reach the browser.
+1. Browser visits `/join?code=XXXX`
+2. Traefik's ForwardAuth calls `/private/forward-auth-decision` with `X-Forwarded-Uri` containing the code
+3. auth-service validates the code, resolves it to a QuizSession, and sets a signed/encrypted session cookie
+4. Subsequent requests use the cookie — no code needed
 
-See [`auth-service/k8s/traefik-forwardauth-middleware.yaml`](auth-service/k8s/traefik-forwardauth-middleware.yaml:1).
+### Token strategy
 
-## Join flow
+- Tokens are minted via the Kubernetes TokenRequest API against the `FORWARD_SA` ServiceAccount
+- TTL is 10 minutes (Kubernetes minimum)
+- A shared token is cached for browser requests; the kubeconfig endpoint mints a fresh token per download
+- Tokens are injected by Traefik into upstream requests — they never reach the browser
 
-- Client sends `X-Join-Code` without a session name.
-- auth-service resolves the live session and writes a signed/encrypted session cookie.
-- Subsequent requests use the session cookie (no join code needed).
+### Session cookie keys
 
-## Session cookie keys
-
-On startup, auth-service checks for the Kubernetes Secret `auth-session-cookie-keys` in the same namespace. If missing, it generates strong random `hashKey` and `blockKey`, creates the Secret, and uses those keys for `securecookie` signing/encryption.
-
-## Session info endpoint
-
-`GET /public/session-info` returns the resolved session metadata (namespace/name/state/title) for the current session cookie, and rejects non-live sessions.
+On startup, auth-service looks for the Kubernetes Secret `auth-session-cookie-keys` in its namespace. If missing, it generates random `hashKey`/`blockKey` values, creates the Secret, and uses them for `gorilla/securecookie` signing and encryption. This means cookie keys survive pod restarts.

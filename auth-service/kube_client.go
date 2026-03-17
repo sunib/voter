@@ -32,6 +32,13 @@ type quizSessionSummary struct {
 	Title     string
 }
 
+// kubeHandler is the interface used by HTTP handlers — the two operations
+// handlers need from the Kubernetes client. kubeClient satisfies it.
+type kubeHandler interface {
+	requestToken(ctx context.Context, namespace, serviceAccount string, audiences []string, ttlSeconds int64) (string, time.Time, error)
+	getQuizSession(ctx context.Context, ref sessionRef) (quizSessionSpec, error)
+}
+
 type kubeClient struct {
 	clientset kubernetes.Interface
 	dynamic   dynamic.Interface

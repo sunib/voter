@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -162,14 +163,19 @@ func TestJoinCodeStoreResolveAndRotate(t *testing.T) {
 }
 
 type stubKubeClient struct {
-	calls int
-	token string
-	exp   time.Time
+	calls        int
+	token        string
+	exp          time.Time
+	tokenErr     error
 }
 
-func (s *stubKubeClient) requestToken(ctx context.Context, namespace, serviceAccount string, audiences []string, ttlSeconds int64) (string, time.Time, error) {
+func (s *stubKubeClient) requestToken(_ context.Context, _, _ string, _ []string, _ int64) (string, time.Time, error) {
 	s.calls++
-	return s.token, s.exp, nil
+	return s.token, s.exp, s.tokenErr
+}
+
+func (s *stubKubeClient) getQuizSession(_ context.Context, _ sessionRef) (quizSessionSpec, error) {
+	return quizSessionSpec{}, nil
 }
 
 func TestTokenCacheRenewAfterExpiry(t *testing.T) {
@@ -455,6 +461,133 @@ func TestExtractJoinCodeFromForwardedURI(t *testing.T) {
 				}
 				if gotViaCode != tc.wantViaCode {
 					t.Errorf("resolved via join code: got %v, want %v", gotViaCode, tc.wantViaCode)
+				}
+			}
+		})
+	}
+}
+
+func TestKubeconfigHandler(t *testing.T) {
+	cfg := config{
+		JoinCodeRotate:          15 * time.Second,
+		JoinCodeTTL:             60 * time.Second,
+		JoinCodeLength:          4,
+		SessionCookieName:       "auth_session",
+		SessionCookieMaxAgeSecs: 3600,
+		CookieSecure:            false,
+	}
+	store := newJoinCodeStore(cfg)
+	now := time.Now()
+	code, _ := store.rotateAndGet("voter/kubecon-2026", now)
+
+	hashKey, blockKey, err := generateCookieKeys()
+	if err != nil {
+		t.Fatalf("unexpected key error: %v", err)
+	}
+	sc, err := newSessionSecureCookie(hashKey, blockKey)
+	if err != nil {
+		t.Fatalf("unexpected securecookie error: %v", err)
+	}
+
+	tokenExp := now.Add(10 * time.Minute)
+
+	cases := []struct {
+		name           string
+		method         string
+		url            string
+		forwardedHost  string
+		forwardedProto string
+		tokenErr       error
+		wantCode       int
+		wantInBody     []string
+		wantMissing    []string
+	}{
+		{
+			name:       "valid code returns kubeconfig",
+			method:     http.MethodGet,
+			url:        "http://auth-service/public/kubeconfig?code=" + code,
+			wantCode:   http.StatusOK,
+			wantInBody: []string{"kind: Config", "token: stub-token", "namespace: voter", "server: https://auth-service"},
+		},
+		{
+			name:           "server URL comes from X-Forwarded headers",
+			method:         http.MethodGet,
+			url:            "http://auth-service/public/kubeconfig?code=" + code,
+			forwardedHost:  "voter.z65.nl",
+			forwardedProto: "https",
+			wantCode:       http.StatusOK,
+			wantInBody:     []string{"server: https://voter.z65.nl"},
+		},
+		{
+			name:        "no code and no cookie returns 401",
+			method:      http.MethodGet,
+			url:         "http://auth-service/public/kubeconfig",
+			wantCode:    http.StatusUnauthorized,
+			wantMissing: []string{"kind: Config"},
+		},
+		{
+			name:        "invalid code returns 403",
+			method:      http.MethodGet,
+			url:         "http://auth-service/public/kubeconfig?code=ZZZZ",
+			wantCode:    http.StatusForbidden,
+			wantMissing: []string{"kind: Config"},
+		},
+		{
+			name:        "POST returns 405",
+			method:      http.MethodPost,
+			url:         "http://auth-service/public/kubeconfig?code=" + code,
+			wantCode:    http.StatusMethodNotAllowed,
+			wantMissing: []string{"kind: Config"},
+		},
+		{
+			name:        "token request failure returns 500",
+			method:      http.MethodGet,
+			url:         "http://auth-service/public/kubeconfig?code=" + code,
+			tokenErr:    errors.New("kube unavailable"),
+			wantCode:    http.StatusInternalServerError,
+			wantMissing: []string{"kind: Config"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubKubeClient{token: "stub-token", exp: tokenExp, tokenErr: tc.tokenErr}
+			deps := handlerDeps{
+				cfg:           cfg,
+				codes:         store,
+				kube:          stub,
+				sessionCookie: sc,
+				forwardSaName: "quiz-access",
+				forwardSaNS:   "voter",
+				tokenTTL:      600,
+			}
+
+			mux := http.NewServeMux()
+			registerHandlers(mux, deps)
+
+			req := httptest.NewRequest(tc.method, tc.url, nil)
+			if tc.forwardedHost != "" {
+				req.Header.Set("X-Forwarded-Host", tc.forwardedHost)
+			}
+			if tc.forwardedProto != "" {
+				req.Header.Set("X-Forwarded-Proto", tc.forwardedProto)
+			}
+
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			if rec.Code != tc.wantCode {
+				t.Errorf("status: got %d, want %d (body: %q)", rec.Code, tc.wantCode, rec.Body.String())
+			}
+			body := rec.Body.String()
+			for _, want := range tc.wantInBody {
+				if !strings.Contains(body, want) {
+					t.Errorf("body missing %q\ngot:\n%s", want, body)
+				}
+			}
+			for _, missing := range tc.wantMissing {
+				if strings.Contains(body, missing) {
+					t.Errorf("body should not contain %q\ngot:\n%s", missing, body)
 				}
 			}
 		})

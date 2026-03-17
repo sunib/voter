@@ -6,7 +6,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY *.go ./
+COPY *.go *.tmpl ./
 
 ARG GIT_COMMIT
 ARG GIT_DIRTY
