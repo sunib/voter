@@ -91,7 +91,7 @@ function withAuthGate(_server: ViteDevServer, req: any, res: any): boolean {
 
 export function kubeMockPlugin(): Plugin {
   return {
-    name: 'present-yaml:kube-mock',
+    name: 'voter:kube-mock',
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const url = req.url ? new URL(req.url, 'http://localhost') : null

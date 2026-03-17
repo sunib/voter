@@ -26,7 +26,7 @@ For now let's be happy and close it of.
 * I added more tests and there is now a middleware to handle the token.
 * I adjusted the RBAC
 * I added build info on startup so that I can see quickly if my new code is running correctly on prod.
-* You can now get the [current quizessions](https://present.z65.nl/apis/examples.configbutler.ai/v1alpha1/namespaces/present/quizsessions/kubecon-2026).
+* You can now get the [current quizessions](https://voter.z65.nl/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/quizsessions/kubecon-2026).
 * The /session-info endpoints also works now
 * Moved to /private and /public to make sure that we don't loose are tokens by accident.
 

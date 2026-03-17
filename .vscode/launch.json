@@ -9,7 +9,7 @@
       "program": "${workspaceFolder}/auth-service",
       "env": {
         "FORWARD_SA": "quiz-access",
-        "FORWARD_SA_NAMESPACE": "present"
+        "FORWARD_SA_NAMESPACE": "voter"
       }
     }
   ]

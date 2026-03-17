@@ -1,9 +1,9 @@
 # httpyac examples/quizsubmission.http
 # install with: npm i -g httpyac
 ### Set these variables for your cluster/API access
-@base = https://present.z65.nl
+@base = https://voter.z65.nl
 @apiPrefix = /apis/examples.configbutler.ai/v1alpha1
-@ns = present
+@ns = voter
 @session = kubecon-2026
 
 ### Submit answers (use with REST Client / httpyac / IntelliJ HTTP)

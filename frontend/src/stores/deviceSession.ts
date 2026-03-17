@@ -5,7 +5,7 @@ type DeviceSessionState = {
   hasAuthedOnce: boolean
 }
 
-const key = 'present-yaml:hasAuthedOnce'
+const key = 'voter:hasAuthedOnce'
 
 export const useDeviceSessionStore = defineStore('deviceSession', {
   state: (): DeviceSessionState => ({

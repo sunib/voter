@@ -15,11 +15,11 @@ npm run dev:mock --host
 And for running with docker:
 
 ```bash
-docker build -t present-yaml-frontend ./frontend
-docker run --rm -p 8080:8080 present-yaml-frontend
+docker build -t voter-frontend ./frontend
+docker run --rm -p 8080:8080 voter-frontend
 ```
-docker build . -t zot.z65.nl/present/auth-service:v1
-docker push zot.z65.nl/present/auth-service:v1
+docker build . -t zot.z65.nl/voter/auth-service:v1
+docker push zot.z65.nl/voter/auth-service:v1
 kubectl create secret docker-registry zot-pull   --docker-server=zot.z65.nl   --docker-username=admin   --docker-password='---replace---' -n vote
 
 ## Join flow

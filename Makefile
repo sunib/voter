@@ -1,5 +1,8 @@
 .PHONY: build-auth-service test-auth-service debug-auth-service build-push-auth-service build-push-frontend build-push
 
+login:
+	docker login zot.z65.nl -u admin
+
 build-auth-service:
 	mkdir -p auth-service/bin
 	cd auth-service && go build -o ./bin/auth-service ./...
@@ -14,7 +17,7 @@ build-push-auth-service:
 		--build-arg BUILD_DATE="$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 		--provenance=true \
 		--sbom=true \
-		-t zot.z65.nl/present/auth-service:latest ./auth-service
+		-t zot.z65.nl/voter/auth-service:latest ./auth-service
 
 build-push-frontend:
 	docker buildx build --push \
@@ -23,6 +26,6 @@ build-push-frontend:
 		--build-arg BUILD_DATE="$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 		--provenance=true \
 		--sbom=true \
-		-t zot.z65.nl/present/frontend:latest ./frontend
+		-t zot.z65.nl/voter/frontend:latest ./frontend
 
 build-push: build-push-auth-service build-push-frontend

@@ -16,7 +16,7 @@ const displayTitle = computed(() => sessionTitle.value ?? props.title ?? 'Attend
   <header class="sticky top-0 z-10 border-b border-black/10 bg-[rgb(var(--bg))]/90 backdrop-blur">
     <div class="mx-auto flex w-full max-w-md items-center justify-between gap-3 px-4 py-3">
       <div class="min-w-0">
-        <div class="text-xs font-bold tracking-[0.18em] text-black/50">PRESENT.YAML</div>
+        <div class="text-xs font-bold tracking-[0.18em] text-black/50">YAML Voter</div>
         <div class="truncate text-base font-semibold">{{ displayTitle }}</div>
         <div class="mt-0.5 text-[10px] leading-tight text-black/40">
           <span>commit {{ buildInfo.commitWithDirty }}</span>

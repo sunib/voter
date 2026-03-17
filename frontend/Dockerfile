@@ -44,4 +44,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD wget -qO- http://127.0.0.1:8080/ >/dev/null || exit 1
 
 # Single cmd build: 
-# docker buildx build --push -t zot.z65.nl/present/frontend:latest .
+# docker buildx build --push -t zot.z65.nl/voter/frontend:latest .

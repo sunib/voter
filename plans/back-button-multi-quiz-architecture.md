@@ -249,7 +249,7 @@ What Kubernetes RBAC cannot enforce for this use case:
 
 - Dynamic per listener ownership from cookie identity
 - Row level filtering of list results by label value
-- Label based authorization such as only objects with `present.yaml/listener=<id>`
+- Label based authorization such as only objects with `voter/listener=<id>`
 
 Implication for this app:
 
@@ -274,9 +274,9 @@ This keeps Kubernetes as storage and coarse authorization, while app backend enf
 
 Use labels for query and ops ergonomics only, not trust:
 
-- `present.yaml/session`: session name
-- `present.yaml/quiz`: quiz id
-- `present.yaml/listener`: listenerSessionId
+- `voter/session`: session name
+- `voter/quiz`: quiz id
+- `voter/listener`: listenerSessionId
 
 Use CEL constraints to keep label and spec alignment where possible.
 

@@ -1,4 +1,4 @@
-module github.com/simon/present-yaml/auth-service
+module github.com/simon/voter/auth-service
 
 go 1.25
 

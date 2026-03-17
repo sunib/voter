@@ -53,7 +53,7 @@ Platform engineers, SREs, and infrastructure architects responsible for building
 
 ## Speaker(s) Info
 - Name: Simon Koudijs
-- Email: simon@configbutler.com
+- Email: simon@configbutler.ai
 - Title: Founder
 - Company: ConfigButler
 - Bio: Expert in configuration management and GitOps, open-sourcing tools to simplify SaaS settings and infrastructure while pioneering reverse GitOps paradigms.

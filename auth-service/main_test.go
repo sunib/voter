@@ -20,21 +20,21 @@ func TestParseSessionRef(t *testing.T) {
 	}{
 		{
 			name:     "valid session path",
-			uri:      "/apis/examples.configbutler.ai/v1alpha1/namespaces/present/quizsessions/kubecon-2026",
+			uri:      "/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/quizsessions/kubecon-2026",
 			wantOK:   true,
-			wantNS:   "present",
+			wantNS:   "voter",
 			wantName: "kubecon-2026",
 		},
 		{
 			name:     "valid session path with query",
-			uri:      "/apis/examples.configbutler.ai/v1alpha1/namespaces/present/quizsessions/kubecon-2026?foo=bar",
+			uri:      "/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/quizsessions/kubecon-2026?foo=bar",
 			wantOK:   true,
-			wantNS:   "present",
+			wantNS:   "voter",
 			wantName: "kubecon-2026",
 		},
 		{
 			name:   "invalid path",
-			uri:    "/apis/examples.configbutler.ai/v1alpha1/namespaces/present/quizsubmissions",
+			uri:    "/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/quizsubmissions",
 			wantOK: false,
 		},
 		{
@@ -230,7 +230,7 @@ func TestSessionCookieRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected securecookie error: %v", err)
 	}
 
-	ref := sessionRef{namespace: "present", name: "kubecon-2026"}
+	ref := sessionRef{namespace: "voter", name: "kubecon-2026"}
 	now := time.Now()
 	resp := httptest.NewRecorder()
 	if err := setSessionCookie(resp, cfg, sc, ref, now); err != nil {
@@ -277,8 +277,8 @@ func TestExtractJoinCodeFromForwardedURI(t *testing.T) {
 		t.Fatalf("unexpected securecookie error: %v", err)
 	}
 
-	// Create a valid join code for "present/kubecon-2026"
-	code, _ := store.rotateAndGet("present/kubecon-2026", time.Now())
+	// Create a valid join code for "voter/kubecon-2026"
+	code, _ := store.rotateAndGet("voter/kubecon-2026", time.Now())
 
 	cases := []struct {
 		name           string
@@ -292,7 +292,7 @@ func TestExtractJoinCodeFromForwardedURI(t *testing.T) {
 		{
 			name:           "code in X-Forwarded-Uri query param",
 			joinCodeHeader: "",
-			forwardedURI:   "/present/kubecon-2026?code=" + code,
+			forwardedURI:   "/voter/kubecon-2026?code=" + code,
 			requestURL:     "http://example.com/private/forward-auth-decision",
 			wantCode:       200,
 			wantSession:    true,
@@ -301,7 +301,7 @@ func TestExtractJoinCodeFromForwardedURI(t *testing.T) {
 		{
 			name:           "code in X-Forwarded-Uri with full URL",
 			joinCodeHeader: "",
-			forwardedURI:   "https://example.com/present/kubecon-2026?code=" + code,
+			forwardedURI:   "https://example.com/voter/kubecon-2026?code=" + code,
 			requestURL:     "http://example.com/private/forward-auth-decision",
 			wantCode:       200,
 			wantSession:    true,
@@ -310,7 +310,7 @@ func TestExtractJoinCodeFromForwardedURI(t *testing.T) {
 		{
 			name:           "code in X-Forwarded-Uri with other params",
 			joinCodeHeader: "",
-			forwardedURI:   "/present/kubecon-2026?foo=bar&code=" + code + "&baz=qux",
+			forwardedURI:   "/voter/kubecon-2026?foo=bar&code=" + code + "&baz=qux",
 			requestURL:     "http://example.com/private/forward-auth-decision",
 			wantCode:       200,
 			wantSession:    true,
@@ -319,7 +319,7 @@ func TestExtractJoinCodeFromForwardedURI(t *testing.T) {
 		{
 			name:           "X-Join-Code header takes precedence",
 			joinCodeHeader: code,
-			forwardedURI:   "/present/kubecon-2026?code=WRONG",
+			forwardedURI:   "/voter/kubecon-2026?code=WRONG",
 			requestURL:     "http://example.com/private/forward-auth-decision",
 			wantCode:       200,
 			wantSession:    true,
@@ -328,7 +328,7 @@ func TestExtractJoinCodeFromForwardedURI(t *testing.T) {
 		{
 			name:           "invalid code in X-Forwarded-Uri",
 			joinCodeHeader: "",
-			forwardedURI:   "/present/kubecon-2026?code=WRONG",
+			forwardedURI:   "/voter/kubecon-2026?code=WRONG",
 			requestURL:     "http://example.com/private/forward-auth-decision",
 			wantCode:       403,
 			wantSession:    false,
@@ -337,7 +337,7 @@ func TestExtractJoinCodeFromForwardedURI(t *testing.T) {
 		{
 			name:           "no code anywhere - missing session",
 			joinCodeHeader: "",
-			forwardedURI:   "/present/kubecon-2026",
+			forwardedURI:   "/voter/kubecon-2026",
 			requestURL:     "http://example.com/private/forward-auth-decision",
 			wantCode:       401,
 			wantSession:    false,
@@ -383,7 +383,7 @@ func TestExtractJoinCodeFromForwardedURI(t *testing.T) {
 		{
 			name:           "X-Forwarded-Uri takes precedence over request URL",
 			joinCodeHeader: "",
-			forwardedURI:   "/present/kubecon-2026?code=" + code,
+			forwardedURI:   "/voter/kubecon-2026?code=" + code,
 			requestURL:     "http://example.com/private/forward-auth-decision?code=WRONG",
 			wantCode:       200,
 			wantSession:    true,
@@ -392,7 +392,7 @@ func TestExtractJoinCodeFromForwardedURI(t *testing.T) {
 		{
 			name:           "request URL code used when X-Forwarded-Uri has no code",
 			joinCodeHeader: "",
-			forwardedURI:   "/present/kubecon-2026",
+			forwardedURI:   "/voter/kubecon-2026",
 			requestURL:     "http://example.com/private/forward-auth-decision?code=" + code,
 			wantCode:       200,
 			wantSession:    true,
@@ -450,8 +450,8 @@ func TestExtractJoinCodeFromForwardedURI(t *testing.T) {
 			}
 
 			if tc.wantSession {
-				if gotRef.namespace != "present" || gotRef.name != "kubecon-2026" {
-					t.Errorf("session ref: got %s/%s, want present/kubecon-2026", gotRef.namespace, gotRef.name)
+				if gotRef.namespace != "voter" || gotRef.name != "kubecon-2026" {
+					t.Errorf("session ref: got %s/%s, want voter/kubecon-2026", gotRef.namespace, gotRef.name)
 				}
 				if gotViaCode != tc.wantViaCode {
 					t.Errorf("resolved via join code: got %v, want %v", gotViaCode, tc.wantViaCode)

@@ -14,7 +14,7 @@ export type KubeError = {
 
 const defaultConfig: KubeConfig = {
   apiPrefix: import.meta.env.VITE_KUBE_API_PREFIX ?? '/apis/examples.configbutler.ai/v1alpha1',
-  namespace: import.meta.env.VITE_KUBE_NAMESPACE ?? 'present',
+  namespace: import.meta.env.VITE_KUBE_NAMESPACE ?? 'vote',  // vote-demo.configbutler.ai, vote.configbutler.ai, talk-demo.configbutler.ai, adam.configbutler.ai
 }
 
 function isAuthError(status: number) {

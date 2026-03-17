@@ -12,7 +12,7 @@ export type DraftAnswer =
   | { questionId: string; freeText: string }
 
 function storageKey(sessionName: string) {
-  return `present-yaml:draft:${sessionName}`
+  return `voter:draft:${sessionName}`
 }
 
 export const useDraftSubmissionStore = defineStore('draftSubmission', {
