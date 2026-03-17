@@ -297,6 +297,80 @@ func TestGetOrRequestTokenCoalescesConcurrentMisses(t *testing.T) {
 	}
 }
 
+func TestGetOrFetchQuizSessionCachesAndCoalesces(t *testing.T) {
+	now := time.Now()
+	cache := newQuizSessionCache()
+	want := quizSessionSpec{}
+	want.Spec.State = "live"
+	want.Spec.Title = "KubeCon Quiz"
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+
+	var mu sync.Mutex
+	calls := 0
+	fetch := func(context.Context) (quizSessionSpec, error) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-release
+		return want, nil
+	}
+
+	const callers = 64
+	sessions := make(chan quizSessionSpec, callers)
+	errs := make(chan error, callers)
+
+	var wg sync.WaitGroup
+	wg.Add(callers)
+	for i := 0; i < callers; i++ {
+		go func() {
+			defer wg.Done()
+			session, err := getOrFetchQuizSession(cache, "voter/kubecon-2026", now, 30*time.Second, context.Background(), fetch)
+			if err != nil {
+				errs <- err
+				return
+			}
+			sessions <- session
+		}()
+	}
+
+	<-started
+	close(release)
+	wg.Wait()
+	close(sessions)
+	close(errs)
+
+	if len(errs) != 0 {
+		t.Fatalf("expected no errors, got %d", len(errs))
+	}
+	if calls != 1 {
+		t.Fatalf("expected exactly 1 session fetch, got %d", calls)
+	}
+	for session := range sessions {
+		if session.Spec.State != want.Spec.State || session.Spec.Title != want.Spec.Title {
+			t.Fatalf("unexpected session: got %+v want %+v", session, want)
+		}
+	}
+
+	cached, err := getOrFetchQuizSession(cache, "voter/kubecon-2026", now.Add(5*time.Second), 30*time.Second, context.Background(), func(context.Context) (quizSessionSpec, error) {
+		t.Fatal("expected cached session")
+		return quizSessionSpec{}, nil
+	})
+	if err != nil {
+		t.Fatalf("unexpected cache hit error: %v", err)
+	}
+	if cached.Spec.State != want.Spec.State || cached.Spec.Title != want.Spec.Title {
+		t.Fatalf("unexpected cached session: got %+v want %+v", cached, want)
+	}
+}
+
 func TestSessionCookieRoundTrip(t *testing.T) {
 	cfg := config{
 		SessionCookieName:       "auth_session",

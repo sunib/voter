@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -32,6 +34,54 @@ type quizSessionSummary struct {
 	Title     string
 }
 
+type quizSessionCacheEntry struct {
+	session   quizSessionSpec
+	expiresAt time.Time
+}
+
+type quizSessionCache struct {
+	mu      sync.Mutex
+	entries map[string]quizSessionCacheEntry
+	group   singleflight.Group
+}
+
+func newQuizSessionCache() *quizSessionCache {
+	return &quizSessionCache{
+		entries: map[string]quizSessionCacheEntry{},
+	}
+}
+
+func (c *quizSessionCache) get(key string, now time.Time) (quizSessionSpec, bool) {
+	var zero quizSessionSpec
+	if c == nil || strings.TrimSpace(key) == "" {
+		return zero, false
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	entry, ok := c.entries[key]
+	if !ok {
+		return zero, false
+	}
+	if entry.expiresAt.IsZero() || now.Before(entry.expiresAt) {
+		return entry.session, true
+	}
+
+	delete(c.entries, key)
+	return zero, false
+}
+
+func (c *quizSessionCache) set(key string, session quizSessionSpec, expiresAt time.Time) {
+	if c == nil || strings.TrimSpace(key) == "" {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries[key] = quizSessionCacheEntry{session: session, expiresAt: expiresAt}
+}
+
 // kubeHandler is the interface used by HTTP handlers — the operations
 // handlers need from the Kubernetes client. kubeClient satisfies it.
 type kubeHandler interface {
@@ -41,15 +91,17 @@ type kubeHandler interface {
 }
 
 type kubeClient struct {
-	clientset kubernetes.Interface
-	dynamic   dynamic.Interface
-	defaultNS string
+	clientset    kubernetes.Interface
+	dynamic      dynamic.Interface
+	defaultNS    string
+	sessionCache *quizSessionCache
 }
 
 const (
-	kubeTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-	kubeCAPath    = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-	kubeAPIServer = "https://kubernetes.default.svc"
+	kubeTokenPath   = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	kubeCAPath      = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+	kubeAPIServer   = "https://kubernetes.default.svc"
+	sessionCacheTTL = 5 * time.Second
 )
 
 func loadKubeClient(cfg config) (kubeClient, error) {
@@ -92,9 +144,10 @@ func loadKubeClient(cfg config) (kubeClient, error) {
 
 	defaultNS, _ := detectNamespace()
 	return kubeClient{
-		clientset: clientset,
-		dynamic:   dynamicClient,
-		defaultNS: defaultNS,
+		clientset:    clientset,
+		dynamic:      dynamicClient,
+		defaultNS:    defaultNS,
+		sessionCache: newQuizSessionCache(),
 	}, nil
 }
 
@@ -139,35 +192,77 @@ func (c kubeClient) reviewToken(ctx context.Context, token string) (bool, string
 
 func (c kubeClient) getQuizSession(ctx context.Context, ref sessionRef) (quizSessionSpec, error) {
 	var out quizSessionSpec
+	key := sessionKey(ref)
 
-	gvr := schema.GroupVersionResource{
-		Group:    "examples.configbutler.ai",
-		Version:  "v1alpha1",
-		Resource: "quizsessions",
-	}
-
-	obj, err := c.dynamic.Resource(gvr).Namespace(ref.namespace).Get(ctx, ref.name, metav1.GetOptions{})
-	if err != nil {
-		return out, fmt.Errorf("failed to get quiz session: %w", err)
-	}
-
-	// Convert the unstructured object to our spec struct
-	specData, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
-	if err != nil {
-		return out, fmt.Errorf("failed to convert object: %w", err)
-	}
-
-	// Extract the spec
-	if spec, ok := specData["spec"].(map[string]interface{}); ok {
-		if state, ok := spec["state"].(string); ok {
-			out.Spec.State = state
+	return getOrFetchQuizSession(c.sessionCache, key, time.Now(), sessionCacheTTL, ctx, func(fetchCtx context.Context) (quizSessionSpec, error) {
+		gvr := schema.GroupVersionResource{
+			Group:    "examples.configbutler.ai",
+			Version:  "v1alpha1",
+			Resource: "quizsessions",
 		}
-		if title, ok := spec["title"].(string); ok {
-			out.Spec.Title = title
+
+		obj, err := c.dynamic.Resource(gvr).Namespace(ref.namespace).Get(fetchCtx, ref.name, metav1.GetOptions{})
+		if err != nil {
+			return out, fmt.Errorf("failed to get quiz session: %w", err)
 		}
+
+		// Convert the unstructured object to our spec struct
+		specData, err := runtime.DefaultUnstructuredConverter.ToUnstructured(obj)
+		if err != nil {
+			return out, fmt.Errorf("failed to convert object: %w", err)
+		}
+
+		// Extract the spec
+		if spec, ok := specData["spec"].(map[string]interface{}); ok {
+			if state, ok := spec["state"].(string); ok {
+				out.Spec.State = state
+			}
+			if title, ok := spec["title"].(string); ok {
+				out.Spec.Title = title
+			}
+		}
+
+		return out, nil
+	})
+}
+
+func getOrFetchQuizSession(cache *quizSessionCache, key string, now time.Time, ttl time.Duration, ctx context.Context, fetch func(context.Context) (quizSessionSpec, error)) (quizSessionSpec, error) {
+	var zero quizSessionSpec
+
+	if cache == nil || strings.TrimSpace(key) == "" {
+		return fetch(ctx)
 	}
 
-	return out, nil
+	if session, ok := cache.get(key, now); ok {
+		return session, nil
+	}
+
+	resultCh := cache.group.DoChan(key, func() (any, error) {
+		if session, ok := cache.get(key, time.Now()); ok {
+			return session, nil
+		}
+
+		session, err := fetch(ctx)
+		if err != nil {
+			return zero, err
+		}
+		cache.set(key, session, time.Now().Add(ttl))
+		return session, nil
+	})
+
+	select {
+	case <-ctx.Done():
+		return zero, ctx.Err()
+	case result := <-resultCh:
+		if result.Err != nil {
+			return zero, result.Err
+		}
+		session, ok := result.Val.(quizSessionSpec)
+		if !ok {
+			return zero, errors.New("quiz session cache returned unexpected type")
+		}
+		return session, nil
+	}
 }
 
 func (c kubeClient) listQuizSessions(ctx context.Context) ([]quizSessionSummary, error) {

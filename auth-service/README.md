@@ -77,6 +77,10 @@ curl -i http://localhost:8080/healthz
 - A shared token is cached for browser requests; the kubeconfig endpoint mints a fresh token per download
 - Tokens are injected by Traefik into upstream requests — they never reach the browser
 
+### Session lookup strategy
+
+- `QuizSession` lookups for `/public/session-info` are coalesced with `singleflight` and cached for 5 seconds to avoid hammering the Kubernetes API during login spikes
+
 ### Session cookie keys
 
 On startup, auth-service looks for the Kubernetes Secret `auth-session-cookie-keys` in its namespace. If missing, it generates random `hashKey`/`blockKey` values, creates the Secret, and uses them for `gorilla/securecookie` signing and encryption. This means cookie keys survive pod restarts.
