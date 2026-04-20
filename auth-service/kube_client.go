@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -263,6 +264,22 @@ func getOrFetchQuizSession(cache *quizSessionCache, key string, now time.Time, t
 		}
 		return session, nil
 	}
+}
+
+func (c kubeClient) patchQuizSessionJoinCode(ctx context.Context, ref sessionRef, joinCode string) error {
+	gvr := schema.GroupVersionResource{
+		Group:    "examples.configbutler.ai",
+		Version:  "v1alpha1",
+		Resource: "quizsessions",
+	}
+	patch := []byte(fmt.Sprintf(`{"status":{"joinCode":%q}}`, joinCode))
+	_, err := c.dynamic.Resource(gvr).Namespace(ref.namespace).Patch(
+		ctx, ref.name, types.MergePatchType, patch, metav1.PatchOptions{}, "status",
+	)
+	if err != nil {
+		return fmt.Errorf("failed to patch quiz session status: %w", err)
+	}
+	return nil
 }
 
 func (c kubeClient) listQuizSessions(ctx context.Context) ([]quizSessionSummary, error) {

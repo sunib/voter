@@ -9,9 +9,7 @@ import (
 type config struct {
 	Host                           string        `envconfig:"HOST" default:"0.0.0.0"`
 	Port                           string        `envconfig:"PORT" default:"8080"`
-	CookieName                     string        `envconfig:"COOKIE_NAME" default:"device_session"`
 	CookieSecure                   bool          `envconfig:"COOKIE_SECURE" default:"false"`
-	CookieMaxAgeSecs               int           `envconfig:"COOKIE_MAX_AGE_SECONDS" default:"3600"`
 	SessionCookieName              string        `envconfig:"SESSION_COOKIE_NAME" default:"auth_session"`
 	SessionCookieMaxAgeSecs        int           `envconfig:"SESSION_COOKIE_MAX_AGE_SECONDS" default:"3600"`
 	JoinCodeRotate                 time.Duration `envconfig:"JOIN_CODE_ROTATE_SECONDS" default:"15s"`

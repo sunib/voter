@@ -35,23 +35,30 @@ func logQuizSessions(kube kubeClient) {
 }
 
 func rotateJoinCodesForLiveSessions(kube kubeClient, codes *joinCodeStore) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	sessions, err := kube.listQuizSessions(ctx)
-	cancel()
+	listCtx, listCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	sessions, err := kube.listQuizSessions(listCtx)
+	listCancel()
 	if err != nil {
 		log.Printf("join-code: failed to list sessions: %v", err)
 		return
 	}
+	now := time.Now()
 	for _, sess := range sessions {
-		if strings.TrimSpace(sess.State) != "live" {
-			continue
+		ref := sessionRef{namespace: sess.Namespace, name: sess.Name}
+		var code string
+		if strings.TrimSpace(sess.State) == "live" {
+			var ok bool
+			code, ok = codes.rotateAndGet(sessionKey(ref), now)
+			if !ok {
+				continue
+			}
+			log.Printf("join-code: namespace=%s name=%s code=%s", sess.Namespace, sess.Name, code)
 		}
-		key := sessionKey(sessionRef{namespace: sess.Namespace, name: sess.Name})
-		code, ok := codes.rotateAndGet(key, time.Now())
-		if !ok {
-			continue
+		patchCtx, patchCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := kube.patchQuizSessionJoinCode(patchCtx, ref, code); err != nil {
+			log.Printf("join-code: failed to update status namespace=%s name=%s: %v", sess.Namespace, sess.Name, err)
 		}
-		log.Printf("join-code: namespace=%s name=%s code=%s", sess.Namespace, sess.Name, code)
+		patchCancel()
 	}
 }
 
@@ -132,6 +139,6 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("listening on %s (COOKIE_NAME=%s COOKIE_SECURE=%v)", addr, cfg.CookieName, cfg.CookieSecure)
+	log.Printf("listening on %s (SESSION_COOKIE_NAME=%s COOKIE_SECURE=%v)", addr, cfg.SessionCookieName, cfg.CookieSecure)
 	log.Fatal(srv.ListenAndServe())
 }
