@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import AdminNav from '../components/admin/AdminNav.vue'
 import FieldStateMarker from '../components/admin/FieldStateMarker.vue'
-import { getBuildAgeLabel, parseBuildTimestamp } from '../buildInfo'
 import {
   formatMoney,
   getAdminCoffeeConfig,
@@ -29,8 +28,6 @@ const authError = ref('')
 const loadError = ref('')
 const password = ref('')
 const changeReason = ref('')
-const now = ref(Date.now())
-const currentConfigSeenAt = ref<number | null>(null)
 const serverConfig = ref<CoffeeConfig | null>(null)
 const draftConfig = ref<CoffeeConfig | null>(null)
 const voucherUsage = ref<Record<string, number>>({})
@@ -41,7 +38,6 @@ const arrayFieldInputs = ref<Record<string, string>>({})
 
 let configSource: EventSource | undefined
 let orderSource: EventSource | undefined
-let adminClockTimer: ReturnType<typeof window.setInterval> | undefined
 const flashTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 const currency = computed(() => draftConfig.value?.spec.currency ?? 'EUR')
@@ -78,19 +74,6 @@ const saveButtonLabel = computed(() => {
     return 'No Changes to Save'
   }
   return `Save ${dirtyFieldCount.value} Change${dirtyFieldCount.value === 1 ? '' : 's'}`
-})
-const configCreationTimestamp = computed(() =>
-  parseBuildTimestamp(draftConfig.value?.metadata?.creationTimestamp ?? ''),
-)
-const configCreatedAge = computed(() =>
-  getBuildAgeLabel(configCreationTimestamp.value, now.value),
-)
-const configSeenAge = computed(() =>
-  getBuildAgeLabel(currentConfigSeenAt.value, now.value),
-)
-const configCreatedLabel = computed(() => {
-  const raw = draftConfig.value?.metadata?.creationTimestamp
-  return raw ? new Date(raw).toLocaleString() : 'unknown'
 })
 
 async function loadAdminState() {
@@ -251,7 +234,6 @@ function resetConfigState(config: CoffeeConfig) {
   const cloned = cloneConfig(config)
   serverConfig.value = cloneConfig(cloned)
   draftConfig.value = cloned
-  currentConfigSeenAt.value = Date.now()
   changeReason.value = ''
   dirtyPaths.value = {}
   conflicts.value = {}
@@ -273,7 +255,6 @@ function applyIncomingConfig(config: CoffeeConfig) {
     incoming,
   ) as CoffeeConfig
   serverConfig.value = incoming
-  currentConfigSeenAt.value = Date.now()
 }
 
 function reconcileValue(
@@ -690,9 +671,6 @@ function humanizePath(path: string): string {
 }
 
 onMounted(async () => {
-  adminClockTimer = window.setInterval(() => {
-    now.value = Date.now()
-  }, 60000)
   await loadAdminState()
   if (!authRequired.value) {
     openStreams()
@@ -702,9 +680,6 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   configSource?.close()
   orderSource?.close()
-  if (adminClockTimer !== undefined) {
-    window.clearInterval(adminClockTimer)
-  }
   clearAllFlashes()
 })
 </script>
@@ -765,18 +740,6 @@ onBeforeUnmount(() => {
             <span class="config-meta__item">
               <strong>Generation</strong>
               <code>{{ draftConfig.metadata?.generation ?? 'unknown' }}</code>
-            </span>
-            <span class="config-meta__item">
-              <strong>Version</strong>
-              <code>{{ draftConfig.metadata?.resourceVersion ?? 'unknown' }}</code>
-            </span>
-            <span class="config-meta__item" :title="configCreatedLabel">
-              <strong>Created</strong>
-              <span>{{ configCreatedAge }}</span>
-            </span>
-            <span class="config-meta__item">
-              <strong>Seen here</strong>
-              <span>{{ configSeenAge }}</span>
             </span>
           </div>
 

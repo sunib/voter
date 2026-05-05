@@ -271,7 +271,6 @@ func TestCoffeeConfigFromWatchEventAcceptsModifiedConfig(t *testing.T) {
 			},
 		},
 	}
-
 	cfg, ok := coffeeConfigFromWatchEvent(event)
 	if !ok {
 		t.Fatalf("expected modified event to decode")

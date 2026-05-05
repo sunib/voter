@@ -2,8 +2,6 @@ export type KubeObjectMeta = {
   name?: string
   namespace?: string
   generation?: number
-  resourceVersion?: string
-  creationTimestamp?: string
   labels?: Record<string, string>
 }
 
