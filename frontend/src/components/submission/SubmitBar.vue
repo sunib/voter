@@ -12,7 +12,7 @@ const emit = defineEmits<{ submit: [] }>()
 </script>
 
 <template>
-  <div class="sticky bottom-0 -mx-4 mt-8 border-t border-black/10 bg-[rgb(var(--bg))]/90 px-4 py-4 backdrop-blur">
+  <div class="sticky-surface sticky bottom-0 -mx-4 mt-8 px-4 py-4">
     <Message v-if="error" severity="error" class="mb-3 !rounded-xl">
       {{ error }}
     </Message>

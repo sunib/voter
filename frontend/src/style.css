@@ -15,6 +15,21 @@
     'Liberation Mono', 'Courier New', monospace;
   --font-display:
     'Teko', Impact, Haettenschweiler, 'Arial Narrow Bold', sans-serif;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: 28 23 19;
+    --card: 43 36 31;
+    --ink: 243 235 225;
+    --muted: 194 179 162;
+    --line: 235 223 208;
+    --accent: 92 201 164;
+    --danger: 255 131 110;
+    --warning: 232 173 74;
+    --shadow: 0 22px 56px rgba(0, 0, 0, 0.34);
+  }
 }
 
 html,
@@ -35,6 +50,19 @@ body {
     ),
     linear-gradient(180deg, rgba(255, 255, 255, 0.4), transparent 30%),
     rgb(var(--bg));
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background:
+      radial-gradient(
+        circle at top left,
+        rgba(var(--accent), 0.16),
+        transparent 28%
+      ),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 32%),
+      rgb(var(--bg));
+  }
 }
 
 * {
@@ -112,6 +140,16 @@ code {
   white-space: nowrap;
   font-size: 0.84rem;
   color: rgb(var(--ink));
+}
+
+.sticky-surface {
+  border-color: rgba(var(--line), 0.12);
+  background: rgba(var(--card), 0.88);
+  backdrop-filter: blur(16px);
+}
+
+.top-bar__eyebrow {
+  color: rgba(var(--muted), 0.88);
 }
 
 .page-shell {
