@@ -24,7 +24,6 @@ type config struct {
 	ForwardServiceAccount          string        `envconfig:"FORWARD_SA"`
 	ForwardServiceAccountNamespace string        `envconfig:"FORWARD_SA_NAMESPACE"`
 	CoffeeConfigName               string        `envconfig:"COFFEE_CONFIG_NAME" default:"testnet-coffee"`
-	CoffeeConfigNamespace          string        `envconfig:"COFFEE_CONFIG_NAMESPACE"`
 }
 
 func loadConfig() (config, error) {

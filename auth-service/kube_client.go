@@ -102,7 +102,6 @@ type kubeClient struct {
 	dynamic      dynamic.Interface
 	defaultNS    string
 	sessionCache *quizSessionCache
-	coffeeNS     string
 	coffeeName   string
 }
 
@@ -152,16 +151,11 @@ func loadKubeClient(cfg config) (kubeClient, error) {
 	}
 
 	defaultNS, _ := detectNamespace()
-	coffeeNS := strings.TrimSpace(cfg.CoffeeConfigNamespace)
-	if coffeeNS == "" {
-		coffeeNS = defaultNS
-	}
 	return kubeClient{
 		clientset:    clientset,
 		dynamic:      dynamicClient,
 		defaultNS:    defaultNS,
 		sessionCache: newQuizSessionCache(),
-		coffeeNS:     coffeeNS,
 		coffeeName:   strings.TrimSpace(cfg.CoffeeConfigName),
 	}, nil
 }
@@ -332,11 +326,11 @@ func (c kubeClient) listQuizSessions(ctx context.Context) ([]quizSessionSummary,
 }
 
 func (c kubeClient) getCoffeeConfig(ctx context.Context) (coffeeConfig, error) {
-	if c.coffeeNS == "" || c.coffeeName == "" {
-		return coffeeConfig{}, errors.New("coffee config namespace/name not configured")
+	if c.defaultNS == "" || c.coffeeName == "" {
+		return coffeeConfig{}, errors.New("coffee config name not configured in runtime namespace")
 	}
 
-	obj, err := c.dynamic.Resource(coffeeConfigGVR()).Namespace(c.coffeeNS).Get(ctx, c.coffeeName, metav1.GetOptions{})
+	obj, err := c.dynamic.Resource(coffeeConfigGVR()).Namespace(c.defaultNS).Get(ctx, c.coffeeName, metav1.GetOptions{})
 	if err != nil {
 		return coffeeConfig{}, fmt.Errorf("failed to get coffee config: %w", err)
 	}
@@ -344,11 +338,11 @@ func (c kubeClient) getCoffeeConfig(ctx context.Context) (coffeeConfig, error) {
 }
 
 func (c kubeClient) patchCoffeeConfig(ctx context.Context, patch []byte) (coffeeConfig, error) {
-	if c.coffeeNS == "" || c.coffeeName == "" {
-		return coffeeConfig{}, errors.New("coffee config namespace/name not configured")
+	if c.defaultNS == "" || c.coffeeName == "" {
+		return coffeeConfig{}, errors.New("coffee config name not configured in runtime namespace")
 	}
 
-	obj, err := c.dynamic.Resource(coffeeConfigGVR()).Namespace(c.coffeeNS).Patch(
+	obj, err := c.dynamic.Resource(coffeeConfigGVR()).Namespace(c.defaultNS).Patch(
 		ctx,
 		c.coffeeName,
 		types.MergePatchType,
@@ -367,7 +361,7 @@ func (c kubeClient) watchCoffeeConfig(ctx context.Context) (coffeeConfig, k8swat
 		return coffeeConfig{}, nil, err
 	}
 
-	watcher, err := c.dynamic.Resource(coffeeConfigGVR()).Namespace(c.coffeeNS).Watch(ctx, metav1.ListOptions{
+	watcher, err := c.dynamic.Resource(coffeeConfigGVR()).Namespace(c.defaultNS).Watch(ctx, metav1.ListOptions{
 		FieldSelector:   fields.OneTermEqualSelector("metadata.name", c.coffeeName).String(),
 		ResourceVersion: current.Metadata.ResourceVersion,
 	})
