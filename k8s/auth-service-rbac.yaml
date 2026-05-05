@@ -56,6 +56,10 @@ rules:
   - apiGroups: ["examples.configbutler.ai"]
     resources: ["quizsubmissions"]
     verbs: ["get", "list", "watch", "create"]
+  # Access to CoffeeConfig (namespaced config object used by the demo)
+  - apiGroups: ["examples.configbutler.ai"]
+    resources: ["coffeeconfigs"]
+    verbs: ["get", "list", "watch", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

@@ -17,7 +17,7 @@ build-push-auth-service:
 		--build-arg BUILD_DATE="$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 		--provenance=true \
 		--sbom=true \
-		-t zot.z65.nl/voter/auth-service:latest ./auth-service
+		-t zot.z65.nl/voter/auth-service:coffee ./auth-service
 
 build-push-frontend:
 	docker buildx build --push \
@@ -26,6 +26,6 @@ build-push-frontend:
 		--build-arg BUILD_DATE="$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 		--provenance=true \
 		--sbom=true \
-		-t zot.z65.nl/voter/frontend:latest ./frontend
+		-t zot.z65.nl/voter/frontend:coffee ./frontend
 
 build-push: build-push-auth-service build-push-frontend

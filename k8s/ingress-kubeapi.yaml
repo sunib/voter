@@ -33,7 +33,7 @@ spec:
   routes:
     # All Kubernetes API paths. auth-forwarder handles both browser (mints a token via
     # session cookie / join code) and kubectl (validates and passes through bearer token).
-    - match: Host(`vote.reversegitops.dev`) && (PathPrefix(`/api`) || PathPrefix(`/apis`) || PathPrefix(`/openapi`))
+    - match: Host(`coffee.z65.nl`) && (PathPrefix(`/api`) || PathPrefix(`/apis`) || PathPrefix(`/openapi`))
       kind: Rule
       middlewares:
         - name: auth-forwarder

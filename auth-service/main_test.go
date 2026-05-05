@@ -10,6 +10,8 @@ import (
 
 	"net/http"
 	"net/http/httptest"
+
+	k8swatch "k8s.io/apimachinery/pkg/watch"
 )
 
 func TestParseSessionRef(t *testing.T) {
@@ -205,6 +207,18 @@ func (s *stubKubeClient) getQuizSession(_ context.Context, _ sessionRef) (quizSe
 
 func (s *stubKubeClient) reviewToken(_ context.Context, _ string) (bool, string, error) {
 	return s.reviewAuthenticated, s.reviewUsername, s.reviewErr
+}
+
+func (s *stubKubeClient) getCoffeeConfig(_ context.Context) (coffeeConfig, error) {
+	return coffeeConfig{}, nil
+}
+
+func (s *stubKubeClient) patchCoffeeConfig(_ context.Context, _ []byte) (coffeeConfig, error) {
+	return coffeeConfig{}, nil
+}
+
+func (s *stubKubeClient) watchCoffeeConfig(_ context.Context) (coffeeConfig, k8swatch.Interface, error) {
+	return coffeeConfig{}, nil, errors.New("not implemented")
 }
 
 func TestTokenCacheRenewAfterExpiry(t *testing.T) {
