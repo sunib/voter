@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8swatch "k8s.io/apimachinery/pkg/watch"
 )
 
@@ -219,6 +220,69 @@ func (s *stubKubeClient) patchCoffeeConfig(_ context.Context, _ []byte) (coffeeC
 
 func (s *stubKubeClient) watchCoffeeConfig(_ context.Context) (coffeeConfig, k8swatch.Interface, error) {
 	return coffeeConfig{}, nil, errors.New("not implemented")
+}
+
+func TestCoffeeConfigFromWatchEventIgnoresBookmark(t *testing.T) {
+	event := k8swatch.Event{
+		Type: k8swatch.Bookmark,
+		Object: &unstructured.Unstructured{
+			Object: map[string]any{
+				"metadata": map[string]any{
+					"name":            "testnet-coffee",
+					"namespace":       "voter",
+					"resourceVersion": "123",
+				},
+			},
+		},
+	}
+
+	if _, ok := coffeeConfigFromWatchEvent(event); ok {
+		t.Fatalf("expected bookmark event to be ignored")
+	}
+}
+
+func TestCoffeeConfigFromWatchEventAcceptsModifiedConfig(t *testing.T) {
+	event := k8swatch.Event{
+		Type: k8swatch.Modified,
+		Object: &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "examples.configbutler.ai/v1alpha1",
+				"kind":       "CoffeeConfig",
+				"metadata": map[string]any{
+					"name":            "testnet-coffee",
+					"namespace":       "voter",
+					"resourceVersion": "456",
+				},
+				"spec": map[string]any{
+					"shopName": "TestNet Coffee",
+					"currency": "EUR",
+					"products": []any{
+						map[string]any{
+							"sku":        "coffee-flat-white",
+							"name":       "Flat White",
+							"priceCents": int64(395),
+							"enabled":    true,
+						},
+					},
+					"vouchers": []any{},
+				},
+			},
+		},
+	}
+
+	cfg, ok := coffeeConfigFromWatchEvent(event)
+	if !ok {
+		t.Fatalf("expected modified event to decode")
+	}
+	if cfg.Metadata.ResourceVersion != "456" {
+		t.Fatalf("unexpected resourceVersion: got %q want %q", cfg.Metadata.ResourceVersion, "456")
+	}
+	if len(cfg.Spec.Products) != 1 {
+		t.Fatalf("unexpected products length: got %d want %d", len(cfg.Spec.Products), 1)
+	}
+	if cfg.Spec.Products[0].SKU != "coffee-flat-white" {
+		t.Fatalf("unexpected sku: got %q want %q", cfg.Spec.Products[0].SKU, "coffee-flat-white")
+	}
 }
 
 func TestTokenCacheRenewAfterExpiry(t *testing.T) {

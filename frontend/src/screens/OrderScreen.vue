@@ -138,7 +138,7 @@ async function placeOrder() {
 
 function openConfigWatch() {
   configSource?.close()
-  configSource = watchCoffeeConfig('/public/coffeeconfig/watch', (event) => {
+  configSource = watchCoffeeConfig('/public/storefront/watch', (event) => {
     cart.setActiveConfig(event.object)
     cart.setStorefront(buildStorefrontFromConfig(event.object, voucherCode.value || undefined))
   })

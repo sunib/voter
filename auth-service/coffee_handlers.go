@@ -43,7 +43,7 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 		writeJSON(w, http.StatusOK, buildStorefront(cfg, r.URL.Query().Get("voucher")))
 	})
 
-	mux.HandleFunc("/public/coffeeconfig/watch", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/public/storefront/watch", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -95,7 +95,7 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 		writeJSON(w, statusCode, resp)
 	})
 
-	mux.HandleFunc("/api/admin/login", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/public/admin/login", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -122,7 +122,7 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
-	mux.HandleFunc("/api/admin/coffeeconfig", requireAdminMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/public/admin/coffeeconfig", requireAdminMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -157,7 +157,7 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 		}
 	}))
 
-	mux.HandleFunc("/api/admin/coffeeconfig/watch", requireAdminMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/public/admin/coffeeconfig/watch", requireAdminMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -165,7 +165,7 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 		streamCoffeeConfigWatch(w, r, deps)
 	}))
 
-	mux.HandleFunc("/private/orders", requireAdminMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/public/admin/orders", requireAdminMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -173,7 +173,7 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 		writeJSON(w, http.StatusOK, deps.orders.snapshot())
 	}))
 
-	mux.HandleFunc("/private/orders/debug", requireAdminMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/public/admin/orders/debug", requireAdminMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -181,7 +181,7 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 		writeJSON(w, http.StatusOK, deps.orders.snapshot())
 	}))
 
-	mux.HandleFunc("/private/orders/stream", requireAdminMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/public/admin/orders/stream", requireAdminMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -312,6 +312,12 @@ func streamCoffeeConfigWatch(w http.ResponseWriter, r *http.Request, deps handle
 }
 
 func coffeeConfigFromWatchEvent(event k8swatch.Event) (coffeeConfig, bool) {
+	// Only emit full config snapshots. Bookmark and other control events can carry
+	// metadata-only objects, which would otherwise clear the frontend state.
+	if event.Type != k8swatch.Added && event.Type != k8swatch.Modified {
+		return coffeeConfig{}, false
+	}
+
 	switch object := event.Object.(type) {
 	case *unstructured.Unstructured:
 		cfg, err := toCoffeeConfig(object)

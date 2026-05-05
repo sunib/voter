@@ -87,7 +87,7 @@ function openStreams() {
   configSource?.close()
   orderSource?.close()
 
-  configSource = watchCoffeeConfig('/api/admin/coffeeconfig/watch', (event) => {
+  configSource = watchCoffeeConfig('/public/admin/coffeeconfig/watch', (event) => {
     draftConfig.value = cloneConfig(event.object)
   })
 
@@ -381,7 +381,7 @@ onBeforeUnmount(() => {
         <article class="panel">
           <div class="section-heading">
             <h2>Live orders</h2>
-            <p>Initial state comes from <code>GET /private/orders</code>; new events arrive over SSE.</p>
+            <p>Initial state comes from <code>GET /public/admin/orders</code>; new events arrive over SSE.</p>
           </div>
           <div v-if="orderedEvents.length === 0" class="empty-state">No coffee orders yet.</div>
           <div v-else class="stack-list">

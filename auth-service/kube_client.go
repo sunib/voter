@@ -368,9 +368,8 @@ func (c kubeClient) watchCoffeeConfig(ctx context.Context) (coffeeConfig, k8swat
 	}
 
 	watcher, err := c.dynamic.Resource(coffeeConfigGVR()).Namespace(c.coffeeNS).Watch(ctx, metav1.ListOptions{
-		FieldSelector:       fields.OneTermEqualSelector("metadata.name", c.coffeeName).String(),
-		ResourceVersion:     current.Metadata.ResourceVersion,
-		AllowWatchBookmarks: true,
+		FieldSelector:   fields.OneTermEqualSelector("metadata.name", c.coffeeName).String(),
+		ResourceVersion: current.Metadata.ResourceVersion,
 	})
 	if err != nil {
 		return coffeeConfig{}, nil, fmt.Errorf("failed to watch coffee config: %w", err)

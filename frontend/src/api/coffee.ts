@@ -68,7 +68,7 @@ export async function submitOrder(input: CoffeeOrderRequest): Promise<CoffeeOrde
 }
 
 export async function loginAdmin(password: string): Promise<void> {
-  const res = await fetch('/api/admin/login', {
+  const res = await fetch('/public/admin/login', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -83,11 +83,11 @@ export async function loginAdmin(password: string): Promise<void> {
 }
 
 export async function getAdminCoffeeConfig(): Promise<CoffeeConfig> {
-  return await requestJson<CoffeeConfig>('/api/admin/coffeeconfig')
+  return await requestJson<CoffeeConfig>('/public/admin/coffeeconfig')
 }
 
 export async function patchAdminCoffeeConfig(patch: unknown): Promise<CoffeeConfig> {
-  return await requestJson<CoffeeConfig>('/api/admin/coffeeconfig', {
+  return await requestJson<CoffeeConfig>('/public/admin/coffeeconfig', {
     method: 'PATCH',
     headers: {
       'content-type': 'application/merge-patch+json',
@@ -97,7 +97,7 @@ export async function patchAdminCoffeeConfig(patch: unknown): Promise<CoffeeConf
 }
 
 export async function getOrdersSnapshot(): Promise<CoffeeOrdersSnapshot> {
-  return await requestJson<CoffeeOrdersSnapshot>('/private/orders')
+  return await requestJson<CoffeeOrdersSnapshot>('/public/admin/orders')
 }
 
 function openEventStream<T>(
@@ -127,7 +127,7 @@ export function watchOrders(
   onMessage: (event: CoffeeOrderRecord) => void,
   onError?: (event: Event) => void,
 ): EventSource {
-  return openEventStream('/private/orders/stream', onMessage, onError)
+  return openEventStream('/public/admin/orders/stream', onMessage, onError)
 }
 
 export function buildStorefrontFromConfig(

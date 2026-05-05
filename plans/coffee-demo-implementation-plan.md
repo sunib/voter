@@ -233,9 +233,9 @@ Chosen shape:
 - backend remains thin and does not invent a separate config model
 
 Recommended operations:
-- `GET /api/admin/coffeeconfig`
-- `PATCH /api/admin/coffeeconfig`
-- `GET /api/admin/coffeeconfig/watch`
+- `GET /public/admin/coffeeconfig`
+- `PATCH /public/admin/coffeeconfig`
+- `GET /public/admin/coffeeconfig/watch`
 
 Thin-backend requirements:
 - backend reads and writes the real `CoffeeConfig` in Kubernetes
@@ -289,7 +289,7 @@ Return stable error codes:
 ### Read-only order debug endpoint
 Optional but useful for demo/dev:
 
-- `GET /private/orders/debug`
+- `GET /public/admin/orders/debug`
 
 Can return:
 - successful order count
@@ -303,7 +303,7 @@ Add a backend endpoint for the admin page to see incoming orders live.
 
 Recommended option:
 
-- `GET /private/orders/stream`
+- `GET /public/admin/orders/stream`
 
 Use Server-Sent Events for the first cut.
 
@@ -324,11 +324,11 @@ Event payload can include:
 
 Also keep a snapshot endpoint:
 
-- `GET /private/orders`
+- `GET /public/admin/orders`
 
 The admin page should use:
-1. `GET /private/orders` for initial state
-2. `GET /private/orders/stream` for live updates
+1. `GET /public/admin/orders` for initial state
+2. `GET /public/admin/orders/stream` for live updates
 
 If SSE proves awkward in the deployed environment, short-interval polling is an acceptable fallback, but SSE is the preferred design.
 
