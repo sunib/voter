@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { getOrdersSnapshot, getPublicSession, watchOrders } from '../api/coffee'
+import { getOrdersSnapshot, watchOrders } from '../api/coffee'
 import AdminNav from '../components/admin/AdminNav.vue'
 import type { CoffeeOrderRecord } from '../api/coffeeTypes'
 import { formatMoney, type ApiError } from '../api/coffee'
 
 const loading = ref(true)
 const loadError = ref('')
-const adminNickname = ref('')
 const orders = ref<CoffeeOrderRecord[]>([])
 
 let orderSource: EventSource | undefined
@@ -18,11 +17,7 @@ async function loadAdminOrders() {
   loading.value = true
   loadError.value = ''
   try {
-    const [session, snapshot] = await Promise.all([
-      getPublicSession(),
-      getOrdersSnapshot(),
-    ])
-    adminNickname.value = session.nickname
+    const snapshot = await getOrdersSnapshot()
     orders.value = snapshot.orders
   } catch (error) {
     loadError.value = (error as ApiError).message
@@ -82,7 +77,6 @@ onBeforeUnmount(() => {
             events arrive over SSE.
           </p>
         </div>
-        <p class="metadata-copy">Signed in as {{ adminNickname }}</p>
         <div v-if="orderedEvents.length === 0" class="empty-state">
           No coffee orders yet.
         </div>

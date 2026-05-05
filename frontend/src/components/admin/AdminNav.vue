@@ -5,6 +5,28 @@ import { RouterLink, useRoute } from 'vue-router'
 const route = useRoute()
 
 const currentRouteName = computed(() => route.name)
+const tabs = [
+  {
+    name: 'order',
+    to: '/',
+    label: 'Order',
+  },
+  {
+    name: 'admin-orders',
+    to: '/admin/orders',
+    label: 'List',
+  },
+  {
+    name: 'admin',
+    to: '/admin',
+    label: 'Config',
+  },
+  {
+    name: 'admin-commits',
+    to: '/admin/commits',
+    label: 'ConfigHistory',
+  },
+] as const
 
 function isActive(name: string): boolean {
   return currentRouteName.value === name
@@ -12,18 +34,14 @@ function isActive(name: string): boolean {
 </script>
 
 <template>
-  <div class="admin-nav">
+  <nav class="admin-tabs" aria-label="Admin sections">
     <RouterLink
-      :class="['button', isActive('admin') ? '' : 'button--secondary']"
-      to="/admin"
+      v-for="tab in tabs"
+      :key="tab.name"
+      :class="['admin-tab', isActive(tab.name) ? 'admin-tab--active' : '']"
+      :to="tab.to"
     >
-      Config
+      {{ tab.label }}
     </RouterLink>
-    <RouterLink
-      :class="['button', isActive('admin-orders') ? '' : 'button--secondary']"
-      to="/admin/orders"
-    >
-      Orders
-    </RouterLink>
-  </div>
+  </nav>
 </template>

@@ -52,6 +52,68 @@ code {
   font-family: var(--font-body);
 }
 
+.app-badges {
+  position: fixed;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 40;
+  display: grid;
+  gap: 0.45rem;
+  justify-items: end;
+  pointer-events: none;
+}
+
+.app-badges > * {
+  pointer-events: auto;
+}
+
+.session-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  max-width: min(17rem, calc(100vw - 1.5rem));
+  padding: 0.48rem 0.72rem;
+  border: 1px solid rgba(var(--line), 0.08);
+  border-radius: 999px;
+  background:
+    linear-gradient(135deg, rgba(var(--accent), 0.16), transparent 68%),
+    rgba(var(--card), 0.94);
+  box-shadow: 0 10px 26px rgba(17, 12, 8, 0.1);
+  backdrop-filter: blur(14px);
+}
+
+.session-badge__icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 999px;
+  background: rgba(var(--accent), 0.14);
+  color: rgb(var(--accent));
+  flex: 0 0 auto;
+}
+
+.session-badge__icon {
+  font-size: 0.82rem;
+}
+
+.session-badge__label {
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(var(--muted));
+}
+
+.session-badge__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.84rem;
+  color: rgb(var(--ink));
+}
+
 .page-shell {
   width: min(100%, 1160px);
   margin: 0 auto;
@@ -173,10 +235,40 @@ p {
   background: rgba(255, 245, 242, 0.98);
 }
 
-.admin-nav {
-  display: flex;
-  gap: 0.7rem;
+.admin-tabs {
+  display: inline-flex;
   flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.35rem;
+  border-radius: 999px;
+  background: rgba(var(--line), 0.05);
+}
+
+.admin-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.7rem;
+  padding: 0.7rem 1rem;
+  border-radius: 999px;
+  color: rgb(var(--muted));
+  text-decoration: none;
+  transition:
+    transform 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.admin-tab:hover {
+  transform: translateY(-1px);
+  color: rgb(var(--ink));
+}
+
+.admin-tab--active {
+  background: rgba(var(--card), 0.98);
+  color: rgb(var(--ink));
+  box-shadow: 0 10px 22px rgba(17, 12, 8, 0.08);
 }
 
 .section-heading {

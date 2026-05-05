@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { getPublicSession, type ApiError } from './api/coffee'
 import OrderScreen from './screens/OrderScreen.vue'
 import AdminScreen from './screens/AdminScreen.vue'
+import AdminCommitsScreen from './screens/AdminCommitsScreen.vue'
 import AdminOrdersScreen from './screens/AdminOrdersScreen.vue'
 import AnswerScreen from './screens/AnswerScreen.vue'
 import LoginScreen from './screens/LoginScreen.vue'
@@ -39,6 +40,11 @@ export const router = createRouter({
       path: '/admin/orders',
       name: 'admin-orders',
       component: AdminOrdersScreen,
+    },
+    {
+      path: '/admin/commits',
+      name: 'admin-commits',
+      component: AdminCommitsScreen,
     },
     {
       path: '/answer/:session',

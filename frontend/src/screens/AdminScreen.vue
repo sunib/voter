@@ -1,20 +1,18 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import AdminNav from '../components/admin/AdminNav.vue'
-import FieldStateMarker from '../components/admin/FieldStateMarker.vue'
+import { formatConflictValue, humanizePath } from '../adminFormatters'
 import {
   formatMoney,
   getAdminCoffeeConfig,
-  getCoffeeConfigChangesSnapshot,
-  getPublicSession,
   getOrdersSnapshot,
   patchAdminCoffeeConfig,
   watchCoffeeConfig,
-  watchCoffeeConfigChanges,
   watchOrders,
   type ApiError,
 } from '../api/coffee'
-import type { CoffeeConfig, CoffeeConfigChangeRecord } from '../api/coffeeTypes'
+import AdminNav from '../components/admin/AdminNav.vue'
+import FieldStateMarker from '../components/admin/FieldStateMarker.vue'
+import type { CoffeeConfig } from '../api/coffeeTypes'
 
 type FieldConflict = {
   previousServer: unknown
@@ -26,12 +24,10 @@ type FieldState = 'clean' | 'dirty' | 'conflict'
 const loading = ref(true)
 const saving = ref(false)
 const loadError = ref('')
-const adminNickname = ref('')
 const changeReason = ref('')
 const serverConfig = ref<CoffeeConfig | null>(null)
 const draftConfig = ref<CoffeeConfig | null>(null)
 const voucherUsage = ref<Record<string, number>>({})
-const recentChanges = ref<CoffeeConfigChangeRecord[]>([])
 const dirtyPaths = ref<Record<string, true>>({})
 const flashedPaths = ref<Record<string, true>>({})
 const conflicts = ref<Record<string, FieldConflict>>({})
@@ -39,7 +35,6 @@ const arrayFieldInputs = ref<Record<string, string>>({})
 
 let configSource: EventSource | undefined
 let orderSource: EventSource | undefined
-let changeSource: EventSource | undefined
 const flashTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 const currency = computed(() => draftConfig.value?.spec.currency ?? 'EUR')
@@ -82,16 +77,12 @@ async function loadAdminState() {
   loading.value = true
   loadError.value = ''
   try {
-    const [session, config, snapshot, changesSnapshot] = await Promise.all([
-      getPublicSession(),
+    const [config, snapshot] = await Promise.all([
       getAdminCoffeeConfig(),
       getOrdersSnapshot(),
-      getCoffeeConfigChangesSnapshot(),
     ])
-    adminNickname.value = session.nickname
     resetConfigState(config)
     voucherUsage.value = snapshot.voucherUsage
-    recentChanges.value = changesSnapshot.changes
   } catch (error) {
     loadError.value = (error as ApiError).message
   } finally {
@@ -125,7 +116,6 @@ async function saveConfig() {
 function openStreams() {
   configSource?.close()
   orderSource?.close()
-  changeSource?.close()
 
   configSource = watchCoffeeConfig(
     '/public/admin/coffeeconfig/watch',
@@ -142,13 +132,6 @@ function openStreams() {
         [key]: (voucherUsage.value[key] ?? 0) + 1,
       }
     }
-  })
-
-  changeSource = watchCoffeeConfigChanges((event) => {
-    recentChanges.value = [
-      event,
-      ...recentChanges.value.filter((entry) => entry.id !== event.id),
-    ].slice(0, 24)
   })
 }
 
@@ -635,54 +618,6 @@ function cloneValue<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
-function formatConflictValue(value: unknown): string {
-  if (Array.isArray(value)) {
-    if (value.length === 0) {
-      return '(empty)'
-    }
-    if (value.every((item) => typeof item !== 'object' || item === null)) {
-      return value.map((item) => String(item)).join(', ')
-    }
-    return `${value.length} item${value.length === 1 ? '' : 's'}`
-  }
-  if (typeof value === 'boolean') {
-    return value ? 'true' : 'false'
-  }
-  if (isObjectLike(value)) {
-    const keys = Object.keys(value)
-    return keys.length === 0
-      ? '(empty)'
-      : `${keys.length} field${keys.length === 1 ? '' : 's'}`
-  }
-  if (value === null || value === undefined || value === '') {
-    return '(empty)'
-  }
-  return String(value)
-}
-
-function humanizePath(path: string): string {
-  return path
-    .replace(/^spec\./, '')
-    .replace(/\.apiKeySecretRef\./g, ' secret ')
-    .replace(/\.orderConfirmationTemplate/g, ' mail template')
-    .replace(/\.zeroAmountCheckoutAllowed/g, ' zero checkout')
-    .replace(/\./g, ' / ')
-}
-
-function formatEventTimestamp(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(date)
-}
-
 onMounted(async () => {
   await loadAdminState()
   if (!loadError.value) {
@@ -693,7 +628,6 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   configSource?.close()
   orderSource?.close()
-  changeSource?.close()
   clearAllFlashes()
 })
 </script>
@@ -1625,9 +1559,6 @@ onBeforeUnmount(() => {
               </ul>
 
               <div class="save-summary__meta metadata-copy">
-                <div>
-                  Signed in as <strong>{{ adminNickname }}</strong>
-                </div>
                 <label
                   v-if="dirtyFieldCount > 0"
                   class="field save-summary__reason"
@@ -1655,67 +1586,6 @@ onBeforeUnmount(() => {
                 </button>
               </div>
             </section>
-          </article>
-
-          <article class="panel recent-changes">
-            <div class="section-heading">
-              <div>
-                <p class="eyebrow">Recent changes</p>
-                <h3>Pod-local commit log</h3>
-              </div>
-              <span class="pill pill--neutral">
-                {{ recentChanges.length }} event{{
-                  recentChanges.length === 1 ? '' : 's'
-                }}
-              </span>
-            </div>
-            <p class="metadata-copy recent-changes__intro">
-              This list is kept in memory and resets when the pod restarts.
-              Actor names come from the shared demo session nickname.
-            </p>
-
-            <div v-if="recentChanges.length === 0" class="empty-state">
-              No config changes have been saved since this pod started.
-            </div>
-
-            <ul v-else class="recent-changes__list">
-              <li
-                v-for="entry in recentChanges"
-                :key="entry.id"
-                class="recent-changes__item"
-              >
-                <div class="recent-changes__meta">
-                  <span class="pill pill--neutral">
-                    {{ formatEventTimestamp(entry.createdAt) }}
-                  </span>
-                  <span class="pill pill--warning">{{ entry.actor }}</span>
-                </div>
-                <strong>{{ entry.summary }}</strong>
-                <p v-if="entry.reason" class="metadata-copy">
-                  {{ entry.reason }}
-                </p>
-                <ul class="inline-list recent-changes__fields">
-                  <li
-                    v-for="change in entry.changes.slice(0, 4)"
-                    :key="`${entry.id}-${change.path}`"
-                  >
-                    <strong>{{ humanizePath(change.path) }}</strong>
-                    <span aria-hidden="true">:</span>
-                    <s>{{ formatConflictValue(change.previousValue) }}</s>
-                    <span aria-hidden="true">→</span>
-                    <span>{{ formatConflictValue(change.newValue) }}</span>
-                  </li>
-                </ul>
-                <p
-                  v-if="entry.changes.length > 4"
-                  class="metadata-copy recent-changes__more"
-                >
-                  +{{ entry.changes.length - 4 }} more field{{
-                    entry.changes.length - 4 === 1 ? '' : 's'
-                  }}
-                </p>
-              </li>
-            </ul>
           </article>
         </div>
       </section>
