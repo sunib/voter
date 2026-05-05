@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { buildInfo } from '../buildInfo'
+import AdminNav from '../components/admin/AdminNav.vue'
 import FieldStateMarker from '../components/admin/FieldStateMarker.vue'
 import {
   formatMoney,
@@ -12,7 +12,7 @@ import {
   watchOrders,
   type ApiError,
 } from '../api/coffee'
-import type { CoffeeConfig, CoffeeOrderRecord } from '../api/coffeeTypes'
+import type { CoffeeConfig } from '../api/coffeeTypes'
 
 type FieldConflict = {
   previousServer: unknown
@@ -27,9 +27,9 @@ const authRequired = ref(false)
 const authError = ref('')
 const loadError = ref('')
 const password = ref('')
+const changeReason = ref('')
 const serverConfig = ref<CoffeeConfig | null>(null)
 const draftConfig = ref<CoffeeConfig | null>(null)
-const orders = ref<CoffeeOrderRecord[]>([])
 const voucherUsage = ref<Record<string, number>>({})
 const dirtyPaths = ref<Record<string, true>>({})
 const flashedPaths = ref<Record<string, true>>({})
@@ -40,7 +40,6 @@ let configSource: EventSource | undefined
 let orderSource: EventSource | undefined
 const flashTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
-const orderedEvents = computed(() => [...orders.value].reverse())
 const currency = computed(() => draftConfig.value?.spec.currency ?? 'EUR')
 const dirtyFieldCount = computed(() => Object.keys(dirtyPaths.value).length)
 const conflictEntries = computed(() => Object.entries(conflicts.value))
@@ -86,7 +85,6 @@ async function loadAdminState() {
       getOrdersSnapshot(),
     ])
     resetConfigState(config)
-    orders.value = snapshot.orders
     voucherUsage.value = snapshot.voucherUsage
     authRequired.value = false
   } catch (error) {
@@ -120,6 +118,8 @@ async function saveConfig() {
   saving.value = true
   loadError.value = ''
   try {
+    // Reserved for a future save-note flow; optional and not sent yet.
+    void changeReason.value
     const updated = await patchAdminCoffeeConfig({
       spec: draftConfig.value.spec,
     })
@@ -143,7 +143,6 @@ function openStreams() {
   )
 
   orderSource = watchOrders((event) => {
-    orders.value = [...orders.value, event]
     if (event.status === 'placed' && event.voucherCode) {
       const key = event.voucherCode.trim().toLowerCase()
       voucherUsage.value = {
@@ -235,6 +234,7 @@ function resetConfigState(config: CoffeeConfig) {
   const cloned = cloneConfig(config)
   serverConfig.value = cloneConfig(cloned)
   draftConfig.value = cloned
+  changeReason.value = ''
   dirtyPaths.value = {}
   conflicts.value = {}
   arrayFieldInputs.value = {}
@@ -691,8 +691,11 @@ onBeforeUnmount(() => {
       <h1>Live coffee config</h1>
       <p class="hero-copy">
         This page reads and patches the real <code>CoffeeConfig</code> object,
-        then watches for live changes and incoming orders.
+        then watches for live changes while keeping voucher usage current.
       </p>
+      <div class="hero-actions">
+        <AdminNav />
+      </div>
     </section>
 
     <section v-if="authRequired" class="panel admin-login">
@@ -731,10 +734,6 @@ onBeforeUnmount(() => {
         <article class="panel">
           <div class="section-heading">
             <h2>Storefront config</h2>
-            <p>
-              Edits are saved with JSON Merge Patch against the Kubernetes
-              object.
-            </p>
           </div>
 
           <div class="form-grid">
@@ -751,14 +750,9 @@ onBeforeUnmount(() => {
                 />
               </div>
               <input
-                :value="getTextField('spec.shopName')"
+                v-model="draftConfig.spec.shopName"
                 type="text"
-                @input="
-                  updateField(
-                    'spec.shopName',
-                    ($event.target as HTMLInputElement).value,
-                  )
-                "
+                @input="refreshFieldState('spec.shopName')"
               />
             </label>
             <label :class="fieldClasses('spec.currency')">
@@ -774,14 +768,9 @@ onBeforeUnmount(() => {
                 />
               </div>
               <input
-                :value="getTextField('spec.currency')"
+                v-model="draftConfig.spec.currency"
                 type="text"
-                @input="
-                  updateField(
-                    'spec.currency',
-                    ($event.target as HTMLInputElement).value,
-                  )
-                "
+                @input="refreshFieldState('spec.currency')"
               />
             </label>
           </div>
@@ -799,14 +788,9 @@ onBeforeUnmount(() => {
               />
             </div>
             <textarea
-              :value="getTextField('spec.bannerText')"
+              v-model="draftConfig.spec.bannerText"
               rows="3"
-              @input="
-                updateField(
-                  'spec.bannerText',
-                  ($event.target as HTMLTextAreaElement).value,
-                )
-              "
+              @input="refreshFieldState('spec.bannerText')"
             />
           </label>
 
@@ -847,14 +831,9 @@ onBeforeUnmount(() => {
                     />
                   </div>
                   <input
-                    :value="getTextField(`spec.products.${index}.sku`)"
+                    v-model="product.sku"
                     type="text"
-                    @input="
-                      updateField(
-                        `spec.products.${index}.sku`,
-                        ($event.target as HTMLInputElement).value,
-                      )
-                    "
+                    @input="refreshFieldState(`spec.products.${index}.sku`)"
                   />
                 </label>
                 <label :class="fieldClasses(`spec.products.${index}.name`)">
@@ -1531,10 +1510,13 @@ onBeforeUnmount(() => {
             </label>
           </div>
 
+        </article>
+
+        <article class="panel admin-sidebar">
           <section class="save-summary">
             <div class="save-summary__header">
               <div class="save-summary__copy">
-                <p class="eyebrow">Save summary</p>
+                <p class="eyebrow">Review and save</p>
                 <h3>
                   {{
                     dirtyFieldCount === 0
@@ -1586,7 +1568,9 @@ onBeforeUnmount(() => {
                       "
                     >
                       {{
-                        entry.state === 'conflict' ? 'Missed update' : 'Edited'
+                        entry.state === 'conflict'
+                          ? 'Concurrent change'
+                          : 'Edited'
                       }}
                     </span>
                   </div>
@@ -1612,6 +1596,14 @@ onBeforeUnmount(() => {
             </ul>
 
             <div class="save-summary__meta metadata-copy">
+              <label class="field save-summary__reason">
+                <span>Why are you making this change?</span>
+                <textarea
+                  v-model="changeReason"
+                  rows="3"
+                  placeholder="Optional for now. Add a short note so people understand what changed and why."
+                />
+              </label>
               <div>
                 Resource version
                 {{ draftConfig.metadata?.resourceVersion ?? 'unknown' }}
@@ -1619,10 +1611,6 @@ onBeforeUnmount(() => {
               <div>
                 {{ cleanDirtyCount }} edit(s) and {{ conflictCount }} missed
                 incoming change(s) in this save.
-              </div>
-              <div>
-                commit {{ buildInfo.commitWithDirty }} • built
-                {{ buildInfo.buildDate }}
               </div>
             </div>
 
@@ -1636,58 +1624,6 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </section>
-        </article>
-
-        <article class="panel">
-          <div class="section-heading">
-            <h2>Live orders</h2>
-            <p>
-              Initial state comes from <code>GET /public/admin/orders</code>;
-              new events arrive over SSE.
-            </p>
-          </div>
-          <div v-if="orderedEvents.length === 0" class="empty-state">
-            No coffee orders yet.
-          </div>
-          <div v-else class="stack-list">
-            <article
-              v-for="order in orderedEvents"
-              :key="order.orderId"
-              class="embedded-card"
-            >
-              <div class="row-actions">
-                <strong>{{ order.orderId }}</strong>
-                <span
-                  class="pill"
-                  :class="
-                    order.status === 'placed' ? 'pill--good' : 'pill--warning'
-                  "
-                >
-                  {{ order.status }}
-                </span>
-              </div>
-              <p class="metadata-copy">
-                {{ new Date(order.submittedAt).toLocaleString() }}
-              </p>
-              <ul class="inline-list">
-                <li
-                  v-for="item in order.items"
-                  :key="`${order.orderId}-${item.sku}`"
-                >
-                  {{ item.name }} × {{ item.quantity }}
-                </li>
-              </ul>
-              <div class="row-actions">
-                <span>{{ order.voucherCode || 'no voucher' }}</span>
-                <strong>{{
-                  formatMoney(order.currency, order.totalPriceCents)
-                }}</strong>
-              </div>
-              <p v-if="order.failureMessage" class="error-copy">
-                {{ order.failureCode }}: {{ order.failureMessage }}
-              </p>
-            </article>
-          </div>
         </article>
       </section>
     </template>

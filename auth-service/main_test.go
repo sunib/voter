@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -692,6 +693,52 @@ func TestExtractJoinCodeFromForwardedURI(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPublicBuildInfoEndpoint(t *testing.T) {
+	previousCommit := gitCommit
+	previousDirty := gitDirty
+	previousBuildDate := buildDate
+	t.Cleanup(func() {
+		gitCommit = previousCommit
+		gitDirty = previousDirty
+		buildDate = previousBuildDate
+	})
+
+	gitCommit = "abc1234"
+	gitDirty = "1"
+	buildDate = "2026-05-05T08:30:00Z"
+
+	mux := http.NewServeMux()
+	registerHandlers(mux, handlerDeps{
+		kube: &stubKubeClient{},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "http://auth-service/public/build-info", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d want %d", rec.Code, http.StatusOK)
+	}
+
+	var payload publicBuildInfoResponse
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if payload.GitCommit != "abc1234" {
+		t.Fatalf("unexpected gitCommit: got %q want %q", payload.GitCommit, "abc1234")
+	}
+	if !payload.IsDirty {
+		t.Fatalf("expected dirty build flag to be true")
+	}
+	if payload.BuildDate != "2026-05-05T08:30:00Z" {
+		t.Fatalf("unexpected buildDate: got %q want %q", payload.BuildDate, "2026-05-05T08:30:00Z")
+	}
+	if payload.CommitWithDirty != "abc1234-dirty" {
+		t.Fatalf("unexpected commitWithDirty: got %q want %q", payload.CommitWithDirty, "abc1234-dirty")
 	}
 }
 

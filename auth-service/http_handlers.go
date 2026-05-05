@@ -27,6 +27,13 @@ type kubeconfigData struct {
 	ExpiresAt string
 }
 
+type publicBuildInfoResponse struct {
+	GitCommit       string `json:"gitCommit"`
+	IsDirty         bool   `json:"isDirty"`
+	BuildDate       string `json:"buildDate"`
+	CommitWithDirty string `json:"commitWithDirty"`
+}
+
 type handlerDeps struct {
 	cfg           config
 	codes         *joinCodeStore
@@ -46,6 +53,25 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok\n"))
+	})
+
+	mux.HandleFunc("/public/build-info", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		commitWithDirty := gitCommit
+		if gitDirty == "1" {
+			commitWithDirty = fmt.Sprintf("%s-dirty", gitCommit)
+		}
+
+		writeJSON(w, http.StatusOK, publicBuildInfoResponse{
+			GitCommit:       gitCommit,
+			IsDirty:         gitDirty == "1",
+			BuildDate:       buildDate,
+			CommitWithDirty: commitWithDirty,
+		})
 	})
 
 	mux.HandleFunc("/public/session-info", requireSessionMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
@@ -227,7 +253,7 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 		if r.URL.Path == "/" {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("auth-forwarder prototype\n\nEndpoints:\n- GET /healthz\n- GET|POST /private/forward-auth-decision (Traefik ForwardAuth)\n- GET|POST /public/session-info (Get info on current sessions)\n- GET /public/kubeconfig?code=XXXX (Download kubeconfig for kubectl access)\n"))
+			_, _ = w.Write([]byte("auth-forwarder prototype\n\nEndpoints:\n- GET /healthz\n- GET /public/build-info\n- GET|POST /private/forward-auth-decision (Traefik ForwardAuth)\n- GET|POST /public/session-info (Get info on current sessions)\n- GET /public/kubeconfig?code=XXXX (Download kubeconfig for kubectl access)\n"))
 			return
 		}
 		http.NotFound(w, r)

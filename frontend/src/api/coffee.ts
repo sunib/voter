@@ -10,6 +10,13 @@ import type {
   StorefrontResponse,
 } from './coffeeTypes'
 
+export type PublicBuildInfoResponse = {
+  gitCommit: string
+  isDirty: boolean
+  buildDate: string
+  commitWithDirty: string
+}
+
 export type ApiError = Error & {
   status: number
   body?: unknown
@@ -58,6 +65,10 @@ export async function getStorefront(voucherCode?: string): Promise<StorefrontRes
     url.searchParams.set('voucher', voucherCode)
   }
   return await requestJson<StorefrontResponse>(url.pathname + url.search)
+}
+
+export async function getPublicBuildInfo(): Promise<PublicBuildInfoResponse> {
+  return await requestJson<PublicBuildInfoResponse>('/public/build-info')
 }
 
 export async function submitOrder(input: CoffeeOrderRequest): Promise<CoffeeOrderResponse> {
@@ -207,8 +218,12 @@ function discountedUnitPrice(priceCents: number, voucher: CoffeeVoucherSpec): nu
 }
 
 export function formatMoney(currency: string, cents: number): string {
-  return new Intl.NumberFormat(undefined, {
-    style: 'currency',
-    currency,
-  }).format(cents / 100)
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency,
+    }).format(cents / 100)
+  } catch {
+    return `${currency || '???'} ${(cents / 100).toFixed(2)}`
+  }
 }

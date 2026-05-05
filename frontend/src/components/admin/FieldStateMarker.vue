@@ -17,7 +17,7 @@ const root = ref<HTMLElement | null>(null)
 const isOpen = ref(false)
 const isVisible = computed(() => props.state !== 'clean')
 const statusLabel = computed(() =>
-  props.state === 'conflict' ? 'Missed incoming change' : 'Local edit',
+  props.state === 'conflict' ? 'Concurrent change' : 'Local edit',
 )
 const actionLabel = computed(() =>
   props.state === 'conflict' ? 'Take Theirs' : 'Revert',
@@ -112,7 +112,8 @@ onBeforeUnmount(() => {
         v-if="state === 'conflict' && previousServer !== undefined"
         class="field-state__copy"
       >
-        Server moved from {{ formatValue(previousServer) }} to
+        A newer saved value arrived while you were editing this field. Server
+        moved from {{ formatValue(previousServer) }} to
         {{ formatValue(serverValue) }}.
       </p>
       <p v-else class="field-state__copy">
