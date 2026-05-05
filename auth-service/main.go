@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+const globalDemoAccessCodeKey = "global-demo-access"
+
 // Build information, set via ldflags at build time
 var (
 	gitCommit = "unknown"
@@ -34,32 +36,28 @@ func logQuizSessions(kube kubeClient) {
 	}
 }
 
-func rotateJoinCodesForLiveSessions(kube kubeClient, codes *joinCodeStore) {
-	listCtx, listCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	sessions, err := kube.listQuizSessions(listCtx)
-	listCancel()
-	if err != nil {
-		log.Printf("join-code: failed to list sessions: %v", err)
+func rotateGlobalAccessCode(cfg config, codes *joinCodeStore, now time.Time) {
+	if strings.TrimSpace(cfg.DemoAccessCode) != "" {
 		return
 	}
-	now := time.Now()
-	for _, sess := range sessions {
-		ref := sessionRef{namespace: sess.Namespace, name: sess.Name}
-		var code string
-		if strings.TrimSpace(sess.State) == "live" {
-			var ok bool
-			code, ok = codes.rotateAndGet(sessionKey(ref), now)
-			if !ok {
-				continue
-			}
-			log.Printf("join-code: namespace=%s name=%s code=%s", sess.Namespace, sess.Name, code)
-		}
-		patchCtx, patchCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := kube.patchQuizSessionJoinCode(patchCtx, ref, code); err != nil {
-			log.Printf("join-code: failed to update status namespace=%s name=%s: %v", sess.Namespace, sess.Name, err)
-		}
-		patchCancel()
+	code, ok, created := codes.ensureActiveCode(globalDemoAccessCodeKey, now)
+	if !ok {
+		return
 	}
+	if created {
+		log.Printf("demo-access-code: code=%s ttl=%s", code, cfg.JoinCodeTTL)
+	}
+}
+
+func isValidDemoAccessCode(cfg config, codes *joinCodeStore, code string, now time.Time) bool {
+	normalized := normalizeJoinCode(code)
+	if normalized == "" {
+		return false
+	}
+	if staticCode := normalizeJoinCode(cfg.DemoAccessCode); staticCode != "" {
+		return normalized == staticCode
+	}
+	return codes.validate(globalDemoAccessCodeKey, normalized, now)
 }
 
 func main() {
@@ -95,18 +93,21 @@ func main() {
 
 	logQuizSessions(kube)
 	tokens := newTokenCache()
+	orders := newCoffeeRuntime()
+	changes := newCoffeeChangeRuntime(64)
 
-	// Trigger first token generation immediately at startup
-	rotateJoinCodesForLiveSessions(kube, codes)
-
-	// Then start periodic rotation
-	go func() {
-		ticker := time.NewTicker(cfg.JoinCodeRotate)
-		defer ticker.Stop()
-		for range ticker.C {
-			rotateJoinCodesForLiveSessions(kube, codes)
-		}
-	}()
+	rotateGlobalAccessCode(cfg, codes, time.Now())
+	if strings.TrimSpace(cfg.DemoAccessCode) != "" {
+		log.Printf("demo-access-code: using static code from DEMO_ACCESS_CODE")
+	} else {
+		go func() {
+			ticker := time.NewTicker(cfg.JoinCodeRotate)
+			defer ticker.Stop()
+			for range ticker.C {
+				rotateGlobalAccessCode(cfg, codes, time.Now())
+			}
+		}()
+	}
 
 	const tokenTTLSeconds int64 = 600 // Not allowed to make smaller tahn 10 minbutes?!
 	forwardSa := strings.TrimSpace(cfg.ForwardServiceAccount)
@@ -125,8 +126,11 @@ func main() {
 		cfg:           cfg,
 		codes:         codes,
 		kube:          kube,
+		orders:        orders,
+		changes:       changes,
 		sessionCookie: sessionCookie,
 		tokens:        tokens,
+		defaultNS:     kube.defaultNS,
 		forwardSaName: forwardSa,
 		forwardSaNS:   forwardSaNamespace,
 		tokenTTL:      tokenTTLSeconds,

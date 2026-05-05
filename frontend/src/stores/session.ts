@@ -1,72 +1,74 @@
 import { defineStore } from 'pinia'
 import type { QuizSession, SessionInfo } from '../api/types'
-import { getQuizSession, getSessionInfo } from '../api/kube'
+import { getQuizSession } from '../api/kube'
 
 type SessionState = {
-	byName: Record<
-		string,
-		{
-			status: 'idle' | 'loading' | 'ready' | 'error'
-			data?: QuizSession
-			error?: string
-			loadedAt?: number
-		}
-	>
-	currentInfo?: {
-		status: 'idle' | 'loading' | 'ready' | 'error'
-		data?: SessionInfo
-		error?: string
-		loadedAt?: number
-	}
+  byName: Record<
+    string,
+    {
+      status: 'idle' | 'loading' | 'ready' | 'error'
+      data?: QuizSession
+      error?: string
+      loadedAt?: number
+    }
+  >
+  currentInfo?: {
+    status: 'idle' | 'loading' | 'ready' | 'error'
+    data?: SessionInfo
+    error?: string
+    loadedAt?: number
+  }
 }
 
 export const useSessionStore = defineStore('session', {
-	state: (): SessionState => ({
-		byName: {},
-		currentInfo: { status: 'idle' },
-	}),
-	actions: {
-		async ensureLoaded(name: string, opts?: { joinCode?: string }) {
+  state: (): SessionState => ({
+    byName: {},
+    currentInfo: { status: 'idle' },
+  }),
+  actions: {
+    async ensureLoaded(name: string) {
       const existing = this.byName[name]
-      if (existing?.status === 'ready') return existing.data!
+      if (existing?.status === 'ready') {
+        return existing.data!
+      }
 
       this.byName[name] = {
         status: 'loading',
       }
 
       try {
-        const data = await getQuizSession(name, { joinCode: opts?.joinCode })
+        const data = await getQuizSession(name)
         this.byName[name] = {
           status: 'ready',
           data,
           loadedAt: Date.now(),
         }
         return data
-      } catch (e: any) {
+      } catch (error: any) {
         this.byName[name] = {
           status: 'error',
-          error: e?.message ?? 'Failed to load session',
+          error: error?.message ?? 'Failed to load session',
         }
-			throw e
-		}
-	},
-		async fetchSessionInfo(opts?: { joinCode?: string }) {
-			this.currentInfo = { status: 'loading' }
-			try {
-				const data = await getSessionInfo({ joinCode: opts?.joinCode })
-				this.currentInfo = {
-					status: 'ready',
-					data,
-					loadedAt: Date.now(),
-				}
-				return data
-			} catch (e: any) {
-				this.currentInfo = {
-					status: 'error',
-					error: e?.message ?? 'Failed to load session info',
-				}
-				throw e
-			}
-		},
-	},
+        throw error
+      }
+    },
+    setCurrentSession(name: string) {
+      const session = this.byName[name]?.data
+      if (!session) {
+        this.currentInfo = { status: 'idle' }
+        return
+      }
+
+      this.currentInfo = {
+        status: 'ready',
+        data: {
+          name,
+          namespace: session.metadata.namespace ?? '',
+          state: session.spec?.state,
+          title: session.spec?.title,
+        },
+        loadedAt: Date.now(),
+      }
+    },
+  },
 })

@@ -12,9 +12,12 @@ import (
 	"golang.org/x/sync/singleflight"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	k8swatch "k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -89,6 +92,9 @@ type kubeHandler interface {
 	requestToken(ctx context.Context, namespace, serviceAccount string, audiences []string, ttlSeconds int64) (string, time.Time, error)
 	getQuizSession(ctx context.Context, ref sessionRef) (quizSessionSpec, error)
 	reviewToken(ctx context.Context, token string) (authenticated bool, username string, err error)
+	getCoffeeConfig(ctx context.Context) (coffeeConfig, error)
+	patchCoffeeConfig(ctx context.Context, patch []byte) (coffeeConfig, error)
+	watchCoffeeConfig(ctx context.Context) (coffeeConfig, k8swatch.Interface, error)
 }
 
 type kubeClient struct {
@@ -96,6 +102,7 @@ type kubeClient struct {
 	dynamic      dynamic.Interface
 	defaultNS    string
 	sessionCache *quizSessionCache
+	coffeeName   string
 }
 
 const (
@@ -149,6 +156,7 @@ func loadKubeClient(cfg config) (kubeClient, error) {
 		dynamic:      dynamicClient,
 		defaultNS:    defaultNS,
 		sessionCache: newQuizSessionCache(),
+		coffeeName:   strings.TrimSpace(cfg.CoffeeConfigName),
 	}, nil
 }
 
@@ -315,6 +323,72 @@ func (c kubeClient) listQuizSessions(ctx context.Context) ([]quizSessionSummary,
 	}
 
 	return items, nil
+}
+
+func (c kubeClient) getCoffeeConfig(ctx context.Context) (coffeeConfig, error) {
+	if c.defaultNS == "" || c.coffeeName == "" {
+		return coffeeConfig{}, errors.New("coffee config name not configured in runtime namespace")
+	}
+
+	obj, err := c.dynamic.Resource(coffeeConfigGVR()).Namespace(c.defaultNS).Get(ctx, c.coffeeName, metav1.GetOptions{})
+	if err != nil {
+		return coffeeConfig{}, fmt.Errorf("failed to get coffee config: %w", err)
+	}
+	return toCoffeeConfig(obj)
+}
+
+func (c kubeClient) patchCoffeeConfig(ctx context.Context, patch []byte) (coffeeConfig, error) {
+	if c.defaultNS == "" || c.coffeeName == "" {
+		return coffeeConfig{}, errors.New("coffee config name not configured in runtime namespace")
+	}
+
+	obj, err := c.dynamic.Resource(coffeeConfigGVR()).Namespace(c.defaultNS).Patch(
+		ctx,
+		c.coffeeName,
+		types.MergePatchType,
+		patch,
+		metav1.PatchOptions{},
+	)
+	if err != nil {
+		return coffeeConfig{}, fmt.Errorf("failed to patch coffee config: %w", err)
+	}
+	return toCoffeeConfig(obj)
+}
+
+func (c kubeClient) watchCoffeeConfig(ctx context.Context) (coffeeConfig, k8swatch.Interface, error) {
+	current, err := c.getCoffeeConfig(ctx)
+	if err != nil {
+		return coffeeConfig{}, nil, err
+	}
+
+	watcher, err := c.dynamic.Resource(coffeeConfigGVR()).Namespace(c.defaultNS).Watch(ctx, metav1.ListOptions{
+		FieldSelector:   fields.OneTermEqualSelector("metadata.name", c.coffeeName).String(),
+		ResourceVersion: current.Metadata.ResourceVersion,
+	})
+	if err != nil {
+		return coffeeConfig{}, nil, fmt.Errorf("failed to watch coffee config: %w", err)
+	}
+
+	return current, watcher, nil
+}
+
+func coffeeConfigGVR() schema.GroupVersionResource {
+	return schema.GroupVersionResource{
+		Group:    "examples.configbutler.ai",
+		Version:  "v1alpha1",
+		Resource: "coffeeconfigs",
+	}
+}
+
+func toCoffeeConfig(obj *unstructured.Unstructured) (coffeeConfig, error) {
+	var out coffeeConfig
+	if obj == nil {
+		return out, errors.New("nil coffee config object")
+	}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &out); err != nil {
+		return out, fmt.Errorf("failed to decode coffee config: %w", err)
+	}
+	return out, nil
 }
 
 func detectNamespace() (string, error) {

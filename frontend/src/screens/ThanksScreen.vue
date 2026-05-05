@@ -1,23 +1,31 @@
 <script setup lang="ts">
-import AppShell from '../components/layout/AppShell.vue'
-import Card from 'primevue/card'
+import { computed } from 'vue'
+import { RouterLink } from 'vue-router'
+import { formatMoney } from '../api/coffee'
+import { useCartStore } from '../stores/cart'
+
+const cart = useCartStore()
+
+const order = computed(() => cart.lastOrder)
 </script>
 
 <template>
-  <AppShell title="Thanks">
-    <Card class="rounded-[var(--radius)]">
-      <template #content>
-        <div class="p-5">
-          <div class="space-y-3 text-center">
-            <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[rgba(0,214,255,0.18)]">
-              <div class="h-2.5 w-2.5 rounded-full bg-[rgb(var(--accent))]" />
-            </div>
-
-            <h1 class="text-2xl font-extrabold">Submitted</h1>
-            <p class="text-sm text-black/60">You can close this tab.</p>
-          </div>
-        </div>
-      </template>
-    </Card>
-  </AppShell>
+  <main class="page-shell page-shell--centered">
+    <section class="hero-card hero-card--compact">
+      <p class="eyebrow">Order confirmation</p>
+      <h1>{{ order?.status === 'placed' ? 'Coffee order placed' : 'Order finished' }}</h1>
+      <p class="hero-copy">
+        <template v-if="order">
+          {{ order.orderId }} for {{ formatMoney(order.currency, order.totalPriceCents) }}.
+        </template>
+        <template v-else>
+          Your last coffee order has finished processing.
+        </template>
+      </p>
+      <div class="hero-actions">
+        <RouterLink class="button" to="/">Order another coffee</RouterLink>
+        <RouterLink class="button button--secondary" to="/admin">Admin view</RouterLink>
+      </div>
+    </section>
+  </main>
 </template>

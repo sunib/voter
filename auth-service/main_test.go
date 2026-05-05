@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -10,6 +11,9 @@ import (
 
 	"net/http"
 	"net/http/httptest"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	k8swatch "k8s.io/apimachinery/pkg/watch"
 )
 
 func TestParseSessionRef(t *testing.T) {
@@ -163,6 +167,39 @@ func TestJoinCodeStoreResolveAndRotate(t *testing.T) {
 	}
 }
 
+func TestJoinCodeStoreEnsureActiveCodeReusesValidCode(t *testing.T) {
+	cfg := config{
+		JoinCodeTTL:    2 * time.Hour,
+		JoinCodeLength: 4,
+	}
+	store := newJoinCodeStore(cfg)
+	now := time.Now()
+
+	first, ok, created := store.ensureActiveCode(globalDemoAccessCodeKey, now)
+	if !ok || !created || first == "" {
+		t.Fatalf("expected first ensureActiveCode call to create a code")
+	}
+
+	second, ok, created := store.ensureActiveCode(globalDemoAccessCodeKey, now.Add(10*time.Second))
+	if !ok {
+		t.Fatalf("expected second ensureActiveCode call to succeed")
+	}
+	if created {
+		t.Fatalf("expected existing code to be reused while still valid")
+	}
+	if second != first {
+		t.Fatalf("expected same code to be reused, got %q want %q", second, first)
+	}
+
+	third, ok, created := store.ensureActiveCode(globalDemoAccessCodeKey, now.Add(2*time.Hour+time.Second))
+	if !ok || !created {
+		t.Fatalf("expected a new code after ttl expiry")
+	}
+	if third == first {
+		t.Fatalf("expected a fresh code after expiry")
+	}
+}
+
 type stubKubeClient struct {
 	mu                  sync.Mutex
 	calls               int
@@ -174,6 +211,11 @@ type stubKubeClient struct {
 	reviewAuthenticated bool
 	reviewUsername      string
 	reviewErr           error
+	coffeeConfig        coffeeConfig
+	patchResult         coffeeConfig
+	coffeeConfigErr     error
+	patchCoffeeErr      error
+	lastPatchBody       []byte
 }
 
 func (s *stubKubeClient) requestToken(_ context.Context, _, _ string, _ []string, _ int64) (string, time.Time, error) {
@@ -205,6 +247,85 @@ func (s *stubKubeClient) getQuizSession(_ context.Context, _ sessionRef) (quizSe
 
 func (s *stubKubeClient) reviewToken(_ context.Context, _ string) (bool, string, error) {
 	return s.reviewAuthenticated, s.reviewUsername, s.reviewErr
+}
+
+func (s *stubKubeClient) getCoffeeConfig(_ context.Context) (coffeeConfig, error) {
+	return s.coffeeConfig, s.coffeeConfigErr
+}
+
+func (s *stubKubeClient) patchCoffeeConfig(_ context.Context, patch []byte) (coffeeConfig, error) {
+	s.lastPatchBody = append([]byte(nil), patch...)
+	return s.patchResult, s.patchCoffeeErr
+}
+
+func (s *stubKubeClient) watchCoffeeConfig(_ context.Context) (coffeeConfig, k8swatch.Interface, error) {
+	return coffeeConfig{}, nil, errors.New("not implemented")
+}
+
+func TestCoffeeConfigFromWatchEventIgnoresBookmark(t *testing.T) {
+	event := k8swatch.Event{
+		Type: k8swatch.Bookmark,
+		Object: &unstructured.Unstructured{
+			Object: map[string]any{
+				"metadata": map[string]any{
+					"name":            "testnet-coffee",
+					"namespace":       "voter",
+					"resourceVersion": "123",
+				},
+			},
+		},
+	}
+
+	if _, ok := coffeeConfigFromWatchEvent(event); ok {
+		t.Fatalf("expected bookmark event to be ignored")
+	}
+}
+
+func TestCoffeeConfigFromWatchEventAcceptsModifiedConfig(t *testing.T) {
+	event := k8swatch.Event{
+		Type: k8swatch.Modified,
+		Object: &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "examples.configbutler.ai/v1alpha1",
+				"kind":       "CoffeeConfig",
+				"metadata": map[string]any{
+					"name":            "testnet-coffee",
+					"namespace":       "voter",
+					"generation":      int64(7),
+					"resourceVersion": "456",
+				},
+				"spec": map[string]any{
+					"shopName": "TestNet Coffee",
+					"currency": "EUR",
+					"products": []any{
+						map[string]any{
+							"sku":        "coffee-flat-white",
+							"name":       "Flat White",
+							"priceCents": int64(395),
+							"enabled":    true,
+						},
+					},
+					"vouchers": []any{},
+				},
+			},
+		},
+	}
+	cfg, ok := coffeeConfigFromWatchEvent(event)
+	if !ok {
+		t.Fatalf("expected modified event to decode")
+	}
+	if cfg.Metadata.ResourceVersion != "456" {
+		t.Fatalf("unexpected resourceVersion: got %q want %q", cfg.Metadata.ResourceVersion, "456")
+	}
+	if cfg.Metadata.Generation != 7 {
+		t.Fatalf("unexpected generation: got %d want %d", cfg.Metadata.Generation, 7)
+	}
+	if len(cfg.Spec.Products) != 1 {
+		t.Fatalf("unexpected products length: got %d want %d", len(cfg.Spec.Products), 1)
+	}
+	if cfg.Spec.Products[0].SKU != "coffee-flat-white" {
+		t.Fatalf("unexpected sku: got %q want %q", cfg.Spec.Products[0].SKU, "coffee-flat-white")
+	}
 }
 
 func TestTokenCacheRenewAfterExpiry(t *testing.T) {
@@ -386,10 +507,9 @@ func TestSessionCookieRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected securecookie error: %v", err)
 	}
 
-	ref := sessionRef{namespace: "voter", name: "kubecon-2026"}
 	now := time.Now()
 	resp := httptest.NewRecorder()
-	if err := setSessionCookie(resp, cfg, sc, ref, now); err != nil {
+	if err := setSessionCookie(resp, cfg, sc, "Alice", now); err != nil {
 		t.Fatalf("unexpected set cookie error: %v", err)
 	}
 
@@ -404,8 +524,8 @@ func TestSessionCookieRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected session cookie to decode")
 	}
-	if resolved.namespace != ref.namespace || resolved.name != ref.name {
-		t.Fatalf("unexpected ref: %v/%v", resolved.namespace, resolved.name)
+	if resolved.Nickname != "Alice" {
+		t.Fatalf("unexpected nickname: got %q want %q", resolved.Nickname, "Alice")
 	}
 
 	// Expired cookie should be rejected.
@@ -415,13 +535,205 @@ func TestSessionCookieRoundTrip(t *testing.T) {
 	}
 }
 
-func TestExtractJoinCodeFromForwardedURI(t *testing.T) {
+func TestRequireSessionMiddlewareUsesSharedCookie(t *testing.T) {
 	cfg := config{
-		JoinCodeRotate:    15 * time.Second,
-		JoinCodeTTL:       60 * time.Second,
-		JoinCodeLength:    4,
-		SessionCookieName: "auth_session",
-		CookieSecure:      false,
+		SessionCookieName:       "auth_session",
+		SessionCookieMaxAgeSecs: 60,
+		CookieSecure:            false,
+	}
+	hashKey, blockKey, err := generateCookieKeys()
+	if err != nil {
+		t.Fatalf("unexpected key error: %v", err)
+	}
+	sc, err := newSessionSecureCookie(hashKey, blockKey)
+	if err != nil {
+		t.Fatalf("unexpected securecookie error: %v", err)
+	}
+	resp := httptest.NewRecorder()
+	if err := setSessionCookie(resp, cfg, sc, "Alice", time.Now()); err != nil {
+		t.Fatalf("unexpected set cookie error: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "http://example.com/private/forward-auth-decision", nil)
+	for _, cookie := range resp.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
+
+	deps := handlerDeps{
+		cfg:           cfg,
+		sessionCookie: sc,
+	}
+
+	var gotSession sessionCookiePayload
+	next := func(w http.ResponseWriter, r *http.Request) {
+		gotSession, _ = getBrowserSession(r)
+		w.WriteHeader(http.StatusOK)
+	}
+
+	rec := httptest.NewRecorder()
+	requireSessionMiddleware(deps, next).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code: got %d, want %d", rec.Code, http.StatusOK)
+	}
+	if gotSession.Nickname != "Alice" {
+		t.Fatalf("unexpected nickname: got %q want %q", gotSession.Nickname, "Alice")
+	}
+}
+
+func TestPublicBuildInfoEndpoint(t *testing.T) {
+	previousCommit := gitCommit
+	previousDirty := gitDirty
+	previousBuildDate := buildDate
+	t.Cleanup(func() {
+		gitCommit = previousCommit
+		gitDirty = previousDirty
+		buildDate = previousBuildDate
+	})
+
+	gitCommit = "abc1234"
+	gitDirty = "1"
+	buildDate = "2026-05-05T08:30:00Z"
+
+	mux := http.NewServeMux()
+	registerHandlers(mux, handlerDeps{
+		kube: &stubKubeClient{},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "http://auth-service/public/build-info", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d want %d", rec.Code, http.StatusOK)
+	}
+
+	var payload publicBuildInfoResponse
+	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if payload.GitCommit != "abc1234" {
+		t.Fatalf("unexpected gitCommit: got %q want %q", payload.GitCommit, "abc1234")
+	}
+	if !payload.IsDirty {
+		t.Fatalf("expected dirty build flag to be true")
+	}
+	if payload.BuildDate != "2026-05-05T08:30:00Z" {
+		t.Fatalf("unexpected buildDate: got %q want %q", payload.BuildDate, "2026-05-05T08:30:00Z")
+	}
+	if payload.CommitWithDirty != "abc1234-dirty" {
+		t.Fatalf("unexpected commitWithDirty: got %q want %q", payload.CommitWithDirty, "abc1234-dirty")
+	}
+}
+
+func TestPublicLoginStoresNicknameAndSessionEndpointReturnsIt(t *testing.T) {
+	cfg := config{
+		SessionCookieName:       "auth_session",
+		SessionCookieMaxAgeSecs: 3600,
+		JoinCodeTTL:             2 * time.Hour,
+		JoinCodeLength:          4,
+		CookieSecure:            false,
+	}
+	store := newJoinCodeStore(cfg)
+	code, _ := store.rotateAndGet(globalDemoAccessCodeKey, time.Now())
+	hashKey, blockKey, err := generateCookieKeys()
+	if err != nil {
+		t.Fatalf("unexpected key error: %v", err)
+	}
+	sc, err := newSessionSecureCookie(hashKey, blockKey)
+	if err != nil {
+		t.Fatalf("unexpected securecookie error: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	registerHandlers(mux, handlerDeps{
+		cfg:           cfg,
+		codes:         store,
+		kube:          &stubKubeClient{},
+		sessionCookie: sc,
+		orders:        newCoffeeRuntime(),
+		changes:       newCoffeeChangeRuntime(8),
+	})
+
+	loginReq := httptest.NewRequest(http.MethodPost, "http://auth-service/public/login", strings.NewReader(`{"code":"`+code+`","nickname":"Alice"}`))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRec := httptest.NewRecorder()
+	mux.ServeHTTP(loginRec, loginReq)
+
+	if loginRec.Code != http.StatusNoContent {
+		t.Fatalf("unexpected login status: got %d want %d body=%q", loginRec.Code, http.StatusNoContent, loginRec.Body.String())
+	}
+
+	cookies := loginRec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatalf("expected session cookie to be set")
+	}
+
+	sessionReq := httptest.NewRequest(http.MethodGet, "http://auth-service/public/session", nil)
+	sessionReq.AddCookie(cookies[0])
+	sessionRec := httptest.NewRecorder()
+	mux.ServeHTTP(sessionRec, sessionReq)
+
+	if sessionRec.Code != http.StatusOK {
+		t.Fatalf("unexpected session status: got %d want %d body=%q", sessionRec.Code, http.StatusOK, sessionRec.Body.String())
+	}
+
+	var payload adminSessionResponse
+	if err := json.NewDecoder(sessionRec.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode admin session response: %v", err)
+	}
+	if payload.Nickname != "Alice" {
+		t.Fatalf("unexpected nickname: got %q want %q", payload.Nickname, "Alice")
+	}
+}
+
+func TestPublicLoginRequiresNickname(t *testing.T) {
+	cfg := config{
+		SessionCookieName:       "auth_session",
+		SessionCookieMaxAgeSecs: 3600,
+		JoinCodeTTL:             2 * time.Hour,
+		JoinCodeLength:          4,
+		CookieSecure:            false,
+	}
+	store := newJoinCodeStore(cfg)
+	code, _ := store.rotateAndGet(globalDemoAccessCodeKey, time.Now())
+	hashKey, blockKey, err := generateCookieKeys()
+	if err != nil {
+		t.Fatalf("unexpected key error: %v", err)
+	}
+	sc, err := newSessionSecureCookie(hashKey, blockKey)
+	if err != nil {
+		t.Fatalf("unexpected securecookie error: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	registerHandlers(mux, handlerDeps{
+		cfg:           cfg,
+		codes:         store,
+		kube:          &stubKubeClient{},
+		sessionCookie: sc,
+		orders:        newCoffeeRuntime(),
+		changes:       newCoffeeChangeRuntime(8),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "http://auth-service/public/login", strings.NewReader(`{"code":"`+code+`","nickname":"   "}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected status: got %d want %d body=%q", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestPublicLoginRequiresValidCode(t *testing.T) {
+	cfg := config{
+		SessionCookieName:       "auth_session",
+		SessionCookieMaxAgeSecs: 3600,
+		JoinCodeTTL:             2 * time.Hour,
+		JoinCodeLength:          4,
+		CookieSecure:            false,
 	}
 	store := newJoinCodeStore(cfg)
 	hashKey, blockKey, err := generateCookieKeys()
@@ -433,187 +745,97 @@ func TestExtractJoinCodeFromForwardedURI(t *testing.T) {
 		t.Fatalf("unexpected securecookie error: %v", err)
 	}
 
-	// Create a valid join code for "voter/kubecon-2026"
-	code, _ := store.rotateAndGet("voter/kubecon-2026", time.Now())
+	mux := http.NewServeMux()
+	registerHandlers(mux, handlerDeps{
+		cfg:           cfg,
+		codes:         store,
+		kube:          &stubKubeClient{},
+		sessionCookie: sc,
+		orders:        newCoffeeRuntime(),
+		changes:       newCoffeeChangeRuntime(8),
+	})
 
-	cases := []struct {
-		name           string
-		joinCodeHeader string
-		forwardedURI   string
-		requestURL     string
-		wantCode       int
-		wantSession    bool
-		wantViaCode    bool
-	}{
-		{
-			name:           "code in X-Forwarded-Uri query param",
-			joinCodeHeader: "",
-			forwardedURI:   "/voter/kubecon-2026?code=" + code,
-			requestURL:     "http://example.com/private/forward-auth-decision",
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
-		{
-			name:           "code in X-Forwarded-Uri with full URL",
-			joinCodeHeader: "",
-			forwardedURI:   "https://example.com/voter/kubecon-2026?code=" + code,
-			requestURL:     "http://example.com/private/forward-auth-decision",
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
-		{
-			name:           "code in X-Forwarded-Uri with other params",
-			joinCodeHeader: "",
-			forwardedURI:   "/voter/kubecon-2026?foo=bar&code=" + code + "&baz=qux",
-			requestURL:     "http://example.com/private/forward-auth-decision",
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
-		{
-			name:           "X-Join-Code header takes precedence",
-			joinCodeHeader: code,
-			forwardedURI:   "/voter/kubecon-2026?code=WRONG",
-			requestURL:     "http://example.com/private/forward-auth-decision",
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
-		{
-			name:           "invalid code in X-Forwarded-Uri",
-			joinCodeHeader: "",
-			forwardedURI:   "/voter/kubecon-2026?code=WRONG",
-			requestURL:     "http://example.com/private/forward-auth-decision",
-			wantCode:       403,
-			wantSession:    false,
-			wantViaCode:    false,
-		},
-		{
-			name:           "no code anywhere - missing session",
-			joinCodeHeader: "",
-			forwardedURI:   "/voter/kubecon-2026",
-			requestURL:     "http://example.com/private/forward-auth-decision",
-			wantCode:       401,
-			wantSession:    false,
-			wantViaCode:    false,
-		},
-		{
-			name:           "empty X-Forwarded-Uri",
-			joinCodeHeader: "",
-			forwardedURI:   "",
-			requestURL:     "http://example.com/private/forward-auth-decision",
-			wantCode:       401,
-			wantSession:    false,
-			wantViaCode:    false,
-		},
-		{
-			name:           "malformed X-Forwarded-Uri still works (no code)",
-			joinCodeHeader: "",
-			forwardedURI:   "://not-a-valid-url",
-			requestURL:     "http://example.com/private/forward-auth-decision",
-			wantCode:       401,
-			wantSession:    false,
-			wantViaCode:    false,
-		},
-		// Tests for direct request URL query parameter
-		{
-			name:           "code in request URL query param",
-			joinCodeHeader: "",
-			forwardedURI:   "",
-			requestURL:     "http://example.com/private/forward-auth-decision?code=" + code,
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
-		{
-			name:           "code in request URL with other params",
-			joinCodeHeader: "",
-			forwardedURI:   "",
-			requestURL:     "http://example.com/private/forward-auth-decision?foo=bar&code=" + code + "&baz=qux",
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
-		{
-			name:           "X-Forwarded-Uri takes precedence over request URL",
-			joinCodeHeader: "",
-			forwardedURI:   "/voter/kubecon-2026?code=" + code,
-			requestURL:     "http://example.com/private/forward-auth-decision?code=WRONG",
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
-		{
-			name:           "request URL code used when X-Forwarded-Uri has no code",
-			joinCodeHeader: "",
-			forwardedURI:   "/voter/kubecon-2026",
-			requestURL:     "http://example.com/private/forward-auth-decision?code=" + code,
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
-		{
-			name:           "invalid code in request URL",
-			joinCodeHeader: "",
-			forwardedURI:   "",
-			requestURL:     "http://example.com/private/forward-auth-decision?code=WRONG",
-			wantCode:       403,
-			wantSession:    false,
-			wantViaCode:    false,
-		},
-		{
-			name:           "X-Join-Code header takes precedence over request URL",
-			joinCodeHeader: code,
-			forwardedURI:   "",
-			requestURL:     "http://example.com/private/forward-auth-decision?code=WRONG",
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
+	req := httptest.NewRequest(http.MethodPost, "http://auth-service/public/login", strings.NewReader(`{"code":"WRONG","nickname":"Alice"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unexpected status: got %d want %d body=%q", rec.Code, http.StatusUnauthorized, rec.Body.String())
+	}
+}
+
+func TestAdminPatchUsesNicknameFromSessionCookie(t *testing.T) {
+	cfg := config{
+		SessionCookieName:       "auth_session",
+		SessionCookieMaxAgeSecs: 3600,
+		CookieSecure:            false,
+	}
+	hashKey, blockKey, err := generateCookieKeys()
+	if err != nil {
+		t.Fatalf("unexpected key error: %v", err)
+	}
+	sc, err := newSessionSecureCookie(hashKey, blockKey)
+	if err != nil {
+		t.Fatalf("unexpected securecookie error: %v", err)
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			deps := handlerDeps{
-				cfg:           cfg,
-				codes:         store,
-				sessionCookie: sc,
-			}
+	before := coffeeConfig{
+		Metadata: kubeObjectMeta{Generation: 7},
+		Spec: coffeeConfigSpec{
+			ShopName:   "TestNet Coffee",
+			BannerText: "Before",
+		},
+	}
+	after := before
+	after.Metadata.Generation = 8
+	after.Spec.BannerText = "After"
 
-			var gotRef sessionRef
-			var gotViaCode bool
-			next := func(w http.ResponseWriter, r *http.Request) {
-				gotRef, _ = getSessionRef(r)
-				gotViaCode = wasResolvedViaJoinCode(r)
-				w.WriteHeader(http.StatusOK)
-			}
+	stub := &stubKubeClient{
+		coffeeConfig: before,
+		patchResult:  after,
+	}
+	changes := newCoffeeChangeRuntime(8)
 
-			req := httptest.NewRequest("GET", tc.requestURL, nil)
-			if tc.joinCodeHeader != "" {
-				req.Header.Set("X-Join-Code", tc.joinCodeHeader)
-			}
-			if tc.forwardedURI != "" {
-				req.Header.Set("X-Forwarded-Uri", tc.forwardedURI)
-			}
+	mux := http.NewServeMux()
+	registerHandlers(mux, handlerDeps{
+		cfg:           cfg,
+		kube:          stub,
+		sessionCookie: sc,
+		orders:        newCoffeeRuntime(),
+		changes:       changes,
+	})
 
-			rec := httptest.NewRecorder()
-			requireSessionMiddleware(deps, next).ServeHTTP(rec, req)
+	cookieRec := httptest.NewRecorder()
+	if err := setSessionCookie(cookieRec, cfg, sc, "Alice", time.Now()); err != nil {
+		t.Fatalf("failed to set session cookie: %v", err)
+	}
+	cookies := cookieRec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatalf("expected session cookie")
+	}
 
-			if rec.Code != tc.wantCode {
-				t.Errorf("status code: got %d, want %d", rec.Code, tc.wantCode)
-			}
+	req := httptest.NewRequest(http.MethodPatch, "http://auth-service/public/admin/coffeeconfig", strings.NewReader(`{"spec":{"bannerText":"After"}}`))
+	req.Header.Set("Content-Type", "application/merge-patch+json")
+	req.Header.Set("X-Admin-Actor", "Mallory")
+	req.Header.Set("X-Change-Reason", "demo update")
+	req.AddCookie(cookies[0])
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
 
-			if tc.wantSession {
-				if gotRef.namespace != "voter" || gotRef.name != "kubecon-2026" {
-					t.Errorf("session ref: got %s/%s, want voter/kubecon-2026", gotRef.namespace, gotRef.name)
-				}
-				if gotViaCode != tc.wantViaCode {
-					t.Errorf("resolved via join code: got %v, want %v", gotViaCode, tc.wantViaCode)
-				}
-			}
-		})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected patch status: got %d want %d body=%q", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	snapshot := changes.snapshot()
+	if len(snapshot.Changes) != 1 {
+		t.Fatalf("unexpected change count: got %d want %d", len(snapshot.Changes), 1)
+	}
+	if snapshot.Changes[0].Actor != "Alice" {
+		t.Fatalf("unexpected actor: got %q want %q", snapshot.Changes[0].Actor, "Alice")
+	}
+	if snapshot.Changes[0].Reason != "demo update" {
+		t.Fatalf("unexpected reason: got %q want %q", snapshot.Changes[0].Reason, "demo update")
 	}
 }
 
@@ -714,16 +936,11 @@ func TestForwardAuthBearerPassthrough(t *testing.T) {
 
 func TestKubeconfigHandler(t *testing.T) {
 	cfg := config{
-		JoinCodeRotate:          15 * time.Second,
-		JoinCodeTTL:             60 * time.Second,
-		JoinCodeLength:          4,
 		SessionCookieName:       "auth_session",
 		SessionCookieMaxAgeSecs: 3600,
 		CookieSecure:            false,
 	}
-	store := newJoinCodeStore(cfg)
 	now := time.Now()
-	code, _ := store.rotateAndGet("voter/kubecon-2026", now)
 
 	hashKey, blockKey, err := generateCookieKeys()
 	if err != nil {
@@ -748,16 +965,16 @@ func TestKubeconfigHandler(t *testing.T) {
 		wantMissing    []string
 	}{
 		{
-			name:       "valid code returns kubeconfig",
+			name:       "valid session returns kubeconfig",
 			method:     http.MethodGet,
-			url:        "http://auth-service/public/kubeconfig?code=" + code,
+			url:        "http://auth-service/public/kubeconfig",
 			wantCode:   http.StatusOK,
 			wantInBody: []string{"kind: Config", "token: stub-token", "namespace: voter", "server: https://auth-service"},
 		},
 		{
 			name:           "server URL comes from X-Forwarded headers",
 			method:         http.MethodGet,
-			url:            "http://auth-service/public/kubeconfig?code=" + code,
+			url:            "http://auth-service/public/kubeconfig",
 			forwardedHost:  "voter.z65.nl",
 			forwardedProto: "https",
 			wantCode:       http.StatusOK,
@@ -771,23 +988,16 @@ func TestKubeconfigHandler(t *testing.T) {
 			wantMissing: []string{"kind: Config"},
 		},
 		{
-			name:        "invalid code returns 403",
-			method:      http.MethodGet,
-			url:         "http://auth-service/public/kubeconfig?code=ZZZZ",
-			wantCode:    http.StatusForbidden,
-			wantMissing: []string{"kind: Config"},
-		},
-		{
 			name:        "POST returns 405",
 			method:      http.MethodPost,
-			url:         "http://auth-service/public/kubeconfig?code=" + code,
+			url:         "http://auth-service/public/kubeconfig",
 			wantCode:    http.StatusMethodNotAllowed,
 			wantMissing: []string{"kind: Config"},
 		},
 		{
 			name:        "token request failure returns 500",
 			method:      http.MethodGet,
-			url:         "http://auth-service/public/kubeconfig?code=" + code,
+			url:         "http://auth-service/public/kubeconfig",
 			tokenErr:    errors.New("kube unavailable"),
 			wantCode:    http.StatusInternalServerError,
 			wantMissing: []string{"kind: Config"},
@@ -799,9 +1009,9 @@ func TestKubeconfigHandler(t *testing.T) {
 			stub := &stubKubeClient{token: "stub-token", exp: tokenExp, tokenErr: tc.tokenErr}
 			deps := handlerDeps{
 				cfg:           cfg,
-				codes:         store,
 				kube:          stub,
 				sessionCookie: sc,
+				defaultNS:     "voter",
 				forwardSaName: "quiz-access",
 				forwardSaNS:   "voter",
 				tokenTTL:      600,
@@ -816,6 +1026,15 @@ func TestKubeconfigHandler(t *testing.T) {
 			}
 			if tc.forwardedProto != "" {
 				req.Header.Set("X-Forwarded-Proto", tc.forwardedProto)
+			}
+			if tc.wantCode != http.StatusUnauthorized {
+				cookieRec := httptest.NewRecorder()
+				if err := setSessionCookie(cookieRec, cfg, sc, "Alice", now); err != nil {
+					t.Fatalf("failed to set session cookie: %v", err)
+				}
+				for _, cookie := range cookieRec.Result().Cookies() {
+					req.AddCookie(cookie)
+				}
 			}
 
 			rec := httptest.NewRecorder()

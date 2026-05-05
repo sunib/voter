@@ -22,10 +22,10 @@ const (
 )
 
 type sessionCookiePayload struct {
-	SessionKey string `json:"sessionKey"`
-	IssuedAt   int64  `json:"iat"`
-	ExpiresAt  int64  `json:"exp"`
-	Version    int    `json:"v"`
+	Nickname  string `json:"nickname"`
+	IssuedAt  int64  `json:"iat"`
+	ExpiresAt int64  `json:"exp"`
+	Version   int    `json:"v"`
 }
 
 func ensureSessionCookieKeys(ctx context.Context, kube kubeClient) ([]byte, []byte, error) {
@@ -91,15 +91,19 @@ func newSessionSecureCookie(hashKey, blockKey []byte) (*securecookie.SecureCooki
 	return sc, nil
 }
 
-func setSessionCookie(w http.ResponseWriter, cfg config, sc *securecookie.SecureCookie, ref sessionRef, now time.Time) error {
+func setSessionCookie(w http.ResponseWriter, cfg config, sc *securecookie.SecureCookie, nickname string, now time.Time) error {
 	if sc == nil {
 		return errors.New("secure cookie unavailable")
 	}
+	nickname, err := normalizeSessionNickname(nickname)
+	if err != nil {
+		return err
+	}
 	payload := sessionCookiePayload{
-		SessionKey: sessionKey(ref),
-		IssuedAt:   now.Unix(),
-		ExpiresAt:  now.Add(time.Duration(cfg.SessionCookieMaxAgeSecs) * time.Second).Unix(),
-		Version:    sessionCookieVersion,
+		Nickname:  nickname,
+		IssuedAt:  now.Unix(),
+		ExpiresAt: now.Add(time.Duration(cfg.SessionCookieMaxAgeSecs) * time.Second).Unix(),
+		Version:   sessionCookieVersion,
 	}
 	encoded, err := sc.Encode(cfg.SessionCookieName, payload)
 	if err != nil {
@@ -118,30 +122,35 @@ func setSessionCookie(w http.ResponseWriter, cfg config, sc *securecookie.Secure
 	return nil
 }
 
-func getSessionFromCookie(r *http.Request, cfg config, sc *securecookie.SecureCookie, now time.Time) (sessionRef, bool) {
+func getSessionFromCookie(r *http.Request, cfg config, sc *securecookie.SecureCookie, now time.Time) (sessionCookiePayload, bool) {
+	var zero sessionCookiePayload
 	if sc == nil {
-		return sessionRef{}, false
+		return zero, false
 	}
 	c, err := r.Cookie(cfg.SessionCookieName)
 	if err != nil {
-		return sessionRef{}, false
+		return zero, false
 	}
 	value := strings.TrimSpace(c.Value)
 	if value == "" {
-		return sessionRef{}, false
+		return zero, false
 	}
 	var payload sessionCookiePayload
 	if err := sc.Decode(cfg.SessionCookieName, value, &payload); err != nil {
-		return sessionRef{}, false
+		return zero, false
 	}
 	if payload.Version != sessionCookieVersion {
-		return sessionRef{}, false
+		return zero, false
 	}
 	if payload.ExpiresAt > 0 && now.Unix() > payload.ExpiresAt {
-		return sessionRef{}, false
+		return zero, false
 	}
-	ref, ok := parseSessionKey(payload.SessionKey)
-	return ref, ok
+	nickname, err := normalizeSessionNickname(payload.Nickname)
+	if err != nil {
+		return zero, false
+	}
+	payload.Nickname = nickname
+	return payload, true
 }
 
 func clearSessionCookie(w http.ResponseWriter, cfg config) {
@@ -155,4 +164,18 @@ func clearSessionCookie(w http.ResponseWriter, cfg config) {
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
 	})
+}
+
+const maxSessionNicknameLength = 40
+
+func normalizeSessionNickname(input string) (string, error) {
+	nickname := strings.TrimSpace(input)
+	switch {
+	case nickname == "":
+		return "", errors.New("nickname is required")
+	case len([]rune(nickname)) > maxSessionNicknameLength:
+		return "", fmt.Errorf("nickname must be %d characters or fewer", maxSessionNicknameLength)
+	default:
+		return nickname, nil
+	}
 }

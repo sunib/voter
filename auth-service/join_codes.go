@@ -67,6 +67,25 @@ func (s *joinCodeStore) rotateAndGet(sessionKey string, now time.Time) (string, 
 	return newCode, true
 }
 
+func (s *joinCodeStore) ensureActiveCode(sessionKey string, now time.Time) (string, bool, bool) {
+	if sessionKey == "" {
+		return "", false, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.pruneLocked(now)
+	entries := s.bySession[sessionKey]
+	if len(entries) > 0 {
+		return entries[len(entries)-1].code, true, false
+	}
+
+	newCode := s.generateUniqueLocked(now)
+	s.bySession[sessionKey] = append(s.bySession[sessionKey], joinCodeEntry{code: newCode, createdAt: now})
+	s.byCode[newCode] = joinCodeIndexEntry{sessionKey: sessionKey, createdAt: now}
+	return newCode, true, true
+}
+
 func (s *joinCodeStore) resolve(code string, now time.Time) (string, bool) {
 	normalized := normalizeJoinCode(code)
 	if normalized == "" {

@@ -1,8 +1,3 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: voter
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,7 +17,7 @@ spec:
         - name: zot-pull
       containers:
         - name: voter-frontend
-          image: zot.z65.nl/voter/frontend:latest
+          image: zot.z65.nl/voter/frontend:coffee
           imagePullPolicy: Always
           #env:
             #- name: KUBE_NAMESPACE   # This does not work since it's a SPA
@@ -73,7 +68,7 @@ spec:
         - name: zot-pull
       containers:
         - name: auth-service
-          image: zot.z65.nl/voter/auth-service:latest
+          image: zot.z65.nl/voter/auth-service:coffee
           imagePullPolicy: Always
           env:
             - name: FORWARD_SA
@@ -82,6 +77,10 @@ spec:
               value: voter
             - name: COOKIE_SECURE
               value: "true"
+            - name: ADMIN_PASSWORD
+              value: testnetcoffee
+            - name: COFFEE_CONFIG_NAME
+              value: testnet-coffee
           ports:
             - name: http
               containerPort: 8080
