@@ -1,23 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { getOrdersSnapshot, getPublicSession, watchOrders } from '../api/coffee'
 import AdminNav from '../components/admin/AdminNav.vue'
-import {
-  formatMoney,
-  getOrdersSnapshot,
-  getAdminSession,
-  loginAdmin,
-  watchOrders,
-  type ApiError,
-} from '../api/coffee'
 import type { CoffeeOrderRecord } from '../api/coffeeTypes'
+import { formatMoney, type ApiError } from '../api/coffee'
 
 const loading = ref(true)
-const authRequired = ref(false)
-const authError = ref('')
 const loadError = ref('')
 const adminNickname = ref('')
-const loginNickname = ref('')
-const password = ref('')
 const orders = ref<CoffeeOrderRecord[]>([])
 
 let orderSource: EventSource | undefined
@@ -29,20 +19,13 @@ async function loadAdminOrders() {
   loadError.value = ''
   try {
     const [session, snapshot] = await Promise.all([
-      getAdminSession(),
+      getPublicSession(),
       getOrdersSnapshot(),
     ])
     adminNickname.value = session.nickname
     orders.value = snapshot.orders
-    authRequired.value = false
   } catch (error) {
-    const apiError = error as ApiError
-    if (apiError.status === 401) {
-      authRequired.value = true
-      adminNickname.value = ''
-    } else {
-      loadError.value = apiError.message
-    }
+    loadError.value = (error as ApiError).message
   } finally {
     loading.value = false
   }
@@ -55,21 +38,9 @@ function openOrdersStream() {
   })
 }
 
-async function handleLogin() {
-  authError.value = ''
-  try {
-    await loginAdmin(password.value, loginNickname.value)
-    password.value = ''
-    await loadAdminOrders()
-    openOrdersStream()
-  } catch (error) {
-    authError.value = (error as Error).message
-  }
-}
-
 onMounted(async () => {
   await loadAdminOrders()
-  if (!authRequired.value) {
+  if (!loadError.value) {
     openOrdersStream()
   }
 })
@@ -93,38 +64,7 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section v-if="authRequired" class="panel admin-login">
-      <div class="section-heading">
-        <h2>Admin login</h2>
-        <p>
-          Enter the shared password and the nickname that should be attached to
-          this admin session.
-        </p>
-      </div>
-      <label class="field">
-        <span>Nickname</span>
-        <input
-          v-model="loginNickname"
-          type="text"
-          maxlength="40"
-          placeholder="Demo operator"
-        />
-      </label>
-      <label class="field">
-        <span>Password</span>
-        <input
-          v-model="password"
-          type="password"
-          placeholder="Shared password"
-        />
-      </label>
-      <div class="hero-actions">
-        <button class="button" @click="handleLogin">Unlock Admin</button>
-        <span v-if="authError" class="error-copy">{{ authError }}</span>
-      </div>
-    </section>
-
-    <section v-else-if="loading" class="panel">
+    <section v-if="loading" class="panel">
       <h2>Loading live orders…</h2>
     </section>
 

@@ -6,9 +6,8 @@ import {
   formatMoney,
   getAdminCoffeeConfig,
   getCoffeeConfigChangesSnapshot,
-  getAdminSession,
+  getPublicSession,
   getOrdersSnapshot,
-  loginAdmin,
   patchAdminCoffeeConfig,
   watchCoffeeConfig,
   watchCoffeeConfigChanges,
@@ -26,12 +25,8 @@ type FieldState = 'clean' | 'dirty' | 'conflict'
 
 const loading = ref(true)
 const saving = ref(false)
-const authRequired = ref(false)
-const authError = ref('')
 const loadError = ref('')
 const adminNickname = ref('')
-const loginNickname = ref('')
-const password = ref('')
 const changeReason = ref('')
 const serverConfig = ref<CoffeeConfig | null>(null)
 const draftConfig = ref<CoffeeConfig | null>(null)
@@ -88,7 +83,7 @@ async function loadAdminState() {
   loadError.value = ''
   try {
     const [session, config, snapshot, changesSnapshot] = await Promise.all([
-      getAdminSession(),
+      getPublicSession(),
       getAdminCoffeeConfig(),
       getOrdersSnapshot(),
       getCoffeeConfigChangesSnapshot(),
@@ -97,29 +92,10 @@ async function loadAdminState() {
     resetConfigState(config)
     voucherUsage.value = snapshot.voucherUsage
     recentChanges.value = changesSnapshot.changes
-    authRequired.value = false
   } catch (error) {
-    const apiError = error as ApiError
-    if (apiError.status === 401) {
-      authRequired.value = true
-      adminNickname.value = ''
-    } else {
-      loadError.value = apiError.message
-    }
+    loadError.value = (error as ApiError).message
   } finally {
     loading.value = false
-  }
-}
-
-async function handleLogin() {
-  authError.value = ''
-  try {
-    await loginAdmin(password.value, loginNickname.value)
-    password.value = ''
-    await loadAdminState()
-    openStreams()
-  } catch (error) {
-    authError.value = (error as Error).message
   }
 }
 
@@ -709,7 +685,7 @@ function formatEventTimestamp(value: string): string {
 
 onMounted(async () => {
   await loadAdminState()
-  if (!authRequired.value) {
+  if (!loadError.value) {
     openStreams()
   }
 })
@@ -736,38 +712,7 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section v-if="authRequired" class="panel admin-login">
-      <div class="section-heading">
-        <h2>Admin login</h2>
-        <p>
-          Enter the shared password and the nickname that should appear in the
-          change log for this admin session.
-        </p>
-      </div>
-      <label class="field">
-        <span>Nickname</span>
-        <input
-          v-model="loginNickname"
-          type="text"
-          maxlength="40"
-          placeholder="Demo operator"
-        />
-      </label>
-      <label class="field">
-        <span>Password</span>
-        <input
-          v-model="password"
-          type="password"
-          placeholder="Shared password"
-        />
-      </label>
-      <div class="hero-actions">
-        <button class="button" @click="handleLogin">Unlock Admin</button>
-        <span v-if="authError" class="error-copy">{{ authError }}</span>
-      </div>
-    </section>
-
-    <section v-else-if="loading" class="panel">
+    <section v-if="loading" class="panel">
       <h2>Loading admin state…</h2>
     </section>
 
@@ -1726,7 +1671,7 @@ onBeforeUnmount(() => {
             </div>
             <p class="metadata-copy recent-changes__intro">
               This list is kept in memory and resets when the pod restarts.
-              Actor names come from the current admin session nickname.
+              Actor names come from the shared demo session nickname.
             </p>
 
             <div v-if="recentChanges.length === 0" class="empty-state">

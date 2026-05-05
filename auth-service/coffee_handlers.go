@@ -3,38 +3,23 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/gorilla/securecookie"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8swatch "k8s.io/apimachinery/pkg/watch"
 )
-
-const (
-	adminCookieVersion     = 2
-	maxAdminNicknameLength = 40
-)
-
-type adminCookiePayload struct {
-	Authorized bool   `json:"authorized"`
-	Nickname   string `json:"nickname"`
-	IssuedAt   int64  `json:"iat"`
-	ExpiresAt  int64  `json:"exp"`
-	Version    int    `json:"v"`
-}
 
 type adminSessionResponse struct {
 	Nickname string `json:"nickname"`
 }
 
 func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
-	mux.HandleFunc("/public/storefront", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/public/storefront", requireSessionMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -49,17 +34,17 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 		}
 
 		writeJSON(w, http.StatusOK, buildStorefront(cfg, r.URL.Query().Get("voucher")))
-	})
+	}))
 
-	mux.HandleFunc("/public/storefront/watch", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/public/storefront/watch", requireSessionMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 		streamCoffeeConfigWatch(w, r, deps)
-	})
+	}))
 
-	mux.HandleFunc("/public/orders", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/public/orders", requireSessionMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -70,6 +55,11 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 			http.Error(w, "invalid order body", http.StatusBadRequest)
 			return
 		}
+		session, _ := getBrowserSession(r)
+		if req.Source == nil {
+			req.Source = map[string]string{}
+		}
+		req.Source["participantNickname"] = session.Nickname
 
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
@@ -101,41 +91,7 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 		}
 
 		writeJSON(w, statusCode, resp)
-	})
-
-	mux.HandleFunc("/public/admin/login", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		var body struct {
-			Password string `json:"password"`
-			Nickname string `json:"nickname"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			http.Error(w, "invalid login body", http.StatusBadRequest)
-			return
-		}
-
-		if body.Password != deps.cfg.AdminPassword {
-			clearAdminCookie(w, deps.cfg)
-			http.Error(w, "invalid admin password", http.StatusUnauthorized)
-			return
-		}
-
-		nickname, err := normalizeAdminNickname(body.Nickname)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		if err := setAdminCookie(w, deps.cfg, deps.sessionCookie, nickname, time.Now()); err != nil {
-			http.Error(w, "failed to create admin session", http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusNoContent)
-	})
+	}))
 
 	mux.HandleFunc("/public/admin/session", requireAdminMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -143,10 +99,10 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 			return
 		}
 
-		session, ok := getAdminSession(r, deps.cfg, deps.sessionCookie, time.Now())
+		session, ok := getBrowserSession(r)
 		if !ok {
-			clearAdminCookie(w, deps.cfg)
-			http.Error(w, "admin session required", http.StatusUnauthorized)
+			clearSessionCookie(w, deps.cfg)
+			http.Error(w, "session required", http.StatusUnauthorized)
 			return
 		}
 
@@ -190,7 +146,7 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 				return
 			}
 			if deps.changes != nil {
-				session, _ := getAdminSession(r, deps.cfg, deps.sessionCookie, time.Now())
+				session, _ := getBrowserSession(r)
 				deps.changes.record(newCoffeeConfigChange(
 					time.Now(),
 					current,
@@ -264,99 +220,7 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 }
 
 func requireAdminMiddleware(deps handlerDeps, next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !isAdminAuthenticated(r, deps.cfg, deps.sessionCookie, time.Now()) {
-			clearAdminCookie(w, deps.cfg)
-			http.Error(w, "admin session required", http.StatusUnauthorized)
-			return
-		}
-		next(w, r)
-	}
-}
-
-func setAdminCookie(w http.ResponseWriter, cfg config, sc *securecookie.SecureCookie, nickname string, now time.Time) error {
-	if sc == nil {
-		return errors.New("secure cookie unavailable")
-	}
-	payload := adminCookiePayload{
-		Authorized: true,
-		Nickname:   nickname,
-		IssuedAt:   now.Unix(),
-		ExpiresAt:  now.Add(time.Duration(cfg.AdminSessionMaxAgeSecs) * time.Second).Unix(),
-		Version:    adminCookieVersion,
-	}
-	encoded, err := sc.Encode(cfg.AdminCookieName, payload)
-	if err != nil {
-		return fmt.Errorf("failed to encode admin cookie: %w", err)
-	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     cfg.AdminCookieName,
-		Value:    encoded,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   cfg.CookieSecure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   cfg.AdminSessionMaxAgeSecs,
-		Expires:  now.Add(time.Duration(cfg.AdminSessionMaxAgeSecs) * time.Second),
-	})
-	return nil
-}
-
-func isAdminAuthenticated(r *http.Request, cfg config, sc *securecookie.SecureCookie, now time.Time) bool {
-	_, ok := getAdminSession(r, cfg, sc, now)
-	return ok
-}
-
-func getAdminSession(r *http.Request, cfg config, sc *securecookie.SecureCookie, now time.Time) (adminCookiePayload, bool) {
-	var zero adminCookiePayload
-	if sc == nil {
-		return zero, false
-	}
-	cookie, err := r.Cookie(cfg.AdminCookieName)
-	if err != nil || strings.TrimSpace(cookie.Value) == "" {
-		return zero, false
-	}
-
-	var payload adminCookiePayload
-	if err := sc.Decode(cfg.AdminCookieName, cookie.Value, &payload); err != nil {
-		return zero, false
-	}
-	if payload.Version != adminCookieVersion || !payload.Authorized {
-		return zero, false
-	}
-	if payload.ExpiresAt != 0 && now.Unix() > payload.ExpiresAt {
-		return zero, false
-	}
-	if _, err := normalizeAdminNickname(payload.Nickname); err != nil {
-		return zero, false
-	}
-	payload.Nickname = strings.TrimSpace(payload.Nickname)
-	return payload, true
-}
-
-func clearAdminCookie(w http.ResponseWriter, cfg config) {
-	http.SetCookie(w, &http.Cookie{
-		Name:     cfg.AdminCookieName,
-		Value:    "",
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   cfg.CookieSecure,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   -1,
-		Expires:  time.Unix(0, 0),
-	})
-}
-
-func normalizeAdminNickname(input string) (string, error) {
-	nickname := strings.TrimSpace(input)
-	switch {
-	case nickname == "":
-		return "", errors.New("nickname is required")
-	case len([]rune(nickname)) > maxAdminNicknameLength:
-		return "", fmt.Errorf("nickname must be %d characters or fewer", maxAdminNicknameLength)
-	default:
-		return nickname, nil
-	}
+	return requireSessionMiddleware(deps, next)
 }
 
 func streamCoffeeConfigWatch(w http.ResponseWriter, r *http.Request, deps handlerDeps) {

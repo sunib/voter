@@ -19,7 +19,7 @@ export type PublicBuildInfoResponse = {
   commitWithDirty: string
 }
 
-export type AdminSessionResponse = {
+export type PublicSessionResponse = {
   nickname: string
 }
 
@@ -89,17 +89,17 @@ export async function submitOrder(
   })
 }
 
-export async function loginAdmin(
-  password: string,
+export async function loginPublic(
   nickname: string,
+  code: string,
 ): Promise<void> {
-  const res = await fetch('/public/admin/login', {
+  const res = await fetch('/public/login', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
     },
     credentials: 'include',
-    body: JSON.stringify({ password, nickname }),
+    body: JSON.stringify({ nickname, code }),
   })
 
   if (!res.ok) {
@@ -107,8 +107,19 @@ export async function loginAdmin(
   }
 }
 
-export async function getAdminSession(): Promise<AdminSessionResponse> {
-  return await requestJson<AdminSessionResponse>('/public/admin/session')
+export async function getPublicSession(): Promise<PublicSessionResponse> {
+  return await requestJson<PublicSessionResponse>('/public/session')
+}
+
+export async function logoutPublic(): Promise<void> {
+  const res = await fetch('/public/logout', {
+    method: 'POST',
+    credentials: 'include',
+  })
+
+  if (!res.ok) {
+    throw createApiError(res.status, await readJsonOrText(res))
+  }
 }
 
 export async function getAdminCoffeeConfig(): Promise<CoffeeConfig> {

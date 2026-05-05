@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import AppShell from '../components/layout/AppShell.vue'
 import Card from 'primevue/card'
@@ -14,6 +14,7 @@ import { createQuizSubmission } from '../api/kube'
 
 const props = defineProps<{ session: string }>()
 
+const route = useRoute()
 const router = useRouter()
 const sessionStore = useSessionStore()
 const draft = useDraftSubmissionStore()
@@ -31,13 +32,11 @@ onMounted(async () => {
   draft.load(props.session)
   try {
     await sessionStore.ensureLoaded(props.session)
-    await sessionStore.fetchSessionInfo()
+    sessionStore.setCurrentSession(props.session)
   } catch (e: any) {
-    // If the device session is missing/expired, we expect 401/403.
-    // Redirect back to join so forwardAuth can bootstrap again.
     const status = e?.status
     if (status === 401 || status === 403) {
-      await router.replace({ name: 'join' })
+      await router.replace({ name: 'login', query: { next: route.fullPath } })
       return
     }
     loadError.value = e?.message ?? 'Failed to load session'
@@ -64,7 +63,7 @@ async function submit() {
   } catch (e: any) {
     const status = e?.status
     if (status === 401 || status === 403) {
-      await router.replace({ name: 'join' })
+      await router.replace({ name: 'login', query: { next: route.fullPath } })
       return
     }
     submitError.value = e?.message ?? 'Submit failed'
@@ -79,7 +78,9 @@ async function submit() {
     <div class="space-y-4">
       <div class="flex items-center justify-between">
         <SessionStateBanner :state="state" />
-        <div class="text-xs font-semibold text-black/55">{{ questions.length }} questions</div>
+        <div class="text-xs font-semibold text-black/55">
+          {{ questions.length }} questions
+        </div>
       </div>
 
       <Card v-if="loadError" class="rounded-[var(--radius)]">
@@ -97,7 +98,9 @@ async function submit() {
         <template #content>
           <div class="p-5">
             <div class="space-y-2">
-              <div class="text-xs font-bold tracking-[0.18em] text-black/55">LOADING</div>
+              <div class="text-xs font-bold tracking-[0.18em] text-black/55">
+                LOADING
+              </div>
               <div class="text-lg font-extrabold">Fetching questions…</div>
             </div>
           </div>
@@ -108,7 +111,10 @@ async function submit() {
         <template #content>
           <div class="p-5">
             <div class="space-y-10">
-              <div v-if="questions.length === 0" class="rounded-xl border border-black/10 bg-black/5 p-4 text-sm text-black/70">
+              <div
+                v-if="questions.length === 0"
+                class="rounded-xl border border-black/10 bg-black/5 p-4 text-sm text-black/70"
+              >
                 No questions configured yet.
               </div>
 
@@ -126,6 +132,11 @@ async function submit() {
       </Card>
     </div>
 
-    <SubmitBar :busy="busy" :disabled="!session" :error="submitError ?? undefined" @submit="submit" />
+    <SubmitBar
+      :busy="busy"
+      :disabled="!session"
+      :error="submitError ?? undefined"
+      @submit="submit"
+    />
   </AppShell>
 </template>

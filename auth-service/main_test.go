@@ -167,6 +167,39 @@ func TestJoinCodeStoreResolveAndRotate(t *testing.T) {
 	}
 }
 
+func TestJoinCodeStoreEnsureActiveCodeReusesValidCode(t *testing.T) {
+	cfg := config{
+		JoinCodeTTL:    2 * time.Hour,
+		JoinCodeLength: 4,
+	}
+	store := newJoinCodeStore(cfg)
+	now := time.Now()
+
+	first, ok, created := store.ensureActiveCode(globalDemoAccessCodeKey, now)
+	if !ok || !created || first == "" {
+		t.Fatalf("expected first ensureActiveCode call to create a code")
+	}
+
+	second, ok, created := store.ensureActiveCode(globalDemoAccessCodeKey, now.Add(10*time.Second))
+	if !ok {
+		t.Fatalf("expected second ensureActiveCode call to succeed")
+	}
+	if created {
+		t.Fatalf("expected existing code to be reused while still valid")
+	}
+	if second != first {
+		t.Fatalf("expected same code to be reused, got %q want %q", second, first)
+	}
+
+	third, ok, created := store.ensureActiveCode(globalDemoAccessCodeKey, now.Add(2*time.Hour+time.Second))
+	if !ok || !created {
+		t.Fatalf("expected a new code after ttl expiry")
+	}
+	if third == first {
+		t.Fatalf("expected a fresh code after expiry")
+	}
+}
+
 type stubKubeClient struct {
 	mu                  sync.Mutex
 	calls               int
@@ -474,10 +507,9 @@ func TestSessionCookieRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected securecookie error: %v", err)
 	}
 
-	ref := sessionRef{namespace: "voter", name: "kubecon-2026"}
 	now := time.Now()
 	resp := httptest.NewRecorder()
-	if err := setSessionCookie(resp, cfg, sc, ref, now); err != nil {
+	if err := setSessionCookie(resp, cfg, sc, "Alice", now); err != nil {
 		t.Fatalf("unexpected set cookie error: %v", err)
 	}
 
@@ -492,8 +524,8 @@ func TestSessionCookieRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected session cookie to decode")
 	}
-	if resolved.namespace != ref.namespace || resolved.name != ref.name {
-		t.Fatalf("unexpected ref: %v/%v", resolved.namespace, resolved.name)
+	if resolved.Nickname != "Alice" {
+		t.Fatalf("unexpected nickname: got %q want %q", resolved.Nickname, "Alice")
 	}
 
 	// Expired cookie should be rejected.
@@ -503,15 +535,12 @@ func TestSessionCookieRoundTrip(t *testing.T) {
 	}
 }
 
-func TestExtractJoinCodeFromForwardedURI(t *testing.T) {
+func TestRequireSessionMiddlewareUsesSharedCookie(t *testing.T) {
 	cfg := config{
-		JoinCodeRotate:    15 * time.Second,
-		JoinCodeTTL:       60 * time.Second,
-		JoinCodeLength:    4,
-		SessionCookieName: "auth_session",
-		CookieSecure:      false,
+		SessionCookieName:       "auth_session",
+		SessionCookieMaxAgeSecs: 60,
+		CookieSecure:            false,
 	}
-	store := newJoinCodeStore(cfg)
 	hashKey, blockKey, err := generateCookieKeys()
 	if err != nil {
 		t.Fatalf("unexpected key error: %v", err)
@@ -520,188 +549,35 @@ func TestExtractJoinCodeFromForwardedURI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected securecookie error: %v", err)
 	}
-
-	// Create a valid join code for "voter/kubecon-2026"
-	code, _ := store.rotateAndGet("voter/kubecon-2026", time.Now())
-
-	cases := []struct {
-		name           string
-		joinCodeHeader string
-		forwardedURI   string
-		requestURL     string
-		wantCode       int
-		wantSession    bool
-		wantViaCode    bool
-	}{
-		{
-			name:           "code in X-Forwarded-Uri query param",
-			joinCodeHeader: "",
-			forwardedURI:   "/voter/kubecon-2026?code=" + code,
-			requestURL:     "http://example.com/private/forward-auth-decision",
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
-		{
-			name:           "code in X-Forwarded-Uri with full URL",
-			joinCodeHeader: "",
-			forwardedURI:   "https://example.com/voter/kubecon-2026?code=" + code,
-			requestURL:     "http://example.com/private/forward-auth-decision",
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
-		{
-			name:           "code in X-Forwarded-Uri with other params",
-			joinCodeHeader: "",
-			forwardedURI:   "/voter/kubecon-2026?foo=bar&code=" + code + "&baz=qux",
-			requestURL:     "http://example.com/private/forward-auth-decision",
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
-		{
-			name:           "X-Join-Code header takes precedence",
-			joinCodeHeader: code,
-			forwardedURI:   "/voter/kubecon-2026?code=WRONG",
-			requestURL:     "http://example.com/private/forward-auth-decision",
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
-		{
-			name:           "invalid code in X-Forwarded-Uri",
-			joinCodeHeader: "",
-			forwardedURI:   "/voter/kubecon-2026?code=WRONG",
-			requestURL:     "http://example.com/private/forward-auth-decision",
-			wantCode:       403,
-			wantSession:    false,
-			wantViaCode:    false,
-		},
-		{
-			name:           "no code anywhere - missing session",
-			joinCodeHeader: "",
-			forwardedURI:   "/voter/kubecon-2026",
-			requestURL:     "http://example.com/private/forward-auth-decision",
-			wantCode:       401,
-			wantSession:    false,
-			wantViaCode:    false,
-		},
-		{
-			name:           "empty X-Forwarded-Uri",
-			joinCodeHeader: "",
-			forwardedURI:   "",
-			requestURL:     "http://example.com/private/forward-auth-decision",
-			wantCode:       401,
-			wantSession:    false,
-			wantViaCode:    false,
-		},
-		{
-			name:           "malformed X-Forwarded-Uri still works (no code)",
-			joinCodeHeader: "",
-			forwardedURI:   "://not-a-valid-url",
-			requestURL:     "http://example.com/private/forward-auth-decision",
-			wantCode:       401,
-			wantSession:    false,
-			wantViaCode:    false,
-		},
-		// Tests for direct request URL query parameter
-		{
-			name:           "code in request URL query param",
-			joinCodeHeader: "",
-			forwardedURI:   "",
-			requestURL:     "http://example.com/private/forward-auth-decision?code=" + code,
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
-		{
-			name:           "code in request URL with other params",
-			joinCodeHeader: "",
-			forwardedURI:   "",
-			requestURL:     "http://example.com/private/forward-auth-decision?foo=bar&code=" + code + "&baz=qux",
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
-		{
-			name:           "X-Forwarded-Uri takes precedence over request URL",
-			joinCodeHeader: "",
-			forwardedURI:   "/voter/kubecon-2026?code=" + code,
-			requestURL:     "http://example.com/private/forward-auth-decision?code=WRONG",
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
-		{
-			name:           "request URL code used when X-Forwarded-Uri has no code",
-			joinCodeHeader: "",
-			forwardedURI:   "/voter/kubecon-2026",
-			requestURL:     "http://example.com/private/forward-auth-decision?code=" + code,
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
-		{
-			name:           "invalid code in request URL",
-			joinCodeHeader: "",
-			forwardedURI:   "",
-			requestURL:     "http://example.com/private/forward-auth-decision?code=WRONG",
-			wantCode:       403,
-			wantSession:    false,
-			wantViaCode:    false,
-		},
-		{
-			name:           "X-Join-Code header takes precedence over request URL",
-			joinCodeHeader: code,
-			forwardedURI:   "",
-			requestURL:     "http://example.com/private/forward-auth-decision?code=WRONG",
-			wantCode:       200,
-			wantSession:    true,
-			wantViaCode:    true,
-		},
+	resp := httptest.NewRecorder()
+	if err := setSessionCookie(resp, cfg, sc, "Alice", time.Now()); err != nil {
+		t.Fatalf("unexpected set cookie error: %v", err)
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			deps := handlerDeps{
-				cfg:           cfg,
-				codes:         store,
-				sessionCookie: sc,
-			}
+	req := httptest.NewRequest("GET", "http://example.com/private/forward-auth-decision", nil)
+	for _, cookie := range resp.Result().Cookies() {
+		req.AddCookie(cookie)
+	}
 
-			var gotRef sessionRef
-			var gotViaCode bool
-			next := func(w http.ResponseWriter, r *http.Request) {
-				gotRef, _ = getSessionRef(r)
-				gotViaCode = wasResolvedViaJoinCode(r)
-				w.WriteHeader(http.StatusOK)
-			}
+	deps := handlerDeps{
+		cfg:           cfg,
+		sessionCookie: sc,
+	}
 
-			req := httptest.NewRequest("GET", tc.requestURL, nil)
-			if tc.joinCodeHeader != "" {
-				req.Header.Set("X-Join-Code", tc.joinCodeHeader)
-			}
-			if tc.forwardedURI != "" {
-				req.Header.Set("X-Forwarded-Uri", tc.forwardedURI)
-			}
+	var gotSession sessionCookiePayload
+	next := func(w http.ResponseWriter, r *http.Request) {
+		gotSession, _ = getBrowserSession(r)
+		w.WriteHeader(http.StatusOK)
+	}
 
-			rec := httptest.NewRecorder()
-			requireSessionMiddleware(deps, next).ServeHTTP(rec, req)
+	rec := httptest.NewRecorder()
+	requireSessionMiddleware(deps, next).ServeHTTP(rec, req)
 
-			if rec.Code != tc.wantCode {
-				t.Errorf("status code: got %d, want %d", rec.Code, tc.wantCode)
-			}
-
-			if tc.wantSession {
-				if gotRef.namespace != "voter" || gotRef.name != "kubecon-2026" {
-					t.Errorf("session ref: got %s/%s, want voter/kubecon-2026", gotRef.namespace, gotRef.name)
-				}
-				if gotViaCode != tc.wantViaCode {
-					t.Errorf("resolved via join code: got %v, want %v", gotViaCode, tc.wantViaCode)
-				}
-			}
-		})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status code: got %d, want %d", rec.Code, http.StatusOK)
+	}
+	if gotSession.Nickname != "Alice" {
+		t.Fatalf("unexpected nickname: got %q want %q", gotSession.Nickname, "Alice")
 	}
 }
 
@@ -751,13 +627,16 @@ func TestPublicBuildInfoEndpoint(t *testing.T) {
 	}
 }
 
-func TestAdminLoginStoresNicknameAndSessionEndpointReturnsIt(t *testing.T) {
+func TestPublicLoginStoresNicknameAndSessionEndpointReturnsIt(t *testing.T) {
 	cfg := config{
-		AdminPassword:          "secret-demo-password",
-		AdminCookieName:        "admin_session",
-		AdminSessionMaxAgeSecs: 3600,
-		CookieSecure:           false,
+		SessionCookieName:       "auth_session",
+		SessionCookieMaxAgeSecs: 3600,
+		JoinCodeTTL:             2 * time.Hour,
+		JoinCodeLength:          4,
+		CookieSecure:            false,
 	}
+	store := newJoinCodeStore(cfg)
+	code, _ := store.rotateAndGet(globalDemoAccessCodeKey, time.Now())
 	hashKey, blockKey, err := generateCookieKeys()
 	if err != nil {
 		t.Fatalf("unexpected key error: %v", err)
@@ -770,13 +649,14 @@ func TestAdminLoginStoresNicknameAndSessionEndpointReturnsIt(t *testing.T) {
 	mux := http.NewServeMux()
 	registerHandlers(mux, handlerDeps{
 		cfg:           cfg,
+		codes:         store,
 		kube:          &stubKubeClient{},
 		sessionCookie: sc,
 		orders:        newCoffeeRuntime(),
 		changes:       newCoffeeChangeRuntime(8),
 	})
 
-	loginReq := httptest.NewRequest(http.MethodPost, "http://auth-service/public/admin/login", strings.NewReader(`{"password":"secret-demo-password","nickname":"Alice"}`))
+	loginReq := httptest.NewRequest(http.MethodPost, "http://auth-service/public/login", strings.NewReader(`{"code":"`+code+`","nickname":"Alice"}`))
 	loginReq.Header.Set("Content-Type", "application/json")
 	loginRec := httptest.NewRecorder()
 	mux.ServeHTTP(loginRec, loginReq)
@@ -787,10 +667,10 @@ func TestAdminLoginStoresNicknameAndSessionEndpointReturnsIt(t *testing.T) {
 
 	cookies := loginRec.Result().Cookies()
 	if len(cookies) == 0 {
-		t.Fatalf("expected admin session cookie to be set")
+		t.Fatalf("expected session cookie to be set")
 	}
 
-	sessionReq := httptest.NewRequest(http.MethodGet, "http://auth-service/public/admin/session", nil)
+	sessionReq := httptest.NewRequest(http.MethodGet, "http://auth-service/public/session", nil)
 	sessionReq.AddCookie(cookies[0])
 	sessionRec := httptest.NewRecorder()
 	mux.ServeHTTP(sessionRec, sessionReq)
@@ -808,13 +688,16 @@ func TestAdminLoginStoresNicknameAndSessionEndpointReturnsIt(t *testing.T) {
 	}
 }
 
-func TestAdminLoginRequiresNickname(t *testing.T) {
+func TestPublicLoginRequiresNickname(t *testing.T) {
 	cfg := config{
-		AdminPassword:          "secret-demo-password",
-		AdminCookieName:        "admin_session",
-		AdminSessionMaxAgeSecs: 3600,
-		CookieSecure:           false,
+		SessionCookieName:       "auth_session",
+		SessionCookieMaxAgeSecs: 3600,
+		JoinCodeTTL:             2 * time.Hour,
+		JoinCodeLength:          4,
+		CookieSecure:            false,
 	}
+	store := newJoinCodeStore(cfg)
+	code, _ := store.rotateAndGet(globalDemoAccessCodeKey, time.Now())
 	hashKey, blockKey, err := generateCookieKeys()
 	if err != nil {
 		t.Fatalf("unexpected key error: %v", err)
@@ -827,13 +710,14 @@ func TestAdminLoginRequiresNickname(t *testing.T) {
 	mux := http.NewServeMux()
 	registerHandlers(mux, handlerDeps{
 		cfg:           cfg,
+		codes:         store,
 		kube:          &stubKubeClient{},
 		sessionCookie: sc,
 		orders:        newCoffeeRuntime(),
 		changes:       newCoffeeChangeRuntime(8),
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "http://auth-service/public/admin/login", strings.NewReader(`{"password":"secret-demo-password","nickname":"   "}`))
+	req := httptest.NewRequest(http.MethodPost, "http://auth-service/public/login", strings.NewReader(`{"code":"`+code+`","nickname":"   "}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -843,11 +727,49 @@ func TestAdminLoginRequiresNickname(t *testing.T) {
 	}
 }
 
+func TestPublicLoginRequiresValidCode(t *testing.T) {
+	cfg := config{
+		SessionCookieName:       "auth_session",
+		SessionCookieMaxAgeSecs: 3600,
+		JoinCodeTTL:             2 * time.Hour,
+		JoinCodeLength:          4,
+		CookieSecure:            false,
+	}
+	store := newJoinCodeStore(cfg)
+	hashKey, blockKey, err := generateCookieKeys()
+	if err != nil {
+		t.Fatalf("unexpected key error: %v", err)
+	}
+	sc, err := newSessionSecureCookie(hashKey, blockKey)
+	if err != nil {
+		t.Fatalf("unexpected securecookie error: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	registerHandlers(mux, handlerDeps{
+		cfg:           cfg,
+		codes:         store,
+		kube:          &stubKubeClient{},
+		sessionCookie: sc,
+		orders:        newCoffeeRuntime(),
+		changes:       newCoffeeChangeRuntime(8),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "http://auth-service/public/login", strings.NewReader(`{"code":"WRONG","nickname":"Alice"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unexpected status: got %d want %d body=%q", rec.Code, http.StatusUnauthorized, rec.Body.String())
+	}
+}
+
 func TestAdminPatchUsesNicknameFromSessionCookie(t *testing.T) {
 	cfg := config{
-		AdminCookieName:        "admin_session",
-		AdminSessionMaxAgeSecs: 3600,
-		CookieSecure:           false,
+		SessionCookieName:       "auth_session",
+		SessionCookieMaxAgeSecs: 3600,
+		CookieSecure:            false,
 	}
 	hashKey, blockKey, err := generateCookieKeys()
 	if err != nil {
@@ -885,12 +807,12 @@ func TestAdminPatchUsesNicknameFromSessionCookie(t *testing.T) {
 	})
 
 	cookieRec := httptest.NewRecorder()
-	if err := setAdminCookie(cookieRec, cfg, sc, "Alice", time.Now()); err != nil {
-		t.Fatalf("failed to set admin cookie: %v", err)
+	if err := setSessionCookie(cookieRec, cfg, sc, "Alice", time.Now()); err != nil {
+		t.Fatalf("failed to set session cookie: %v", err)
 	}
 	cookies := cookieRec.Result().Cookies()
 	if len(cookies) == 0 {
-		t.Fatalf("expected admin cookie")
+		t.Fatalf("expected session cookie")
 	}
 
 	req := httptest.NewRequest(http.MethodPatch, "http://auth-service/public/admin/coffeeconfig", strings.NewReader(`{"spec":{"bannerText":"After"}}`))
@@ -1014,16 +936,11 @@ func TestForwardAuthBearerPassthrough(t *testing.T) {
 
 func TestKubeconfigHandler(t *testing.T) {
 	cfg := config{
-		JoinCodeRotate:          15 * time.Second,
-		JoinCodeTTL:             60 * time.Second,
-		JoinCodeLength:          4,
 		SessionCookieName:       "auth_session",
 		SessionCookieMaxAgeSecs: 3600,
 		CookieSecure:            false,
 	}
-	store := newJoinCodeStore(cfg)
 	now := time.Now()
-	code, _ := store.rotateAndGet("voter/kubecon-2026", now)
 
 	hashKey, blockKey, err := generateCookieKeys()
 	if err != nil {
@@ -1048,16 +965,16 @@ func TestKubeconfigHandler(t *testing.T) {
 		wantMissing    []string
 	}{
 		{
-			name:       "valid code returns kubeconfig",
+			name:       "valid session returns kubeconfig",
 			method:     http.MethodGet,
-			url:        "http://auth-service/public/kubeconfig?code=" + code,
+			url:        "http://auth-service/public/kubeconfig",
 			wantCode:   http.StatusOK,
 			wantInBody: []string{"kind: Config", "token: stub-token", "namespace: voter", "server: https://auth-service"},
 		},
 		{
 			name:           "server URL comes from X-Forwarded headers",
 			method:         http.MethodGet,
-			url:            "http://auth-service/public/kubeconfig?code=" + code,
+			url:            "http://auth-service/public/kubeconfig",
 			forwardedHost:  "voter.z65.nl",
 			forwardedProto: "https",
 			wantCode:       http.StatusOK,
@@ -1071,23 +988,16 @@ func TestKubeconfigHandler(t *testing.T) {
 			wantMissing: []string{"kind: Config"},
 		},
 		{
-			name:        "invalid code returns 403",
-			method:      http.MethodGet,
-			url:         "http://auth-service/public/kubeconfig?code=ZZZZ",
-			wantCode:    http.StatusForbidden,
-			wantMissing: []string{"kind: Config"},
-		},
-		{
 			name:        "POST returns 405",
 			method:      http.MethodPost,
-			url:         "http://auth-service/public/kubeconfig?code=" + code,
+			url:         "http://auth-service/public/kubeconfig",
 			wantCode:    http.StatusMethodNotAllowed,
 			wantMissing: []string{"kind: Config"},
 		},
 		{
 			name:        "token request failure returns 500",
 			method:      http.MethodGet,
-			url:         "http://auth-service/public/kubeconfig?code=" + code,
+			url:         "http://auth-service/public/kubeconfig",
 			tokenErr:    errors.New("kube unavailable"),
 			wantCode:    http.StatusInternalServerError,
 			wantMissing: []string{"kind: Config"},
@@ -1099,9 +1009,9 @@ func TestKubeconfigHandler(t *testing.T) {
 			stub := &stubKubeClient{token: "stub-token", exp: tokenExp, tokenErr: tc.tokenErr}
 			deps := handlerDeps{
 				cfg:           cfg,
-				codes:         store,
 				kube:          stub,
 				sessionCookie: sc,
+				defaultNS:     "voter",
 				forwardSaName: "quiz-access",
 				forwardSaNS:   "voter",
 				tokenTTL:      600,
@@ -1116,6 +1026,15 @@ func TestKubeconfigHandler(t *testing.T) {
 			}
 			if tc.forwardedProto != "" {
 				req.Header.Set("X-Forwarded-Proto", tc.forwardedProto)
+			}
+			if tc.wantCode != http.StatusUnauthorized {
+				cookieRec := httptest.NewRecorder()
+				if err := setSessionCookie(cookieRec, cfg, sc, "Alice", now); err != nil {
+					t.Fatalf("failed to set session cookie: %v", err)
+				}
+				for _, cookie := range cookieRec.Result().Cookies() {
+					req.AddCookie(cookie)
+				}
 			}
 
 			rec := httptest.NewRecorder()

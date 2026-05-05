@@ -42,6 +42,7 @@ type handlerDeps struct {
 	changes       *coffeeChangeRuntime
 	sessionCookie *securecookie.SecureCookie
 	tokens        *tokenCache
+	defaultNS     string
 	forwardSaName string
 	forwardSaNS   string
 	tokenTTL      int64
@@ -49,6 +50,64 @@ type handlerDeps struct {
 
 func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 	registerCoffeeHandlers(mux, deps)
+
+	mux.HandleFunc("/public/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var body struct {
+			Nickname string `json:"nickname"`
+			Code     string `json:"code"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid login body", http.StatusBadRequest)
+			return
+		}
+
+		nickname, err := normalizeSessionNickname(body.Nickname)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if !isValidDemoAccessCode(deps.cfg, deps.codes, body.Code, time.Now()) {
+			clearSessionCookie(w, deps.cfg)
+			http.Error(w, "invalid access code", http.StatusUnauthorized)
+			return
+		}
+		if err := setSessionCookie(w, deps.cfg, deps.sessionCookie, nickname, time.Now()); err != nil {
+			http.Error(w, "failed to create session", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	mux.HandleFunc("/public/session", requireSessionMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		session, ok := getBrowserSession(r)
+		if !ok {
+			clearSessionCookie(w, deps.cfg)
+			http.Error(w, "session required", http.StatusUnauthorized)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{
+			"nickname": session.Nickname,
+		})
+	}))
+
+	mux.HandleFunc("/public/logout", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		clearSessionCookie(w, deps.cfg)
+		w.WriteHeader(http.StatusNoContent)
+	})
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -76,28 +135,29 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 	})
 
 	mux.HandleFunc("/public/session-info", requireSessionMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
-		ref, _ := getSessionRef(r)
-		now := time.Now()
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		name := strings.TrimSpace(r.URL.Query().Get("session"))
+		if name == "" {
+			http.Error(w, "session query parameter is required", http.StatusBadRequest)
+			return
+		}
+
+		namespace := deps.defaultNS
+		if namespace == "" {
+			namespace = "default"
+		}
+		ref := sessionRef{namespace: namespace, name: name}
 
 		ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 		defer cancel()
 		sess, err := deps.kube.getQuizSession(ctx, ref)
 		if err != nil {
-			clearSessionCookie(w, deps.cfg)
 			http.Error(w, "session lookup failed", http.StatusForbidden)
 			return
-		}
-		if strings.TrimSpace(sess.Spec.State) != "live" {
-			clearSessionCookie(w, deps.cfg)
-			http.Error(w, "session not live", http.StatusForbidden)
-			return
-		}
-
-		// Set/refresh session cookie if join code was used
-		if wasResolvedViaJoinCode(r) && deps.sessionCookie != nil {
-			if err := setSessionCookie(w, deps.cfg, deps.sessionCookie, ref, now); err != nil {
-				log.Printf("cookie: failed to set session cookie: %v", err)
-			}
 		}
 
 		payload := map[string]string{
@@ -114,7 +174,7 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 	// Traefik forwardAuth endpoint.
 	// Two paths:
 	//   1. Bearer token already present (kubectl with kubeconfig) → pass it straight through to K8s.
-	//   2. No bearer token (browser) → resolve session via join code / cookie and mint a short-lived token.
+	//   2. No bearer token (browser) → require the shared demo session and mint a short-lived token.
 	mux.HandleFunc("/private/forward-auth-decision", func(w http.ResponseWriter, r *http.Request) {
 		// Path 1: kubectl / direct API access — request carries a bearer token from the kubeconfig.
 		// Validate it via TokenReview before forwarding; don't blindly pass through arbitrary tokens.
@@ -140,7 +200,7 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			return
 		}
 
-		// Path 2: browser flow — require a session (join code or cookie) and mint a token.
+		// Path 2: browser flow — require the shared session and mint a token.
 		requireSessionMiddleware(deps, func(w http.ResponseWriter, r *http.Request) {
 			forwardedURI := r.Header.Get("X-Forwarded-Uri")
 			if forwardedURI == "" {
@@ -156,29 +216,9 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 
 			log.Printf("forward-auth-decision: %s X-Forwarded-Uri=%s ip=%s ua=%q", forwardedMethod, forwardedURI, clientIP(r), r.UserAgent())
 
-			// So we want to limit what it can create: the name should be limited
-			// Check it here
-			// Leave it to kube-api-server -> feels dangerous, but is it?
-			// Can we create a special resource to make create explicit for a 'regex' name?
-
-			ref, _ := getSessionRef(r)
 			now := time.Now()
-			// Check forwarded URI matches session (if present)
-			// Should we even do this? You could also leave it the KubeAPI server?
-			if uriRef, hasRef := parseSessionRef(forwardedURI); hasRef && uriRef != ref {
-				http.Error(w, "You are not authorized for this resource", http.StatusForbidden)
-				return
-			}
 
-			// Long story short: it's better to give a unique namespace... Then it also makes sense to limit that on url level...
-			// And we should be able to create a namespace during this process?
-			// But can I watch for changes without a namespace?
-
-			// So there is two ways to get the audit logging right:
-			// "Trusted authenticator": you pass headers to kube-api-server and it will just trust that we did our job right (dangerous but powerfull)
-			// "Impersonating authenticator": you pass an extra header and ask the kube-api-server to impersonate (you need "Impersonate" rights to do that and the logs will show both the auths service account and the impersonated account in a seperate column)
-
-			// Get forwarding token (using session reference as cache key)
+			// All browser sessions now share the same short-lived forwarding token.
 			const skew = 20 * time.Second
 			tokenToUse, err := getOrRequestToken(deps.tokens, deps.kube, "shared", now, skew, deps.forwardSaNS, deps.forwardSaName, nil, deps.tokenTTL, r.Context())
 			if err != nil {
@@ -190,16 +230,11 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			w.Header().Set("Authorization", fmt.Sprintf("Bearer %s", tokenToUse))
 			w.Header().Set("X-Auth-Forwarder", "ok")
 			w.WriteHeader(http.StatusOK)
-
-			// We can also make this a bit bigger and then allow them to write in a single namespace... -> but keep it limited to that and actually review what they did with a LLM!
-			// And only then we bring the data into a bigger set... -> Let's see what people try to do?
-
-			// It becomes more acceptable: but still is a liability, should I have 'default' patterns for allowing people to self create? Could also limit the amount of resources that you create at once?
 		})(w, r)
 	})
 
 	// Returns a ready-to-use kubeconfig for kubectl access.
-	// Accepts a join code (?code=XXXX) or an existing session cookie — same as all other /public/ endpoints.
+	// Requires the shared demo session cookie.
 	//
 	// Usage (one-liner for the talk):
 	//   export KUBECONFIG=<(curl -s "https://<host>/auth/kubeconfig?code=XXXX")
@@ -210,8 +245,11 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			return
 		}
 
-		ref, _ := getSessionRef(r)
-		log.Printf("kubeconfig: minting token for session=%s/%s ip=%s", ref.namespace, ref.name, clientIP(r))
+		namespace := deps.defaultNS
+		if namespace == "" {
+			namespace = "default"
+		}
+		log.Printf("kubeconfig: minting token for namespace=%s ip=%s", namespace, clientIP(r))
 
 		ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 		defer cancel()
@@ -237,7 +275,7 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 		if err := kubeconfigTmpl.Execute(&buf, kubeconfigData{
 			ServerURL: serverURL,
 			Token:     token,
-			Namespace: ref.namespace,
+			Namespace: namespace,
 			ExpiresAt: expiresAt.UTC().Format(time.RFC3339),
 		}); err != nil {
 			log.Printf("kubeconfig: template execution failed: %v", err)
