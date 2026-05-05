@@ -1,4 +1,4 @@
-.PHONY: build-auth-service test-auth-service debug-auth-service build-push-auth-service build-push-frontend build-push
+.PHONY: build-auth-service test-auth-service debug-auth-service frontend-dev-remote frontend-dev-remote-https build-push-auth-service build-push-frontend build-push
 
 login:
 	docker login zot.z65.nl -u admin
@@ -9,6 +9,12 @@ build-auth-service:
 
 test-auth-service:
 	cd auth-service && go test ./...
+
+frontend-dev-remote:
+	cd frontend && VITE_DEV_API_ORIGIN=https://voter.z65.nl npm run dev
+
+frontend-dev-remote-https:
+	cd frontend && VITE_DEV_API_ORIGIN=https://voter.z65.nl VITE_DEV_HTTPS=1 npm run dev -- --host
 
 build-push-auth-service:
 	docker buildx build --push \
