@@ -1,10 +1,12 @@
 package main
 
 type kubeObjectMeta struct {
-	Name            string            `json:"name,omitempty"`
-	Namespace       string            `json:"namespace,omitempty"`
-	ResourceVersion string            `json:"resourceVersion,omitempty"`
-	Labels          map[string]string `json:"labels,omitempty"`
+	Name              string            `json:"name,omitempty"`
+	Namespace         string            `json:"namespace,omitempty"`
+	Generation        int64             `json:"generation,omitempty"`
+	ResourceVersion   string            `json:"resourceVersion,omitempty"`
+	CreationTimestamp string            `json:"creationTimestamp,omitempty"`
+	Labels            map[string]string `json:"labels,omitempty"`
 }
 
 type secretKeyRef struct {

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import AdminNav from '../components/admin/AdminNav.vue'
 import FieldStateMarker from '../components/admin/FieldStateMarker.vue'
+import { getBuildAgeLabel, parseBuildTimestamp } from '../buildInfo'
 import {
   formatMoney,
   getAdminCoffeeConfig,
@@ -28,6 +29,8 @@ const authError = ref('')
 const loadError = ref('')
 const password = ref('')
 const changeReason = ref('')
+const now = ref(Date.now())
+const currentConfigSeenAt = ref<number | null>(null)
 const serverConfig = ref<CoffeeConfig | null>(null)
 const draftConfig = ref<CoffeeConfig | null>(null)
 const voucherUsage = ref<Record<string, number>>({})
@@ -38,6 +41,7 @@ const arrayFieldInputs = ref<Record<string, string>>({})
 
 let configSource: EventSource | undefined
 let orderSource: EventSource | undefined
+let adminClockTimer: ReturnType<typeof window.setInterval> | undefined
 const flashTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 const currency = computed(() => draftConfig.value?.spec.currency ?? 'EUR')
@@ -74,6 +78,19 @@ const saveButtonLabel = computed(() => {
     return 'No Changes to Save'
   }
   return `Save ${dirtyFieldCount.value} Change${dirtyFieldCount.value === 1 ? '' : 's'}`
+})
+const configCreationTimestamp = computed(() =>
+  parseBuildTimestamp(draftConfig.value?.metadata?.creationTimestamp ?? ''),
+)
+const configCreatedAge = computed(() =>
+  getBuildAgeLabel(configCreationTimestamp.value, now.value),
+)
+const configSeenAge = computed(() =>
+  getBuildAgeLabel(currentConfigSeenAt.value, now.value),
+)
+const configCreatedLabel = computed(() => {
+  const raw = draftConfig.value?.metadata?.creationTimestamp
+  return raw ? new Date(raw).toLocaleString() : 'unknown'
 })
 
 async function loadAdminState() {
@@ -234,6 +251,7 @@ function resetConfigState(config: CoffeeConfig) {
   const cloned = cloneConfig(config)
   serverConfig.value = cloneConfig(cloned)
   draftConfig.value = cloned
+  currentConfigSeenAt.value = Date.now()
   changeReason.value = ''
   dirtyPaths.value = {}
   conflicts.value = {}
@@ -255,6 +273,7 @@ function applyIncomingConfig(config: CoffeeConfig) {
     incoming,
   ) as CoffeeConfig
   serverConfig.value = incoming
+  currentConfigSeenAt.value = Date.now()
 }
 
 function reconcileValue(
@@ -671,6 +690,9 @@ function humanizePath(path: string): string {
 }
 
 onMounted(async () => {
+  adminClockTimer = window.setInterval(() => {
+    now.value = Date.now()
+  }, 60000)
   await loadAdminState()
   if (!authRequired.value) {
     openStreams()
@@ -680,6 +702,9 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   configSource?.close()
   orderSource?.close()
+  if (adminClockTimer !== undefined) {
+    window.clearInterval(adminClockTimer)
+  }
   clearAllFlashes()
 })
 </script>
@@ -736,6 +761,25 @@ onBeforeUnmount(() => {
             <h2>Storefront config</h2>
           </div>
 
+          <div class="config-meta">
+            <span class="config-meta__item">
+              <strong>Generation</strong>
+              <code>{{ draftConfig.metadata?.generation ?? 'unknown' }}</code>
+            </span>
+            <span class="config-meta__item">
+              <strong>Version</strong>
+              <code>{{ draftConfig.metadata?.resourceVersion ?? 'unknown' }}</code>
+            </span>
+            <span class="config-meta__item" :title="configCreatedLabel">
+              <strong>Created</strong>
+              <span>{{ configCreatedAge }}</span>
+            </span>
+            <span class="config-meta__item">
+              <strong>Seen here</strong>
+              <span>{{ configSeenAge }}</span>
+            </span>
+          </div>
+
           <div class="form-grid">
             <label :class="fieldClasses('spec.shopName')">
               <div class="field__heading">
@@ -750,9 +794,14 @@ onBeforeUnmount(() => {
                 />
               </div>
               <input
-                v-model="draftConfig.spec.shopName"
+                :value="getTextField('spec.shopName')"
                 type="text"
-                @input="refreshFieldState('spec.shopName')"
+                @input="
+                  updateField(
+                    'spec.shopName',
+                    ($event.target as HTMLInputElement).value,
+                  )
+                "
               />
             </label>
             <label :class="fieldClasses('spec.currency')">
@@ -768,9 +817,14 @@ onBeforeUnmount(() => {
                 />
               </div>
               <input
-                v-model="draftConfig.spec.currency"
+                :value="getTextField('spec.currency')"
                 type="text"
-                @input="refreshFieldState('spec.currency')"
+                @input="
+                  updateField(
+                    'spec.currency',
+                    ($event.target as HTMLInputElement).value,
+                  )
+                "
               />
             </label>
           </div>
@@ -788,9 +842,14 @@ onBeforeUnmount(() => {
               />
             </div>
             <textarea
-              v-model="draftConfig.spec.bannerText"
+              :value="getTextField('spec.bannerText')"
               rows="3"
-              @input="refreshFieldState('spec.bannerText')"
+              @input="
+                updateField(
+                  'spec.bannerText',
+                  ($event.target as HTMLTextAreaElement).value,
+                )
+              "
             />
           </label>
 
@@ -831,9 +890,14 @@ onBeforeUnmount(() => {
                     />
                   </div>
                   <input
-                    v-model="product.sku"
+                    :value="getTextField(`spec.products.${index}.sku`)"
                     type="text"
-                    @input="refreshFieldState(`spec.products.${index}.sku`)"
+                    @input="
+                      updateField(
+                        `spec.products.${index}.sku`,
+                        ($event.target as HTMLInputElement).value,
+                      )
+                    "
                   />
                 </label>
                 <label :class="fieldClasses(`spec.products.${index}.name`)">
@@ -1571,22 +1635,30 @@ onBeforeUnmount(() => {
                         entry.state === 'conflict'
                           ? 'Concurrent change'
                           : 'Edited'
-                      }}
-                    </span>
+                        }}
+                      </span>
+                    </div>
+                    <p v-if="entry.state === 'conflict'" class="metadata-copy">
+                      <span class="save-summary__change">
+                        Server
+                        <s>{{ formatConflictValue(entry.previousServer) }}</s>
+                        <span aria-hidden="true">→</span>
+                        <span>{{ formatConflictValue(entry.serverValue) }}</span>
+                      </span>
+                      <span class="save-summary__change">
+                        Yours
+                        <span>{{ formatConflictValue(entry.draftValue) }}</span>
+                      </span>
+                    </p>
+                    <p v-else class="metadata-copy">
+                      <span class="save-summary__change">
+                        <s>{{ formatConflictValue(entry.serverValue) }}</s>
+                        <span aria-hidden="true">→</span>
+                        <span>{{ formatConflictValue(entry.draftValue) }}</span>
+                      </span>
+                    </p>
                   </div>
-                  <p v-if="entry.state === 'conflict'" class="metadata-copy">
-                    Server changed from
-                    {{ formatConflictValue(entry.previousServer) }} to
-                    {{ formatConflictValue(entry.serverValue) }}. Saving keeps
-                    your value {{ formatConflictValue(entry.draftValue) }}.
-                  </p>
-                  <p v-else class="metadata-copy">
-                    Saving writes {{ formatConflictValue(entry.draftValue) }}.
-                    Current server value is
-                    {{ formatConflictValue(entry.serverValue) }}.
-                  </p>
-                </div>
-                <button
+                  <button
                   class="button button--ghost"
                   @click="applyServerValue(entry.path)"
                 >
@@ -1596,7 +1668,10 @@ onBeforeUnmount(() => {
             </ul>
 
             <div class="save-summary__meta metadata-copy">
-              <label class="field save-summary__reason">
+              <label
+                v-if="dirtyFieldCount > 0"
+                class="field save-summary__reason"
+              >
                 <span>Why are you making this change?</span>
                 <textarea
                   v-model="changeReason"
@@ -1604,10 +1679,6 @@ onBeforeUnmount(() => {
                   placeholder="Optional for now. Add a short note so people understand what changed and why."
                 />
               </label>
-              <div>
-                Resource version
-                {{ draftConfig.metadata?.resourceVersion ?? 'unknown' }}
-              </div>
               <div>
                 {{ cleanDirtyCount }} edit(s) and {{ conflictCount }} missed
                 incoming change(s) in this save.

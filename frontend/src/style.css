@@ -192,6 +192,32 @@ p {
   margin-top: 1.3rem;
 }
 
+.config-meta {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: -0.1rem 0 1rem;
+}
+
+.config-meta__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.38rem 0.72rem;
+  border-radius: 999px;
+  background: rgba(var(--line), 0.05);
+  color: rgb(var(--muted));
+  font-size: 0.76rem;
+  letter-spacing: 0.03em;
+}
+
+.config-meta__item strong {
+  color: rgb(var(--ink));
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
 .product-grid,
 .stack-list {
   display: grid;
@@ -586,6 +612,17 @@ p {
 .save-summary__meta {
   display: grid;
   gap: 0.35rem;
+}
+
+.save-summary__change {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+.save-summary__change s {
+  opacity: 0.75;
 }
 
 .save-summary__reason textarea {

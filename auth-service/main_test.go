@@ -252,6 +252,7 @@ func TestCoffeeConfigFromWatchEventAcceptsModifiedConfig(t *testing.T) {
 				"metadata": map[string]any{
 					"name":            "testnet-coffee",
 					"namespace":       "voter",
+					"generation":      int64(7),
 					"resourceVersion": "456",
 				},
 				"spec": map[string]any{
@@ -277,6 +278,9 @@ func TestCoffeeConfigFromWatchEventAcceptsModifiedConfig(t *testing.T) {
 	}
 	if cfg.Metadata.ResourceVersion != "456" {
 		t.Fatalf("unexpected resourceVersion: got %q want %q", cfg.Metadata.ResourceVersion, "456")
+	}
+	if cfg.Metadata.Generation != 7 {
+		t.Fatalf("unexpected generation: got %d want %d", cfg.Metadata.Generation, 7)
 	}
 	if len(cfg.Spec.Products) != 1 {
 		t.Fatalf("unexpected products length: got %d want %d", len(cfg.Spec.Products), 1)
