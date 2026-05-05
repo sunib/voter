@@ -5,14 +5,17 @@ import FieldStateMarker from '../components/admin/FieldStateMarker.vue'
 import {
   formatMoney,
   getAdminCoffeeConfig,
+  getCoffeeConfigChangesSnapshot,
+  getAdminSession,
   getOrdersSnapshot,
   loginAdmin,
   patchAdminCoffeeConfig,
   watchCoffeeConfig,
+  watchCoffeeConfigChanges,
   watchOrders,
   type ApiError,
 } from '../api/coffee'
-import type { CoffeeConfig } from '../api/coffeeTypes'
+import type { CoffeeConfig, CoffeeConfigChangeRecord } from '../api/coffeeTypes'
 
 type FieldConflict = {
   previousServer: unknown
@@ -26,11 +29,14 @@ const saving = ref(false)
 const authRequired = ref(false)
 const authError = ref('')
 const loadError = ref('')
+const adminNickname = ref('')
+const loginNickname = ref('')
 const password = ref('')
 const changeReason = ref('')
 const serverConfig = ref<CoffeeConfig | null>(null)
 const draftConfig = ref<CoffeeConfig | null>(null)
 const voucherUsage = ref<Record<string, number>>({})
+const recentChanges = ref<CoffeeConfigChangeRecord[]>([])
 const dirtyPaths = ref<Record<string, true>>({})
 const flashedPaths = ref<Record<string, true>>({})
 const conflicts = ref<Record<string, FieldConflict>>({})
@@ -38,6 +44,7 @@ const arrayFieldInputs = ref<Record<string, string>>({})
 
 let configSource: EventSource | undefined
 let orderSource: EventSource | undefined
+let changeSource: EventSource | undefined
 const flashTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 const currency = computed(() => draftConfig.value?.spec.currency ?? 'EUR')
@@ -80,17 +87,22 @@ async function loadAdminState() {
   loading.value = true
   loadError.value = ''
   try {
-    const [config, snapshot] = await Promise.all([
+    const [session, config, snapshot, changesSnapshot] = await Promise.all([
+      getAdminSession(),
       getAdminCoffeeConfig(),
       getOrdersSnapshot(),
+      getCoffeeConfigChangesSnapshot(),
     ])
+    adminNickname.value = session.nickname
     resetConfigState(config)
     voucherUsage.value = snapshot.voucherUsage
+    recentChanges.value = changesSnapshot.changes
     authRequired.value = false
   } catch (error) {
     const apiError = error as ApiError
     if (apiError.status === 401) {
       authRequired.value = true
+      adminNickname.value = ''
     } else {
       loadError.value = apiError.message
     }
@@ -102,7 +114,7 @@ async function loadAdminState() {
 async function handleLogin() {
   authError.value = ''
   try {
-    await loginAdmin(password.value)
+    await loginAdmin(password.value, loginNickname.value)
     password.value = ''
     await loadAdminState()
     openStreams()
@@ -118,11 +130,14 @@ async function saveConfig() {
   saving.value = true
   loadError.value = ''
   try {
-    // Reserved for a future save-note flow; optional and not sent yet.
-    void changeReason.value
-    const updated = await patchAdminCoffeeConfig({
-      spec: draftConfig.value.spec,
-    })
+    const updated = await patchAdminCoffeeConfig(
+      {
+        spec: draftConfig.value.spec,
+      },
+      {
+        reason: changeReason.value,
+      },
+    )
     resetConfigState(updated)
   } catch (error) {
     loadError.value = (error as Error).message
@@ -134,6 +149,7 @@ async function saveConfig() {
 function openStreams() {
   configSource?.close()
   orderSource?.close()
+  changeSource?.close()
 
   configSource = watchCoffeeConfig(
     '/public/admin/coffeeconfig/watch',
@@ -150,6 +166,13 @@ function openStreams() {
         [key]: (voucherUsage.value[key] ?? 0) + 1,
       }
     }
+  })
+
+  changeSource = watchCoffeeConfigChanges((event) => {
+    recentChanges.value = [
+      event,
+      ...recentChanges.value.filter((entry) => entry.id !== event.id),
+    ].slice(0, 24)
   })
 }
 
@@ -670,6 +693,20 @@ function humanizePath(path: string): string {
     .replace(/\./g, ' / ')
 }
 
+function formatEventTimestamp(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(date)
+}
+
 onMounted(async () => {
   await loadAdminState()
   if (!authRequired.value) {
@@ -680,6 +717,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   configSource?.close()
   orderSource?.close()
+  changeSource?.close()
   clearAllFlashes()
 })
 </script>
@@ -700,12 +738,21 @@ onBeforeUnmount(() => {
 
     <section v-if="authRequired" class="panel admin-login">
       <div class="section-heading">
-        <h2>Admin password</h2>
+        <h2>Admin login</h2>
         <p>
-          First cut only. The backend sets an admin session cookie after
-          verification.
+          Enter the shared password and the nickname that should appear in the
+          change log for this admin session.
         </p>
       </div>
+      <label class="field">
+        <span>Nickname</span>
+        <input
+          v-model="loginNickname"
+          type="text"
+          maxlength="40"
+          placeholder="Demo operator"
+        />
+      </label>
       <label class="field">
         <span>Password</span>
         <input
@@ -1536,68 +1583,68 @@ onBeforeUnmount(() => {
               />
             </label>
           </div>
-
         </article>
 
-        <article class="panel admin-sidebar">
-          <section class="save-summary">
-            <div class="save-summary__header">
-              <div class="save-summary__copy">
-                <p class="eyebrow">Review and save</p>
-                <h3>
-                  {{
-                    dirtyFieldCount === 0
-                      ? 'No pending changes'
-                      : `${dirtyFieldCount} change(s) ready to save`
-                  }}
-                </h3>
-                <p class="metadata-copy">
-                  <template v-if="dirtyFieldCount === 0"
-                    >The current form matches the latest watched
-                    config.</template
-                  >
-                  <template v-else-if="conflictCount === 0">
-                    Yellow dots are local edits. Saving writes your changes into
-                    the watched config.
-                  </template>
-                  <template v-else>
-                    Yellow dots save local edits. Red dots mean a newer server
-                    value arrived; saving now keeps your changes and overwrites
-                    that newer value unless you take theirs first.
-                  </template>
-                </p>
-              </div>
-            </div>
-
-            <ul
-              v-if="dirtySummaryEntries.length > 0"
-              class="save-summary__list"
-            >
-              <li
-                v-for="entry in dirtySummaryEntries"
-                :key="entry.path"
-                class="save-summary__item"
-                :class="
-                  entry.state === 'conflict'
-                    ? 'save-summary__item--conflict'
-                    : 'save-summary__item--dirty'
-                "
-              >
-                <div class="save-summary__item-copy">
-                  <div class="save-summary__item-row">
-                    <strong>{{ entry.label }}</strong>
-                    <span
-                      class="pill"
-                      :class="
-                        entry.state === 'conflict'
-                          ? 'pill--danger'
-                          : 'pill--warning'
-                      "
+        <div class="admin-sidebar admin-sidebar-stack">
+          <article class="panel">
+            <section class="save-summary">
+              <div class="save-summary__header">
+                <div class="save-summary__copy">
+                  <p class="eyebrow">Review and save</p>
+                  <h3>
+                    {{
+                      dirtyFieldCount === 0
+                        ? 'No pending changes'
+                        : `${dirtyFieldCount} change(s) ready to save`
+                    }}
+                  </h3>
+                  <p class="metadata-copy">
+                    <template v-if="dirtyFieldCount === 0"
+                      >The current form matches the latest watched
+                      config.</template
                     >
-                      {{
-                        entry.state === 'conflict'
-                          ? 'Concurrent change'
-                          : 'Edited'
+                    <template v-else-if="conflictCount === 0">
+                      Yellow dots are local edits. Saving writes your changes
+                      into the watched config.
+                    </template>
+                    <template v-else>
+                      Yellow dots save local edits. Red dots mean a newer server
+                      value arrived; saving now keeps your changes and
+                      overwrites that newer value unless you take theirs first.
+                    </template>
+                  </p>
+                </div>
+              </div>
+
+              <ul
+                v-if="dirtySummaryEntries.length > 0"
+                class="save-summary__list"
+              >
+                <li
+                  v-for="entry in dirtySummaryEntries"
+                  :key="entry.path"
+                  class="save-summary__item"
+                  :class="
+                    entry.state === 'conflict'
+                      ? 'save-summary__item--conflict'
+                      : 'save-summary__item--dirty'
+                  "
+                >
+                  <div class="save-summary__item-copy">
+                    <div class="save-summary__item-row">
+                      <strong>{{ entry.label }}</strong>
+                      <span
+                        class="pill"
+                        :class="
+                          entry.state === 'conflict'
+                            ? 'pill--danger'
+                            : 'pill--warning'
+                        "
+                      >
+                        {{
+                          entry.state === 'conflict'
+                            ? 'Concurrent change'
+                            : 'Edited'
                         }}
                       </span>
                     </div>
@@ -1606,7 +1653,9 @@ onBeforeUnmount(() => {
                         Server
                         <s>{{ formatConflictValue(entry.previousServer) }}</s>
                         <span aria-hidden="true">→</span>
-                        <span>{{ formatConflictValue(entry.serverValue) }}</span>
+                        <span>{{
+                          formatConflictValue(entry.serverValue)
+                        }}</span>
                       </span>
                       <span class="save-summary__change">
                         Yours
@@ -1622,43 +1671,108 @@ onBeforeUnmount(() => {
                     </p>
                   </div>
                   <button
-                  class="button button--ghost"
-                  @click="applyServerValue(entry.path)"
+                    class="button button--ghost"
+                    @click="applyServerValue(entry.path)"
+                  >
+                    {{ entry.state === 'conflict' ? 'Take Theirs' : 'Revert' }}
+                  </button>
+                </li>
+              </ul>
+
+              <div class="save-summary__meta metadata-copy">
+                <div>
+                  Signed in as <strong>{{ adminNickname }}</strong>
+                </div>
+                <label
+                  v-if="dirtyFieldCount > 0"
+                  class="field save-summary__reason"
                 >
-                  {{ entry.state === 'conflict' ? 'Take Theirs' : 'Revert' }}
+                  <span>Why are you making this change?</span>
+                  <textarea
+                    v-model="changeReason"
+                    rows="3"
+                    placeholder="Optional for now. Add a short note so people understand what changed and why."
+                  />
+                </label>
+                <div>
+                  {{ cleanDirtyCount }} edit(s) and {{ conflictCount }} missed
+                  incoming change(s) in this save.
+                </div>
+              </div>
+
+              <div class="save-summary__footer">
+                <button
+                  class="button save-summary__button"
+                  :disabled="saving || dirtyFieldCount === 0"
+                  @click="saveConfig"
+                >
+                  {{ saveButtonLabel }}
                 </button>
+              </div>
+            </section>
+          </article>
+
+          <article class="panel recent-changes">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Recent changes</p>
+                <h3>Pod-local commit log</h3>
+              </div>
+              <span class="pill pill--neutral">
+                {{ recentChanges.length }} event{{
+                  recentChanges.length === 1 ? '' : 's'
+                }}
+              </span>
+            </div>
+            <p class="metadata-copy recent-changes__intro">
+              This list is kept in memory and resets when the pod restarts.
+              Actor names come from the current admin session nickname.
+            </p>
+
+            <div v-if="recentChanges.length === 0" class="empty-state">
+              No config changes have been saved since this pod started.
+            </div>
+
+            <ul v-else class="recent-changes__list">
+              <li
+                v-for="entry in recentChanges"
+                :key="entry.id"
+                class="recent-changes__item"
+              >
+                <div class="recent-changes__meta">
+                  <span class="pill pill--neutral">
+                    {{ formatEventTimestamp(entry.createdAt) }}
+                  </span>
+                  <span class="pill pill--warning">{{ entry.actor }}</span>
+                </div>
+                <strong>{{ entry.summary }}</strong>
+                <p v-if="entry.reason" class="metadata-copy">
+                  {{ entry.reason }}
+                </p>
+                <ul class="inline-list recent-changes__fields">
+                  <li
+                    v-for="change in entry.changes.slice(0, 4)"
+                    :key="`${entry.id}-${change.path}`"
+                  >
+                    <strong>{{ humanizePath(change.path) }}</strong>
+                    <span aria-hidden="true">:</span>
+                    <s>{{ formatConflictValue(change.previousValue) }}</s>
+                    <span aria-hidden="true">→</span>
+                    <span>{{ formatConflictValue(change.newValue) }}</span>
+                  </li>
+                </ul>
+                <p
+                  v-if="entry.changes.length > 4"
+                  class="metadata-copy recent-changes__more"
+                >
+                  +{{ entry.changes.length - 4 }} more field{{
+                    entry.changes.length - 4 === 1 ? '' : 's'
+                  }}
+                </p>
               </li>
             </ul>
-
-            <div class="save-summary__meta metadata-copy">
-              <label
-                v-if="dirtyFieldCount > 0"
-                class="field save-summary__reason"
-              >
-                <span>Why are you making this change?</span>
-                <textarea
-                  v-model="changeReason"
-                  rows="3"
-                  placeholder="Optional for now. Add a short note so people understand what changed and why."
-                />
-              </label>
-              <div>
-                {{ cleanDirtyCount }} edit(s) and {{ conflictCount }} missed
-                incoming change(s) in this save.
-              </div>
-            </div>
-
-            <div class="save-summary__footer">
-              <button
-                class="button save-summary__button"
-                :disabled="saving || dirtyFieldCount === 0"
-                @click="saveConfig"
-              >
-                {{ saveButtonLabel }}
-              </button>
-            </div>
-          </section>
-        </article>
+          </article>
+        </div>
       </section>
     </template>
   </main>

@@ -39,6 +39,7 @@ type handlerDeps struct {
 	codes         *joinCodeStore
 	kube          kubeHandler
 	orders        *coffeeRuntime
+	changes       *coffeeChangeRuntime
 	sessionCookie *securecookie.SecureCookie
 	tokens        *tokenCache
 	forwardSaName string

@@ -178,6 +178,11 @@ type stubKubeClient struct {
 	reviewAuthenticated bool
 	reviewUsername      string
 	reviewErr           error
+	coffeeConfig        coffeeConfig
+	patchResult         coffeeConfig
+	coffeeConfigErr     error
+	patchCoffeeErr      error
+	lastPatchBody       []byte
 }
 
 func (s *stubKubeClient) requestToken(_ context.Context, _, _ string, _ []string, _ int64) (string, time.Time, error) {
@@ -212,11 +217,12 @@ func (s *stubKubeClient) reviewToken(_ context.Context, _ string) (bool, string,
 }
 
 func (s *stubKubeClient) getCoffeeConfig(_ context.Context) (coffeeConfig, error) {
-	return coffeeConfig{}, nil
+	return s.coffeeConfig, s.coffeeConfigErr
 }
 
-func (s *stubKubeClient) patchCoffeeConfig(_ context.Context, _ []byte) (coffeeConfig, error) {
-	return coffeeConfig{}, nil
+func (s *stubKubeClient) patchCoffeeConfig(_ context.Context, patch []byte) (coffeeConfig, error) {
+	s.lastPatchBody = append([]byte(nil), patch...)
+	return s.patchResult, s.patchCoffeeErr
 }
 
 func (s *stubKubeClient) watchCoffeeConfig(_ context.Context) (coffeeConfig, k8swatch.Interface, error) {
@@ -742,6 +748,172 @@ func TestPublicBuildInfoEndpoint(t *testing.T) {
 	}
 	if payload.CommitWithDirty != "abc1234-dirty" {
 		t.Fatalf("unexpected commitWithDirty: got %q want %q", payload.CommitWithDirty, "abc1234-dirty")
+	}
+}
+
+func TestAdminLoginStoresNicknameAndSessionEndpointReturnsIt(t *testing.T) {
+	cfg := config{
+		AdminPassword:          "secret-demo-password",
+		AdminCookieName:        "admin_session",
+		AdminSessionMaxAgeSecs: 3600,
+		CookieSecure:           false,
+	}
+	hashKey, blockKey, err := generateCookieKeys()
+	if err != nil {
+		t.Fatalf("unexpected key error: %v", err)
+	}
+	sc, err := newSessionSecureCookie(hashKey, blockKey)
+	if err != nil {
+		t.Fatalf("unexpected securecookie error: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	registerHandlers(mux, handlerDeps{
+		cfg:           cfg,
+		kube:          &stubKubeClient{},
+		sessionCookie: sc,
+		orders:        newCoffeeRuntime(),
+		changes:       newCoffeeChangeRuntime(8),
+	})
+
+	loginReq := httptest.NewRequest(http.MethodPost, "http://auth-service/public/admin/login", strings.NewReader(`{"password":"secret-demo-password","nickname":"Alice"}`))
+	loginReq.Header.Set("Content-Type", "application/json")
+	loginRec := httptest.NewRecorder()
+	mux.ServeHTTP(loginRec, loginReq)
+
+	if loginRec.Code != http.StatusNoContent {
+		t.Fatalf("unexpected login status: got %d want %d body=%q", loginRec.Code, http.StatusNoContent, loginRec.Body.String())
+	}
+
+	cookies := loginRec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatalf("expected admin session cookie to be set")
+	}
+
+	sessionReq := httptest.NewRequest(http.MethodGet, "http://auth-service/public/admin/session", nil)
+	sessionReq.AddCookie(cookies[0])
+	sessionRec := httptest.NewRecorder()
+	mux.ServeHTTP(sessionRec, sessionReq)
+
+	if sessionRec.Code != http.StatusOK {
+		t.Fatalf("unexpected session status: got %d want %d body=%q", sessionRec.Code, http.StatusOK, sessionRec.Body.String())
+	}
+
+	var payload adminSessionResponse
+	if err := json.NewDecoder(sessionRec.Body).Decode(&payload); err != nil {
+		t.Fatalf("failed to decode admin session response: %v", err)
+	}
+	if payload.Nickname != "Alice" {
+		t.Fatalf("unexpected nickname: got %q want %q", payload.Nickname, "Alice")
+	}
+}
+
+func TestAdminLoginRequiresNickname(t *testing.T) {
+	cfg := config{
+		AdminPassword:          "secret-demo-password",
+		AdminCookieName:        "admin_session",
+		AdminSessionMaxAgeSecs: 3600,
+		CookieSecure:           false,
+	}
+	hashKey, blockKey, err := generateCookieKeys()
+	if err != nil {
+		t.Fatalf("unexpected key error: %v", err)
+	}
+	sc, err := newSessionSecureCookie(hashKey, blockKey)
+	if err != nil {
+		t.Fatalf("unexpected securecookie error: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	registerHandlers(mux, handlerDeps{
+		cfg:           cfg,
+		kube:          &stubKubeClient{},
+		sessionCookie: sc,
+		orders:        newCoffeeRuntime(),
+		changes:       newCoffeeChangeRuntime(8),
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "http://auth-service/public/admin/login", strings.NewReader(`{"password":"secret-demo-password","nickname":"   "}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("unexpected status: got %d want %d body=%q", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestAdminPatchUsesNicknameFromSessionCookie(t *testing.T) {
+	cfg := config{
+		AdminCookieName:        "admin_session",
+		AdminSessionMaxAgeSecs: 3600,
+		CookieSecure:           false,
+	}
+	hashKey, blockKey, err := generateCookieKeys()
+	if err != nil {
+		t.Fatalf("unexpected key error: %v", err)
+	}
+	sc, err := newSessionSecureCookie(hashKey, blockKey)
+	if err != nil {
+		t.Fatalf("unexpected securecookie error: %v", err)
+	}
+
+	before := coffeeConfig{
+		Metadata: kubeObjectMeta{Generation: 7},
+		Spec: coffeeConfigSpec{
+			ShopName:   "TestNet Coffee",
+			BannerText: "Before",
+		},
+	}
+	after := before
+	after.Metadata.Generation = 8
+	after.Spec.BannerText = "After"
+
+	stub := &stubKubeClient{
+		coffeeConfig: before,
+		patchResult:  after,
+	}
+	changes := newCoffeeChangeRuntime(8)
+
+	mux := http.NewServeMux()
+	registerHandlers(mux, handlerDeps{
+		cfg:           cfg,
+		kube:          stub,
+		sessionCookie: sc,
+		orders:        newCoffeeRuntime(),
+		changes:       changes,
+	})
+
+	cookieRec := httptest.NewRecorder()
+	if err := setAdminCookie(cookieRec, cfg, sc, "Alice", time.Now()); err != nil {
+		t.Fatalf("failed to set admin cookie: %v", err)
+	}
+	cookies := cookieRec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatalf("expected admin cookie")
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "http://auth-service/public/admin/coffeeconfig", strings.NewReader(`{"spec":{"bannerText":"After"}}`))
+	req.Header.Set("Content-Type", "application/merge-patch+json")
+	req.Header.Set("X-Admin-Actor", "Mallory")
+	req.Header.Set("X-Change-Reason", "demo update")
+	req.AddCookie(cookies[0])
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected patch status: got %d want %d body=%q", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	snapshot := changes.snapshot()
+	if len(snapshot.Changes) != 1 {
+		t.Fatalf("unexpected change count: got %d want %d", len(snapshot.Changes), 1)
+	}
+	if snapshot.Changes[0].Actor != "Alice" {
+		t.Fatalf("unexpected actor: got %q want %q", snapshot.Changes[0].Actor, "Alice")
+	}
+	if snapshot.Changes[0].Reason != "demo update" {
+		t.Fatalf("unexpected reason: got %q want %q", snapshot.Changes[0].Reason, "demo update")
 	}
 }
 

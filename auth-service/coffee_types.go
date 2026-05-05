@@ -135,6 +135,26 @@ type coffeeConfigWatchEvent struct {
 	Object coffeeConfig `json:"object"`
 }
 
+type coffeeConfigFieldChange struct {
+	Path          string `json:"path"`
+	PreviousValue any    `json:"previousValue,omitempty"`
+	NewValue      any    `json:"newValue,omitempty"`
+}
+
+type coffeeConfigChangeRecord struct {
+	ID         string                    `json:"id"`
+	CreatedAt  string                    `json:"createdAt"`
+	Actor      string                    `json:"actor"`
+	Reason     string                    `json:"reason,omitempty"`
+	Summary    string                    `json:"summary"`
+	Generation int64                     `json:"generation,omitempty"`
+	Changes    []coffeeConfigFieldChange `json:"changes"`
+}
+
+type coffeeConfigChangesSnapshot struct {
+	Changes []coffeeConfigChangeRecord `json:"changes"`
+}
+
 type coffeeOrderFailure struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`

@@ -1,5 +1,7 @@
 import type {
   CoffeeConfig,
+  CoffeeConfigChangeRecord,
+  CoffeeConfigChangesSnapshot,
   CoffeeConfigWatchEvent,
   CoffeeOrderRecord,
   CoffeeOrderRequest,
@@ -17,6 +19,10 @@ export type PublicBuildInfoResponse = {
   commitWithDirty: string
 }
 
+export type AdminSessionResponse = {
+  nickname: string
+}
+
 export type ApiError = Error & {
   status: number
   body?: unknown
@@ -26,7 +32,8 @@ function createApiError(status: number, body: unknown): ApiError {
   const message =
     typeof body === 'string'
       ? body
-      : (body as { message?: string } | undefined)?.message ?? `Request failed (${status})`
+      : ((body as { message?: string } | undefined)?.message ??
+        `Request failed (${status})`)
   const err = new Error(message) as ApiError
   err.status = status
   err.body = body
@@ -59,7 +66,9 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T
 }
 
-export async function getStorefront(voucherCode?: string): Promise<StorefrontResponse> {
+export async function getStorefront(
+  voucherCode?: string,
+): Promise<StorefrontResponse> {
   const url = new URL('/public/storefront', window.location.origin)
   if (voucherCode) {
     url.searchParams.set('voucher', voucherCode)
@@ -71,21 +80,26 @@ export async function getPublicBuildInfo(): Promise<PublicBuildInfoResponse> {
   return await requestJson<PublicBuildInfoResponse>('/public/build-info')
 }
 
-export async function submitOrder(input: CoffeeOrderRequest): Promise<CoffeeOrderResponse> {
+export async function submitOrder(
+  input: CoffeeOrderRequest,
+): Promise<CoffeeOrderResponse> {
   return await requestJson<CoffeeOrderResponse>('/public/orders', {
     method: 'POST',
     body: JSON.stringify(input),
   })
 }
 
-export async function loginAdmin(password: string): Promise<void> {
+export async function loginAdmin(
+  password: string,
+  nickname: string,
+): Promise<void> {
   const res = await fetch('/public/admin/login', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
     },
     credentials: 'include',
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ password, nickname }),
   })
 
   if (!res.ok) {
@@ -93,18 +107,39 @@ export async function loginAdmin(password: string): Promise<void> {
   }
 }
 
+export async function getAdminSession(): Promise<AdminSessionResponse> {
+  return await requestJson<AdminSessionResponse>('/public/admin/session')
+}
+
 export async function getAdminCoffeeConfig(): Promise<CoffeeConfig> {
   return await requestJson<CoffeeConfig>('/public/admin/coffeeconfig')
 }
 
-export async function patchAdminCoffeeConfig(patch: unknown): Promise<CoffeeConfig> {
+export type PatchAdminCoffeeConfigOptions = {
+  reason?: string
+}
+
+export async function patchAdminCoffeeConfig(
+  patch: unknown,
+  options?: PatchAdminCoffeeConfigOptions,
+): Promise<CoffeeConfig> {
+  const headers = new Headers({
+    'content-type': 'application/merge-patch+json',
+  })
+  if (options?.reason?.trim()) {
+    headers.set('x-change-reason', options.reason.trim())
+  }
   return await requestJson<CoffeeConfig>('/public/admin/coffeeconfig', {
     method: 'PATCH',
-    headers: {
-      'content-type': 'application/merge-patch+json',
-    },
+    headers,
     body: JSON.stringify(patch),
   })
+}
+
+export async function getCoffeeConfigChangesSnapshot(): Promise<CoffeeConfigChangesSnapshot> {
+  return await requestJson<CoffeeConfigChangesSnapshot>(
+    '/public/admin/coffeeconfig/changes',
+  )
 }
 
 export async function getOrdersSnapshot(): Promise<CoffeeOrdersSnapshot> {
@@ -141,13 +176,28 @@ export function watchOrders(
   return openEventStream('/public/admin/orders/stream', onMessage, onError)
 }
 
+export function watchCoffeeConfigChanges(
+  onMessage: (event: CoffeeConfigChangeRecord) => void,
+  onError?: (event: Event) => void,
+): EventSource {
+  return openEventStream(
+    '/public/admin/coffeeconfig/changes/stream',
+    onMessage,
+    onError,
+  )
+}
+
 export function buildStorefrontFromConfig(
   config: CoffeeConfig,
   voucherCode?: string,
 ): StorefrontResponse {
   const normalizedVoucherCode = (voucherCode ?? '').trim()
   const voucher = findVoucher(config.spec.vouchers, normalizedVoucherCode)
-  const voucherState = resolveVoucherState(config.spec.products, voucher, normalizedVoucherCode)
+  const voucherState = resolveVoucherState(
+    config.spec.products,
+    voucher,
+    normalizedVoucherCode,
+  )
 
   return {
     shop: {
@@ -170,20 +220,29 @@ export function buildStorefrontFromConfig(
         enabled: product.enabled,
         basePriceCents: product.priceCents,
         displayPriceCents:
-          voucher && voucherState === 'assumed-applied' && voucherAppliesToProduct(voucher, product.sku)
+          voucher &&
+          voucherState === 'assumed-applied' &&
+          voucherAppliesToProduct(voucher, product.sku)
             ? discountedUnitPrice(product.priceCents, voucher)
             : product.priceCents,
         voucherState:
-          voucher && voucherState === 'assumed-applied' && voucherAppliesToProduct(voucher, product.sku)
+          voucher &&
+          voucherState === 'assumed-applied' &&
+          voucherAppliesToProduct(voucher, product.sku)
             ? 'assumed-applied'
             : 'not-applied',
       })),
   }
 }
 
-function findVoucher(vouchers: CoffeeVoucherSpec[], code: string): CoffeeVoucherSpec | undefined {
+function findVoucher(
+  vouchers: CoffeeVoucherSpec[],
+  code: string,
+): CoffeeVoucherSpec | undefined {
   const normalizedCode = code.toLowerCase()
-  return vouchers.find((voucher) => voucher.code.trim().toLowerCase() === normalizedCode)
+  return vouchers.find(
+    (voucher) => voucher.code.trim().toLowerCase() === normalizedCode,
+  )
 }
 
 function resolveVoucherState(
@@ -197,24 +256,40 @@ function resolveVoucherState(
   if (!voucher || !voucher.enabled) {
     return 'invalid'
   }
-  if (!products.some((product) => product.enabled && voucherAppliesToProduct(voucher, product.sku))) {
+  if (
+    !products.some(
+      (product) =>
+        product.enabled && voucherAppliesToProduct(voucher, product.sku),
+    )
+  ) {
     return 'not-applicable'
   }
   return 'assumed-applied'
 }
 
-function voucherAppliesToProduct(voucher: CoffeeVoucherSpec, sku: string): boolean {
+function voucherAppliesToProduct(
+  voucher: CoffeeVoucherSpec,
+  sku: string,
+): boolean {
   if (voucher.appliesToProducts.length === 0) {
     return true
   }
-  return voucher.appliesToProducts.some((productSku) => productSku.trim() === sku)
+  return voucher.appliesToProducts.some(
+    (productSku) => productSku.trim() === sku,
+  )
 }
 
-function discountedUnitPrice(priceCents: number, voucher: CoffeeVoucherSpec): number {
+function discountedUnitPrice(
+  priceCents: number,
+  voucher: CoffeeVoucherSpec,
+): number {
   if (voucher.discountType === 'fixed') {
     return Math.max(priceCents - voucher.discountValue, 0)
   }
-  return Math.max(priceCents - Math.floor((priceCents * voucher.discountValue) / 100), 0)
+  return Math.max(
+    priceCents - Math.floor((priceCents * voucher.discountValue) / 100),
+    0,
+  )
 }
 
 export function formatMoney(currency: string, cents: number): string {

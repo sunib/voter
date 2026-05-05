@@ -96,6 +96,7 @@ func main() {
 	logQuizSessions(kube)
 	tokens := newTokenCache()
 	orders := newCoffeeRuntime()
+	changes := newCoffeeChangeRuntime(64)
 
 	// Trigger first token generation immediately at startup
 	rotateJoinCodesForLiveSessions(kube, codes)
@@ -127,6 +128,7 @@ func main() {
 		codes:         codes,
 		kube:          kube,
 		orders:        orders,
+		changes:       changes,
 		sessionCookie: sessionCookie,
 		tokens:        tokens,
 		forwardSaName: forwardSa,

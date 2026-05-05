@@ -4,6 +4,7 @@ import AdminNav from '../components/admin/AdminNav.vue'
 import {
   formatMoney,
   getOrdersSnapshot,
+  getAdminSession,
   loginAdmin,
   watchOrders,
   type ApiError,
@@ -14,6 +15,8 @@ const loading = ref(true)
 const authRequired = ref(false)
 const authError = ref('')
 const loadError = ref('')
+const adminNickname = ref('')
+const loginNickname = ref('')
 const password = ref('')
 const orders = ref<CoffeeOrderRecord[]>([])
 
@@ -25,13 +28,18 @@ async function loadAdminOrders() {
   loading.value = true
   loadError.value = ''
   try {
-    const snapshot = await getOrdersSnapshot()
+    const [session, snapshot] = await Promise.all([
+      getAdminSession(),
+      getOrdersSnapshot(),
+    ])
+    adminNickname.value = session.nickname
     orders.value = snapshot.orders
     authRequired.value = false
   } catch (error) {
     const apiError = error as ApiError
     if (apiError.status === 401) {
       authRequired.value = true
+      adminNickname.value = ''
     } else {
       loadError.value = apiError.message
     }
@@ -50,7 +58,7 @@ function openOrdersStream() {
 async function handleLogin() {
   authError.value = ''
   try {
-    await loginAdmin(password.value)
+    await loginAdmin(password.value, loginNickname.value)
     password.value = ''
     await loadAdminOrders()
     openOrdersStream()
@@ -87,12 +95,21 @@ onBeforeUnmount(() => {
 
     <section v-if="authRequired" class="panel admin-login">
       <div class="section-heading">
-        <h2>Admin password</h2>
+        <h2>Admin login</h2>
         <p>
-          First cut only. The backend sets an admin session cookie after
-          verification.
+          Enter the shared password and the nickname that should be attached to
+          this admin session.
         </p>
       </div>
+      <label class="field">
+        <span>Nickname</span>
+        <input
+          v-model="loginNickname"
+          type="text"
+          maxlength="40"
+          placeholder="Demo operator"
+        />
+      </label>
       <label class="field">
         <span>Password</span>
         <input
@@ -121,10 +138,11 @@ onBeforeUnmount(() => {
         <div class="section-heading">
           <h2>Order stream</h2>
           <p>
-            Initial state comes from <code>GET /public/admin/orders</code>;
-            new events arrive over SSE.
+            Initial state comes from <code>GET /public/admin/orders</code>; new
+            events arrive over SSE.
           </p>
         </div>
+        <p class="metadata-copy">Signed in as {{ adminNickname }}</p>
         <div v-if="orderedEvents.length === 0" class="empty-state">
           No coffee orders yet.
         </div>

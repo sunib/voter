@@ -90,6 +90,26 @@ export type CoffeeConfigWatchEvent = {
   object: CoffeeConfig
 }
 
+export type CoffeeConfigFieldChange = {
+  path: string
+  previousValue?: unknown
+  newValue?: unknown
+}
+
+export type CoffeeConfigChangeRecord = {
+  id: string
+  createdAt: string
+  actor: string
+  reason?: string
+  summary: string
+  generation?: number
+  changes: CoffeeConfigFieldChange[]
+}
+
+export type CoffeeConfigChangesSnapshot = {
+  changes: CoffeeConfigChangeRecord[]
+}
+
 export type CoffeeOrderItemRequest = {
   sku: string
   quantity: number
