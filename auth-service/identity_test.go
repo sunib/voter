@@ -5,165 +5,134 @@ import (
 	"testing"
 )
 
-func TestAudienceIdentityFromSessionASCIINames(t *testing.T) {
+func TestAudienceIdentityFromSessionHappyPath(t *testing.T) {
 	cases := []struct {
 		name        string
-		nickname    string
-		wantUser    string
-		wantDisplay string
+		stableID    string
+		displayName string
+		email       string
 	}{
-		{name: "simple", nickname: "Simon Koudijs", wantUser: "demo:simon-koudijs", wantDisplay: "Simon Koudijs"},
-		{name: "trims whitespace", nickname: "  Simon Koudijs  ", wantUser: "demo:simon-koudijs", wantDisplay: "Simon Koudijs"},
-		{name: "system: prefix no longer special-cased", nickname: "system:masters", wantUser: "demo:system-masters", wantDisplay: "system:masters"},
-		{name: "kubernetes-admin", nickname: "kubernetes-admin", wantUser: "demo:kubernetes-admin", wantDisplay: "kubernetes-admin"},
-		{name: "generated default", nickname: "Demo Guest 42", wantUser: "demo:demo-guest-42", wantDisplay: "Demo Guest 42"},
+		{name: "default-looking values", stableID: "521541", displayName: "Anonymous 521541", email: "521541@demo.configbutler.ai"},
+		{name: "user-personalized display name", stableID: "521541", displayName: "Simon Koudijs", email: "521541@demo.configbutler.ai"},
+		{name: "user-personalized email", stableID: "521541", displayName: "Simon Koudijs", email: "simon@example.com"},
+		{name: "smallest legal stableID", stableID: "100000", displayName: "Anonymous 100000", email: "100000@demo.configbutler.ai"},
+		{name: "largest legal stableID", stableID: "999999", displayName: "Anonymous 999999", email: "999999@demo.configbutler.ai"},
+		{name: "unicode display name passes through", stableID: "521541", displayName: "佐藤", email: "521541@demo.configbutler.ai"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			id, err := audienceIdentityFromSession(tc.nickname, "", "")
+			id, err := audienceIdentityFromSession(tc.stableID, tc.displayName, tc.email)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if id.Username != tc.wantUser {
-				t.Fatalf("Username: got %q want %q", id.Username, tc.wantUser)
+			wantUser := "demo:" + tc.stableID
+			if id.Username != wantUser {
+				t.Fatalf("Username: got %q want %q", id.Username, wantUser)
 			}
-			if id.DisplayName != tc.wantDisplay {
-				t.Fatalf("DisplayName: got %q want %q", id.DisplayName, tc.wantDisplay)
+			if id.DisplayName != tc.displayName {
+				t.Fatalf("DisplayName: got %q want %q", id.DisplayName, tc.displayName)
 			}
-			if !strings.HasSuffix(id.Email, "@"+demoDefaultEmailDomain) {
-				t.Fatalf("Email: got %q, want suffix @%s", id.Email, demoDefaultEmailDomain)
-			}
-		})
-	}
-}
-
-// TestAudienceIdentityFromSessionUnicodeNames pins the contract that non-ASCII
-// names transliterate via gosimple/slug and never collapse to empty. We don't
-// pin the exact slug (unidecode tables can shift across versions) — only that
-// the result is non-empty ASCII and prefixed with demo:.
-func TestAudienceIdentityFromSessionUnicodeNames(t *testing.T) {
-	cases := []string{"Łukasz", "Müller", "佐藤", "Renée", "Søren"}
-	for _, nickname := range cases {
-		t.Run(nickname, func(t *testing.T) {
-			id, err := audienceIdentityFromSession(nickname, "", "")
-			if err != nil {
-				t.Fatalf("unexpected error for %q: %v", nickname, err)
-			}
-			if !strings.HasPrefix(id.Username, demoIdentityUsernamePrefix) {
-				t.Fatalf("Username missing demo: prefix: %q", id.Username)
-			}
-			slug := strings.TrimPrefix(id.Username, demoIdentityUsernamePrefix)
-			if slug == "" {
-				t.Fatalf("transliteration produced empty slug for %q", nickname)
-			}
-			for _, r := range slug {
-				if r > 127 {
-					t.Fatalf("slug contained non-ASCII rune %q in %q", r, slug)
-				}
-			}
-			if id.DisplayName != nickname {
-				t.Fatalf("DisplayName: got %q want %q (display name should round-trip the original)", id.DisplayName, nickname)
+			if id.Email != tc.email {
+				t.Fatalf("Email: got %q want %q", id.Email, tc.email)
 			}
 		})
 	}
 }
 
-func TestAudienceIdentityFromSessionRejects(t *testing.T) {
+// TestAudienceIdentityFromSessionUsernameIsStableIDOnly is the load-bearing
+// regression: the K8s username must never derive from the display name. A
+// user that edits "Anonymous 521541" → "Simon" stays demo:521541, not
+// demo:simon.
+func TestAudienceIdentityFromSessionUsernameIsStableIDOnly(t *testing.T) {
+	first, err := audienceIdentityFromSession("521541", "Anonymous 521541", "521541@demo.configbutler.ai")
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	second, err := audienceIdentityFromSession("521541", "Simon Koudijs", "521541@demo.configbutler.ai")
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if first.Username != second.Username {
+		t.Fatalf("username changed when display name changed: %q vs %q", first.Username, second.Username)
+	}
+	if first.Username != "demo:521541" {
+		t.Fatalf("Username: got %q want %q", first.Username, "demo:521541")
+	}
+}
+
+func TestValidateStableIDRejects(t *testing.T) {
+	bad := []string{
+		"",
+		"   ",
+		"abc",
+		"12345",     // too short
+		"1234567",   // too long
+		"012345",    // leading zero
+		"52154a",    // non-digit
+		"52154 ",    // trailing space
+		"521541\n",  // newline
+		"٥٢١٥٤١",   // non-ASCII digits
+	}
+	for _, raw := range bad {
+		if err := validateStableID(raw); err == nil {
+			t.Fatalf("expected error for %q, got nil", raw)
+		}
+	}
+}
+
+func TestAudienceIdentityFromSessionRejectsBadDisplayName(t *testing.T) {
 	cases := []struct {
-		name     string
-		nickname string
+		name        string
+		displayName string
 	}{
-		{name: "empty", nickname: ""},
-		{name: "whitespace only", nickname: "   "},
-		{name: "punctuation only collapses to empty slug", nickname: "!!!---"},
-		{name: "name with newline (git author break)", nickname: "Alice\nBob"},
-		{name: "name with angle bracket", nickname: "Mallory <evil@example.com>"},
-		{name: "name with carriage return", nickname: "Alice\rBob"},
-		{name: "name too long", nickname: strings.Repeat("a", demoDisplayNameMaxLen+1)},
+		{name: "empty", displayName: ""},
+		{name: "whitespace only", displayName: "   "},
+		{name: "contains newline", displayName: "Alice\nBob"},
+		{name: "contains carriage return", displayName: "Alice\rBob"},
+		{name: "contains angle bracket", displayName: "Mallory <evil@example.com>"},
+		{name: "too long", displayName: strings.Repeat("a", demoDisplayNameMaxLen+1)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := audienceIdentityFromSession(tc.nickname, "", "")
+			_, err := audienceIdentityFromSession("521541", tc.displayName, "521541@demo.configbutler.ai")
 			if err == nil {
-				t.Fatalf("expected error for %q, got nil", tc.nickname)
+				t.Fatalf("expected error for %q, got nil", tc.displayName)
 			}
 		})
 	}
 }
 
-func TestAudienceIdentityFromSessionEmailHandling(t *testing.T) {
-	t.Run("blank email becomes slug@domain", func(t *testing.T) {
-		id, err := audienceIdentityFromSession("Simon Koudijs", "", "demo.example.com")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if id.Email != "simon-koudijs@demo.example.com" {
-			t.Fatalf("Email: got %q want %q", id.Email, "simon-koudijs@demo.example.com")
-		}
-	})
-
-	t.Run("blank email + blank domain falls back to default", func(t *testing.T) {
-		id, err := audienceIdentityFromSession("Simon Koudijs", "", "")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		want := "simon-koudijs@" + demoDefaultEmailDomain
-		if id.Email != want {
-			t.Fatalf("Email: got %q want %q", id.Email, want)
-		}
-	})
-
-	t.Run("valid user email is used as-is", func(t *testing.T) {
-		id, err := audienceIdentityFromSession("Simon Koudijs", "simon@example.com", "")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if id.Email != "simon@example.com" {
-			t.Fatalf("Email: got %q want %q", id.Email, "simon@example.com")
-		}
-	})
-
-	t.Run("invalid email is rejected", func(t *testing.T) {
-		invalid := []string{
-			"not-an-email",
-			"missing-domain@",
-			"@missing-local",
-			"spaces in@email.com",
-			"Foo <foo@example.com>", // name+address form not accepted
-			"foo@example.com\nBcc: evil@example.com",
-			"foo<@example.com",
-		}
-		for _, raw := range invalid {
-			if _, err := audienceIdentityFromSession("Simon", raw, ""); err == nil {
-				t.Fatalf("expected error for %q, got nil", raw)
+func TestAudienceIdentityFromSessionRejectsBadEmail(t *testing.T) {
+	cases := []struct {
+		name  string
+		email string
+	}{
+		{name: "empty", email: ""},
+		{name: "whitespace only", email: "   "},
+		{name: "not an email", email: "not-an-email"},
+		{name: "missing domain", email: "foo@"},
+		{name: "missing local", email: "@bar"},
+		{name: "spaces in local", email: "spaces in@example.com"},
+		{name: "name+address form rejected", email: "Foo <foo@example.com>"},
+		{name: "newline injection", email: "foo@example.com\nBcc: evil@example.com"},
+		{name: "angle bracket in local", email: "foo<@example.com"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := audienceIdentityFromSession("521541", "Anonymous 521541", tc.email)
+			if err == nil {
+				t.Fatalf("expected error for %q, got nil", tc.email)
 			}
-		}
-	})
-
-	t.Run("email whitespace is trimmed", func(t *testing.T) {
-		id, err := audienceIdentityFromSession("Simon", "  simon@example.com  ", "")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if id.Email != "simon@example.com" {
-			t.Fatalf("Email: got %q want %q", id.Email, "simon@example.com")
-		}
-	})
+		})
+	}
 }
 
-func TestAudienceIdentityFromSessionSlugLengthCap(t *testing.T) {
-	// A long display name should produce a slug capped at demoSlugMaxLen with
-	// no trailing dash after truncation.
-	longName := strings.Repeat("a", demoDisplayNameMaxLen)
-	id, err := audienceIdentityFromSession(longName, "", "")
+func TestAudienceIdentityFromSessionTrimsEmail(t *testing.T) {
+	id, err := audienceIdentityFromSession("521541", "Simon", "  simon@example.com  ")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	slug := strings.TrimPrefix(id.Username, demoIdentityUsernamePrefix)
-	if len(slug) > demoSlugMaxLen {
-		t.Fatalf("slug length %d exceeds cap %d", len(slug), demoSlugMaxLen)
-	}
-	if strings.HasSuffix(slug, "-") {
-		t.Fatalf("slug ends with dash after truncation: %q", slug)
+	if id.Email != "simon@example.com" {
+		t.Fatalf("Email: got %q want %q", id.Email, "simon@example.com")
 	}
 }

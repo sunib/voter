@@ -58,15 +58,17 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 		}
 
 		var body struct {
-			Nickname string `json:"nickname"`
-			Code     string `json:"code"`
+			Code        string `json:"code"`
+			StableID    string `json:"stableId"`
+			DisplayName string `json:"displayName"`
+			Email       string `json:"email"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid login body", http.StatusBadRequest)
 			return
 		}
 
-		nickname, err := normalizeSessionNickname(body.Nickname)
+		identity, err := audienceIdentityFromSession(body.StableID, body.DisplayName, body.Email)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -76,7 +78,7 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			http.Error(w, "invalid access code", http.StatusUnauthorized)
 			return
 		}
-		if err := setSessionCookie(w, deps.cfg, deps.sessionCookie, nickname, time.Now()); err != nil {
+		if err := setSessionCookie(w, deps.cfg, deps.sessionCookie, identity, body.StableID, time.Now()); err != nil {
 			http.Error(w, "failed to create session", http.StatusInternalServerError)
 			return
 		}
@@ -96,7 +98,9 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{
-			"nickname": session.Nickname,
+			"stableId":    session.StableID,
+			"displayName": session.DisplayName,
+			"email":       session.Email,
 		})
 	}))
 

@@ -17,15 +17,20 @@ import (
 )
 
 const (
-	sessionCookieVersion = 1
+	// Bumped from 1 → 2 with the nickname → {stableId, displayName, email}
+	// shape change so cookies written before the rollout are silently
+	// invalidated instead of decoding into a half-populated payload.
+	sessionCookieVersion = 2
 	sessionCookieSecret  = "auth-session-cookie-keys"
 )
 
 type sessionCookiePayload struct {
-	Nickname  string `json:"nickname"`
-	IssuedAt  int64  `json:"iat"`
-	ExpiresAt int64  `json:"exp"`
-	Version   int    `json:"v"`
+	StableID    string `json:"stableId"`
+	DisplayName string `json:"displayName"`
+	Email       string `json:"email"`
+	IssuedAt    int64  `json:"iat"`
+	ExpiresAt   int64  `json:"exp"`
+	Version     int    `json:"v"`
 }
 
 func ensureSessionCookieKeys(ctx context.Context, kube kubeClient) ([]byte, []byte, error) {
@@ -91,19 +96,21 @@ func newSessionSecureCookie(hashKey, blockKey []byte) (*securecookie.SecureCooki
 	return sc, nil
 }
 
-func setSessionCookie(w http.ResponseWriter, cfg config, sc *securecookie.SecureCookie, nickname string, now time.Time) error {
+// setSessionCookie writes the validated identity into a signed cookie. The
+// caller (login handler) is responsible for validating stableID/displayName/
+// email against the identity.go rules first — setSessionCookie just stores
+// what it's given.
+func setSessionCookie(w http.ResponseWriter, cfg config, sc *securecookie.SecureCookie, identity audienceIdentity, stableID string, now time.Time) error {
 	if sc == nil {
 		return errors.New("secure cookie unavailable")
 	}
-	nickname, err := normalizeSessionNickname(nickname)
-	if err != nil {
-		return err
-	}
 	payload := sessionCookiePayload{
-		Nickname:  nickname,
-		IssuedAt:  now.Unix(),
-		ExpiresAt: now.Add(time.Duration(cfg.SessionCookieMaxAgeSecs) * time.Second).Unix(),
-		Version:   sessionCookieVersion,
+		StableID:    stableID,
+		DisplayName: identity.DisplayName,
+		Email:       identity.Email,
+		IssuedAt:    now.Unix(),
+		ExpiresAt:   now.Add(time.Duration(cfg.SessionCookieMaxAgeSecs) * time.Second).Unix(),
+		Version:     sessionCookieVersion,
 	}
 	encoded, err := sc.Encode(cfg.SessionCookieName, payload)
 	if err != nil {
@@ -145,11 +152,18 @@ func getSessionFromCookie(r *http.Request, cfg config, sc *securecookie.SecureCo
 	if payload.ExpiresAt > 0 && now.Unix() > payload.ExpiresAt {
 		return zero, false
 	}
-	nickname, err := normalizeSessionNickname(payload.Nickname)
-	if err != nil {
+	// The login handler validated these before signing, so a re-check on read
+	// is defence-in-depth. If anything looks off, drop the session rather than
+	// surfacing a half-valid identity.
+	if validateStableID(payload.StableID) != nil {
 		return zero, false
 	}
-	payload.Nickname = nickname
+	if _, err := normalizeDisplayName(payload.DisplayName); err != nil {
+		return zero, false
+	}
+	if validateAuthorEmail(strings.TrimSpace(payload.Email)) != nil {
+		return zero, false
+	}
 	return payload, true
 }
 
@@ -166,16 +180,3 @@ func clearSessionCookie(w http.ResponseWriter, cfg config) {
 	})
 }
 
-const maxSessionNicknameLength = 40
-
-func normalizeSessionNickname(input string) (string, error) {
-	nickname := strings.TrimSpace(input)
-	switch {
-	case nickname == "":
-		return "", errors.New("nickname is required")
-	case len([]rune(nickname)) > maxSessionNicknameLength:
-		return "", fmt.Errorf("nickname must be %d characters or fewer", maxSessionNicknameLength)
-	default:
-		return nickname, nil
-	}
-}

@@ -38,9 +38,6 @@ type config struct {
 	// matching RBAC on authentication.k8s.io/userextras/...; flip off if that
 	// RBAC is not yet applied to keep the demo working.
 	ConfigButlerIdentityExtrasEnabled bool `envconfig:"CONFIGBUTLER_IDENTITY_EXTRAS_ENABLED" default:"true"`
-	// ConfigButlerDemoEmailDomain is the domain used to synthesize a Git
-	// author email when the participant did not provide one (slug@domain).
-	ConfigButlerDemoEmailDomain string `envconfig:"CONFIGBUTLER_DEMO_EMAIL_DOMAIN" default:"demo.configbutler.ai"`
 }
 
 func loadConfig() (config, error) {

@@ -16,7 +16,9 @@ import (
 )
 
 type adminSessionResponse struct {
-	Nickname string `json:"nickname"`
+	StableID    string `json:"stableId"`
+	DisplayName string `json:"displayName"`
+	Email       string `json:"email"`
 }
 
 func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
@@ -60,7 +62,7 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 		if req.Source == nil {
 			req.Source = map[string]string{}
 		}
-		req.Source["participantNickname"] = session.Nickname
+		req.Source["participantNickname"] = session.DisplayName
 
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
@@ -108,7 +110,9 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 		}
 
 		writeJSON(w, http.StatusOK, adminSessionResponse{
-			Nickname: session.Nickname,
+			StableID:    session.StableID,
+			DisplayName: session.DisplayName,
+			Email:       session.Email,
 		})
 	}))
 
@@ -135,7 +139,7 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 			}
 
 			session, _ := getBrowserSession(r)
-			identity, err := audienceIdentityFromSession(session.Nickname, "", deps.cfg.ConfigButlerDemoEmailDomain)
+			identity, err := audienceIdentityFromSession(session.StableID, session.DisplayName, session.Email)
 			if err != nil {
 				http.Error(w, "invalid session identity: "+err.Error(), http.StatusBadRequest)
 				return
@@ -180,7 +184,7 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 					current,
 					updated,
 					patchBody,
-					session.Nickname,
+					session.DisplayName,
 					reason,
 				))
 			}

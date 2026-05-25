@@ -3,27 +3,26 @@ package main
 import (
 	"errors"
 	"net/mail"
+	"regexp"
 	"strings"
-
-	"github.com/gosimple/slug"
 )
 
 // audienceIdentity is the derived identity used to attribute Kubernetes writes
 // (impersonation user + group) and ConfigButler Git authoring (display name +
-// email via impersonation extras). For user-initiated writes Username must be
-// non-empty — an empty Username is a hard error, never a "skip impersonation"
-// signal, so participant input can never fall through to the auth-service SA.
+// email via impersonation extras).
+//
+// Username derives from the stable client-generated ID, never from the display
+// name — so editing the display name mid-session does not change the K8s
+// identity, and Unicode display names cannot produce odd-looking usernames.
 type audienceIdentity struct {
-	Username    string // e.g. "demo:simon-koudijs"
-	DisplayName string // e.g. "Simon Koudijs"
-	Email       string // user-provided or "<slug>@<emailDomain>"
+	Username    string // e.g. "demo:521541"
+	DisplayName string // e.g. "Anonymous 521541" (or whatever the user typed)
+	Email       string // e.g. "521541@demo.configbutler.ai" (or the user's own)
 }
 
 const (
 	demoIdentityUsernamePrefix = "demo:"
-	demoSlugMaxLen             = 40
 	demoDisplayNameMaxLen      = 64
-	demoDefaultEmailDomain     = "demo.configbutler.ai"
 
 	// gitops-reverser reads these impersonation extras off the audit event to
 	// pick the Git commit author name + email.
@@ -31,39 +30,38 @@ const (
 	configButlerEmailExtraKey       = "configbutler.ai/claims/email"
 )
 
-// audienceIdentityFromSession derives the impersonation identity for a save
-// request. The synthetic "demo:<slug>" username keeps participant-controlled
-// input out of any built-in or directly-bound Kubernetes user namespace.
-func audienceIdentityFromSession(nickname, optionalEmail, emailDomain string) (audienceIdentity, error) {
-	displayName, err := normalizeDisplayName(nickname)
+// stableIDPattern: 6 ASCII digits, no leading zero. Matches the frontend
+// generator and keeps the K8s username short and grep-friendly.
+var stableIDPattern = regexp.MustCompile(`^[1-9][0-9]{5}$`)
+
+// audienceIdentityFromSession is a pure validator — the server never
+// synthesizes defaults. The frontend always sends a stableID, displayName,
+// and email; anything missing or malformed is rejected.
+func audienceIdentityFromSession(stableID, displayName, email string) (audienceIdentity, error) {
+	if err := validateStableID(stableID); err != nil {
+		return audienceIdentity{}, err
+	}
+	name, err := normalizeDisplayName(displayName)
 	if err != nil {
 		return audienceIdentity{}, err
 	}
-
-	s := slug.MakeLang(displayName, "en")
-	if len(s) > demoSlugMaxLen {
-		s = strings.TrimRight(s[:demoSlugMaxLen], "-")
-	}
-	if s == "" {
-		return audienceIdentity{}, errors.New("display name cannot be converted to a demo identity")
-	}
-
-	domain := strings.TrimSpace(emailDomain)
-	if domain == "" {
-		domain = demoDefaultEmailDomain
-	}
-	email := strings.TrimSpace(optionalEmail)
-	if email == "" {
-		email = s + "@" + domain
-	} else if err := validateAuthorEmail(email); err != nil {
+	trimmedEmail := strings.TrimSpace(email)
+	if err := validateAuthorEmail(trimmedEmail); err != nil {
 		return audienceIdentity{}, err
 	}
 
 	return audienceIdentity{
-		Username:    demoIdentityUsernamePrefix + s,
-		DisplayName: displayName,
-		Email:       email,
+		Username:    demoIdentityUsernamePrefix + stableID,
+		DisplayName: name,
+		Email:       trimmedEmail,
 	}, nil
+}
+
+func validateStableID(raw string) error {
+	if !stableIDPattern.MatchString(raw) {
+		return errors.New("stableId must be 6 digits, leading digit 1-9")
+	}
+	return nil
 }
 
 func normalizeDisplayName(raw string) (string, error) {
@@ -83,6 +81,9 @@ func normalizeDisplayName(raw string) (string, error) {
 // validateAuthorEmail accepts only bare addresses (no "Name <addr>" form) and
 // rejects characters that would break a git author signature line.
 func validateAuthorEmail(raw string) error {
+	if raw == "" {
+		return errors.New("email is required")
+	}
 	if strings.ContainsAny(raw, "<>\n\r") {
 		return errors.New("invalid author email")
 	}

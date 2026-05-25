@@ -265,6 +265,27 @@ func (s *stubKubeClient) patchCoffeeConfig(_ context.Context, patch []byte, iden
 	return s.patchResult, s.patchCoffeeErr
 }
 
+// Canonical session identity used across the cookie and admin-patch tests.
+// Mirrors what the frontend constants module would produce for stableID
+// 521541 — the slug-from-displayName link is gone, so the displayName here is
+// a regular human-readable string with no relationship to the K8s username.
+const (
+	testStableID    = "521541"
+	testDisplayName = "Alice"
+	testEmail       = "521541@demo.configbutler.ai"
+)
+
+// setTestSessionCookie validates an identity via the identity helper and
+// writes it as a signed session cookie. Mirrors what the login handler does.
+func setTestSessionCookie(t *testing.T, w http.ResponseWriter, cfg config, sc *securecookie.SecureCookie, stableID, displayName, email string, now time.Time) error {
+	t.Helper()
+	identity, err := audienceIdentityFromSession(stableID, displayName, email)
+	if err != nil {
+		return err
+	}
+	return setSessionCookie(w, cfg, sc, identity, stableID, now)
+}
+
 func (s *stubKubeClient) watchCoffeeConfig(_ context.Context) (coffeeConfig, k8swatch.Interface, error) {
 	return coffeeConfig{}, nil, errors.New("not implemented")
 }
@@ -528,7 +549,7 @@ func TestSessionCookieRoundTrip(t *testing.T) {
 
 	now := time.Now()
 	resp := httptest.NewRecorder()
-	if err := setSessionCookie(resp, cfg, sc, "Alice", now); err != nil {
+	if err := setTestSessionCookie(t, resp, cfg, sc, testStableID, testDisplayName, testEmail, now); err != nil {
 		t.Fatalf("unexpected set cookie error: %v", err)
 	}
 
@@ -543,8 +564,14 @@ func TestSessionCookieRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected session cookie to decode")
 	}
-	if resolved.Nickname != "Alice" {
-		t.Fatalf("unexpected nickname: got %q want %q", resolved.Nickname, "Alice")
+	if resolved.StableID != testStableID {
+		t.Fatalf("unexpected stableID: got %q want %q", resolved.StableID, testStableID)
+	}
+	if resolved.DisplayName != testDisplayName {
+		t.Fatalf("unexpected displayName: got %q want %q", resolved.DisplayName, testDisplayName)
+	}
+	if resolved.Email != testEmail {
+		t.Fatalf("unexpected email: got %q want %q", resolved.Email, testEmail)
 	}
 
 	// Expired cookie should be rejected.
@@ -569,7 +596,7 @@ func TestRequireSessionMiddlewareUsesSharedCookie(t *testing.T) {
 		t.Fatalf("unexpected securecookie error: %v", err)
 	}
 	resp := httptest.NewRecorder()
-	if err := setSessionCookie(resp, cfg, sc, "Alice", time.Now()); err != nil {
+	if err := setTestSessionCookie(t, resp, cfg, sc, testStableID, testDisplayName, testEmail, time.Now()); err != nil {
 		t.Fatalf("unexpected set cookie error: %v", err)
 	}
 
@@ -595,8 +622,8 @@ func TestRequireSessionMiddlewareUsesSharedCookie(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status code: got %d, want %d", rec.Code, http.StatusOK)
 	}
-	if gotSession.Nickname != "Alice" {
-		t.Fatalf("unexpected nickname: got %q want %q", gotSession.Nickname, "Alice")
+	if gotSession.DisplayName != testDisplayName {
+		t.Fatalf("unexpected displayName: got %q want %q", gotSession.DisplayName, testDisplayName)
 	}
 }
 
@@ -646,7 +673,7 @@ func TestPublicBuildInfoEndpoint(t *testing.T) {
 	}
 }
 
-func TestPublicLoginStoresNicknameAndSessionEndpointReturnsIt(t *testing.T) {
+func TestPublicLoginStoresIdentityAndSessionEndpointReturnsIt(t *testing.T) {
 	cfg := config{
 		SessionCookieName:       "auth_session",
 		SessionCookieMaxAgeSecs: 3600,
@@ -675,7 +702,8 @@ func TestPublicLoginStoresNicknameAndSessionEndpointReturnsIt(t *testing.T) {
 		changes:       newCoffeeChangeRuntime(8),
 	})
 
-	loginReq := httptest.NewRequest(http.MethodPost, "http://auth-service/public/login", strings.NewReader(`{"code":"`+code+`","nickname":"Alice"}`))
+	loginBody := `{"code":"` + code + `","stableId":"` + testStableID + `","displayName":"` + testDisplayName + `","email":"` + testEmail + `"}`
+	loginReq := httptest.NewRequest(http.MethodPost, "http://auth-service/public/login", strings.NewReader(loginBody))
 	loginReq.Header.Set("Content-Type", "application/json")
 	loginRec := httptest.NewRecorder()
 	mux.ServeHTTP(loginRec, loginReq)
@@ -698,16 +726,26 @@ func TestPublicLoginStoresNicknameAndSessionEndpointReturnsIt(t *testing.T) {
 		t.Fatalf("unexpected session status: got %d want %d body=%q", sessionRec.Code, http.StatusOK, sessionRec.Body.String())
 	}
 
-	var payload adminSessionResponse
+	var payload map[string]string
 	if err := json.NewDecoder(sessionRec.Body).Decode(&payload); err != nil {
-		t.Fatalf("failed to decode admin session response: %v", err)
+		t.Fatalf("failed to decode session response: %v", err)
 	}
-	if payload.Nickname != "Alice" {
-		t.Fatalf("unexpected nickname: got %q want %q", payload.Nickname, "Alice")
+	if payload["stableId"] != testStableID {
+		t.Fatalf("unexpected stableId: got %q want %q", payload["stableId"], testStableID)
+	}
+	if payload["displayName"] != testDisplayName {
+		t.Fatalf("unexpected displayName: got %q want %q", payload["displayName"], testDisplayName)
+	}
+	if payload["email"] != testEmail {
+		t.Fatalf("unexpected email: got %q want %q", payload["email"], testEmail)
 	}
 }
 
-func TestPublicLoginRequiresNickname(t *testing.T) {
+// TestPublicLoginRejectsInvalidIdentity is the security regression test for
+// the fail-closed contract at the login layer: a request that can't form a
+// valid audience identity (bad stableId, bad displayName, bad email) is
+// rejected with 400, so no invalid session cookie ever gets signed.
+func TestPublicLoginRejectsInvalidIdentity(t *testing.T) {
 	cfg := config{
 		SessionCookieName:       "auth_session",
 		SessionCookieMaxAgeSecs: 3600,
@@ -726,23 +764,42 @@ func TestPublicLoginRequiresNickname(t *testing.T) {
 		t.Fatalf("unexpected securecookie error: %v", err)
 	}
 
-	mux := http.NewServeMux()
-	registerHandlers(mux, handlerDeps{
-		cfg:           cfg,
-		codes:         store,
-		kube:          &stubKubeClient{},
-		sessionCookie: sc,
-		orders:        newCoffeeRuntime(),
-		changes:       newCoffeeChangeRuntime(8),
-	})
+	cases := []struct {
+		name string
+		body string
+	}{
+		{name: "blank displayName", body: `{"code":"` + code + `","stableId":"521541","displayName":"   ","email":"521541@demo.configbutler.ai"}`},
+		{name: "missing stableId", body: `{"code":"` + code + `","displayName":"Alice","email":"521541@demo.configbutler.ai"}`},
+		{name: "bad stableId (leading zero)", body: `{"code":"` + code + `","stableId":"012345","displayName":"Alice","email":"521541@demo.configbutler.ai"}`},
+		{name: "displayName with angle brackets", body: `{"code":"` + code + `","stableId":"521541","displayName":"Mallory <m@evil.example>","email":"521541@demo.configbutler.ai"}`},
+		{name: "missing email", body: `{"code":"` + code + `","stableId":"521541","displayName":"Alice"}`},
+		{name: "bad email", body: `{"code":"` + code + `","stableId":"521541","displayName":"Alice","email":"not-an-email"}`},
+	}
 
-	req := httptest.NewRequest(http.MethodPost, "http://auth-service/public/login", strings.NewReader(`{"code":"`+code+`","nickname":"   "}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			registerHandlers(mux, handlerDeps{
+				cfg:           cfg,
+				codes:         store,
+				kube:          &stubKubeClient{},
+				sessionCookie: sc,
+				orders:        newCoffeeRuntime(),
+				changes:       newCoffeeChangeRuntime(8),
+			})
 
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("unexpected status: got %d want %d body=%q", rec.Code, http.StatusBadRequest, rec.Body.String())
+			req := httptest.NewRequest(http.MethodPost, "http://auth-service/public/login", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d body=%q", rec.Code, rec.Body.String())
+			}
+			if cookies := rec.Result().Cookies(); len(cookies) > 0 && cookies[0].MaxAge != -1 {
+				t.Fatalf("expected no session cookie set, got %+v", cookies[0])
+			}
+		})
 	}
 }
 
@@ -774,7 +831,7 @@ func TestPublicLoginRequiresValidCode(t *testing.T) {
 		changes:       newCoffeeChangeRuntime(8),
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "http://auth-service/public/login", strings.NewReader(`{"code":"WRONG","nickname":"Alice"}`))
+	req := httptest.NewRequest(http.MethodPost, "http://auth-service/public/login", strings.NewReader(`{"code":"WRONG","stableId":"`+testStableID+`","displayName":"`+testDisplayName+`","email":"`+testEmail+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
@@ -784,7 +841,7 @@ func TestPublicLoginRequiresValidCode(t *testing.T) {
 	}
 }
 
-func TestAdminPatchUsesNicknameFromSessionCookie(t *testing.T) {
+func TestAdminPatchUsesDisplayNameFromSessionCookie(t *testing.T) {
 	cfg := config{
 		SessionCookieName:       "auth_session",
 		SessionCookieMaxAgeSecs: 3600,
@@ -826,7 +883,7 @@ func TestAdminPatchUsesNicknameFromSessionCookie(t *testing.T) {
 	})
 
 	cookieRec := httptest.NewRecorder()
-	if err := setSessionCookie(cookieRec, cfg, sc, "Alice", time.Now()); err != nil {
+	if err := setTestSessionCookie(t, cookieRec, cfg, sc, testStableID, testDisplayName, testEmail, time.Now()); err != nil {
 		t.Fatalf("failed to set session cookie: %v", err)
 	}
 	cookies := cookieRec.Result().Cookies()
@@ -850,8 +907,8 @@ func TestAdminPatchUsesNicknameFromSessionCookie(t *testing.T) {
 	if len(snapshot.Changes) != 1 {
 		t.Fatalf("unexpected change count: got %d want %d", len(snapshot.Changes), 1)
 	}
-	if snapshot.Changes[0].Actor != "Alice" {
-		t.Fatalf("unexpected actor: got %q want %q", snapshot.Changes[0].Actor, "Alice")
+	if snapshot.Changes[0].Actor != testDisplayName {
+		t.Fatalf("unexpected actor: got %q want %q", snapshot.Changes[0].Actor, testDisplayName)
 	}
 	if snapshot.Changes[0].Reason != "demo update" {
 		t.Fatalf("unexpected reason: got %q want %q", snapshot.Changes[0].Reason, "demo update")
@@ -901,11 +958,11 @@ func newAdminPatchTestEnv(t *testing.T, cfg config) *adminPatchTestEnv {
 	return &adminPatchTestEnv{mux: mux, stub: stub, cfg: cfg, sc: sc}
 }
 
-func (e *adminPatchTestEnv) sendPatch(t *testing.T, nickname, reason string) *httptest.ResponseRecorder {
+func (e *adminPatchTestEnv) sendPatch(t *testing.T, stableID, displayName, email, reason string) *httptest.ResponseRecorder {
 	t.Helper()
 	cookieRec := httptest.NewRecorder()
-	if err := setSessionCookie(cookieRec, e.cfg, e.sc, nickname, time.Now()); err != nil {
-		t.Fatalf("setSessionCookie: %v", err)
+	if err := setTestSessionCookie(t, cookieRec, e.cfg, e.sc, stableID, displayName, email, time.Now()); err != nil {
+		t.Fatalf("setTestSessionCookie: %v", err)
 	}
 	cookies := cookieRec.Result().Cookies()
 	if len(cookies) == 0 {
@@ -933,7 +990,7 @@ func TestAdminPatchCreatesCommitRequestWhenConfigured(t *testing.T) {
 		ConfigButlerGitTargetName: "voter-coffee",
 	})
 
-	rec := env.sendPatch(t, "Alice", "demo update")
+	rec := env.sendPatch(t, testStableID, testDisplayName, testEmail, "demo update")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("unexpected status: got %d body=%q", rec.Code, rec.Body.String())
 	}
@@ -942,14 +999,15 @@ func TestAdminPatchCreatesCommitRequestWhenConfigured(t *testing.T) {
 		t.Fatalf("expected exactly 1 CommitRequest call, got %d", env.stub.commitRequestCalls)
 	}
 	got := env.stub.lastCommitRequest
-	if got.Identity.Username != "demo:alice" {
-		t.Fatalf("Identity.Username: got %q want %q", got.Identity.Username, "demo:alice")
+	wantUser := "demo:" + testStableID
+	if got.Identity.Username != wantUser {
+		t.Fatalf("Identity.Username: got %q want %q", got.Identity.Username, wantUser)
 	}
-	if got.Identity.DisplayName != "Alice" {
-		t.Fatalf("Identity.DisplayName: got %q want %q", got.Identity.DisplayName, "Alice")
+	if got.Identity.DisplayName != testDisplayName {
+		t.Fatalf("Identity.DisplayName: got %q want %q", got.Identity.DisplayName, testDisplayName)
 	}
-	if got.Identity.Email != "alice@demo.configbutler.ai" {
-		t.Fatalf("Identity.Email: got %q want %q", got.Identity.Email, "alice@demo.configbutler.ai")
+	if got.Identity.Email != testEmail {
+		t.Fatalf("Identity.Email: got %q want %q", got.Identity.Email, testEmail)
 	}
 	if got.GitTargetName != "voter-coffee" {
 		t.Fatalf("GitTargetName: got %q want %q", got.GitTargetName, "voter-coffee")
@@ -959,13 +1017,41 @@ func TestAdminPatchCreatesCommitRequestWhenConfigured(t *testing.T) {
 	}
 }
 
+// TestAdminPatchUsernameIsStableIDOnly is the regression test for the
+// split-identity design: editing the display name on a subsequent save must
+// not change the K8s username that lands in the audit log / CommitRequest.
+func TestAdminPatchUsernameIsStableIDOnly(t *testing.T) {
+	env := newAdminPatchTestEnv(t, config{
+		ConfigButlerGitTargetName: "voter-coffee",
+	})
+
+	// First save with the default display name.
+	if rec := env.sendPatch(t, testStableID, "Anonymous "+testStableID, testEmail, "first"); rec.Code != http.StatusOK {
+		t.Fatalf("first patch status: got %d body=%q", rec.Code, rec.Body.String())
+	}
+	firstUser := env.stub.lastCommitRequest.Identity.Username
+
+	// Second save under the same stableID but a personalized display name.
+	if rec := env.sendPatch(t, testStableID, "Simon Koudijs", testEmail, "second"); rec.Code != http.StatusOK {
+		t.Fatalf("second patch status: got %d body=%q", rec.Code, rec.Body.String())
+	}
+	secondUser := env.stub.lastCommitRequest.Identity.Username
+
+	if firstUser != secondUser {
+		t.Fatalf("Username changed when display name changed: %q vs %q", firstUser, secondUser)
+	}
+	if firstUser != "demo:"+testStableID {
+		t.Fatalf("Username: got %q want %q", firstUser, "demo:"+testStableID)
+	}
+}
+
 // TestAdminPatchSkipsCommitRequestWhenGitTargetNotSet ensures the side effect
 // is fully opt-in: with no CONFIGBUTLER_GIT_TARGET_NAME the patch path must
 // behave exactly as before (no CommitRequest create).
 func TestAdminPatchSkipsCommitRequestWhenGitTargetNotSet(t *testing.T) {
 	env := newAdminPatchTestEnv(t, config{})
 
-	rec := env.sendPatch(t, "Alice", "demo update")
+	rec := env.sendPatch(t, testStableID, testDisplayName, testEmail, "demo update")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("unexpected status: got %d body=%q", rec.Code, rec.Body.String())
 	}
@@ -974,27 +1060,10 @@ func TestAdminPatchSkipsCommitRequestWhenGitTargetNotSet(t *testing.T) {
 	}
 }
 
-// TestAdminPatchRejectsInvalidSessionIdentity is the security regression test
-// for the fail-closed contract: a session nickname that cannot form a valid
-// audience identity (here: contains angle brackets that would break a git
-// author signature) must result in 400 with no patch and no CommitRequest —
-// not a silent fall-through to the auth-service SA.
-func TestAdminPatchRejectsInvalidSessionIdentity(t *testing.T) {
-	env := newAdminPatchTestEnv(t, config{
-		ConfigButlerGitTargetName: "voter-coffee",
-	})
-
-	rec := env.sendPatch(t, "Mallory <m@evil.example>", "demo update")
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for invalid session identity, got %d body=%q", rec.Code, rec.Body.String())
-	}
-	if env.stub.lastPatchIdentity.Username != "" {
-		t.Fatalf("expected no patch call, got identity %+v", env.stub.lastPatchIdentity)
-	}
-	if env.stub.commitRequestCalls != 0 {
-		t.Fatalf("expected no CommitRequest, got %d", env.stub.commitRequestCalls)
-	}
-}
+// Invalid-identity fail-closed is now exercised at the login layer in
+// TestPublicLoginRejectsInvalidIdentity. Once a session cookie exists, the
+// identity in it has already been validated, so the PATCH handler doesn't
+// have an "invalid session" branch to test independently.
 
 // TestAdminPatchSucceedsWhenCommitRequestFails proves the contract from the
 // plan: once the CoffeeConfig is written, a CommitRequest failure must not
@@ -1005,7 +1074,7 @@ func TestAdminPatchSucceedsWhenCommitRequestFails(t *testing.T) {
 	})
 	env.stub.commitRequestErr = errors.New("simulated commit request failure")
 
-	rec := env.sendPatch(t, "Alice", "demo update")
+	rec := env.sendPatch(t, testStableID, testDisplayName, testEmail, "demo update")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK even when CommitRequest fails, got %d body=%q", rec.Code, rec.Body.String())
 	}
@@ -1204,7 +1273,7 @@ func TestKubeconfigHandler(t *testing.T) {
 			}
 			if tc.wantCode != http.StatusUnauthorized {
 				cookieRec := httptest.NewRecorder()
-				if err := setSessionCookie(cookieRec, cfg, sc, "Alice", now); err != nil {
+				if err := setTestSessionCookie(t, cookieRec, cfg, sc, testStableID, testDisplayName, testEmail, now); err != nil {
 					t.Fatalf("failed to set session cookie: %v", err)
 				}
 				for _, cookie := range cookieRec.Result().Cookies() {
