@@ -1,14 +1,44 @@
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
+  name: strip-impersonate
+  namespace: voter
+spec:
+  # Defense in depth: drop any Impersonate-* request header the client might
+  # have sent BEFORE forwardAuth gets a chance to add the server-derived ones.
+  # Without this, a malicious client could attach e.g. `Impersonate-User:
+  # system:admin` and — because the impersonator SA has unrestricted
+  # `impersonate users` — the API server would accept it.
+  #
+  # We enumerate every Impersonate-* header Kubernetes recognises today; if you
+  # add a new Impersonate-Extra-* key in the auth-service, list it here too.
+  headers:
+    customRequestHeaders:
+      Impersonate-User: ""
+      Impersonate-Group: ""
+      Impersonate-Uid: ""
+      Impersonate-Extra-configbutler.ai%2Fclaims%2Fdisplay-name: ""
+      Impersonate-Extra-configbutler.ai%2Fclaims%2Femail: ""
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
   name: auth-forwarder
   namespace: voter
 spec:
   forwardAuth:
     address: http://auth-service.voter.svc.cluster.local:8080/private/forward-auth-decision
     trustForwardHeader: true
+    # Authorization carries the impersonator SA token. Impersonate-* headers
+    # carry the audience identity derived from the session cookie; the API
+    # server uses them to re-authorize the request as demo:<stableID> in group
+    # voter-audience, and the audit event records that user as the actor.
     authResponseHeaders:
       - Authorization
+      - Impersonate-User
+      - Impersonate-Group
+      - Impersonate-Extra-configbutler.ai%2Fclaims%2Fdisplay-name
+      - Impersonate-Extra-configbutler.ai%2Fclaims%2Femail
     addAuthCookiesToResponse:
       - auth_session
 ---
@@ -36,6 +66,10 @@ spec:
     - match: Host(`coffee.z65.nl`) && (PathPrefix(`/api`) || PathPrefix(`/apis`) || PathPrefix(`/openapi`))
       kind: Rule
       middlewares:
+        # ORDER MATTERS: strip-impersonate must run before auth-forwarder so
+        # forwardAuth's authResponseHeaders are the only source of Impersonate-*
+        # reaching the upstream Kubernetes API.
+        - name: strip-impersonate
         - name: auth-forwarder
       services:
         - name: kubernetes

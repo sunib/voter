@@ -119,21 +119,31 @@ func main() {
 	if forwardSaNamespace == "" {
 		log.Fatalf("config error: FORWARD_SA_NAMESPACE is required")
 	}
+	kubeconfigSa := strings.TrimSpace(cfg.KubeconfigServiceAccount)
+	if kubeconfigSa == "" {
+		kubeconfigSa = forwardSa
+	}
+	kubeconfigSaNamespace := strings.TrimSpace(cfg.KubeconfigServiceAccountNS)
+	if kubeconfigSaNamespace == "" {
+		kubeconfigSaNamespace = forwardSaNamespace
+	}
 
 	mux := http.NewServeMux()
 
 	registerHandlers(mux, handlerDeps{
-		cfg:           cfg,
-		codes:         codes,
-		kube:          kube,
-		orders:        orders,
-		changes:       changes,
-		sessionCookie: sessionCookie,
-		tokens:        tokens,
-		defaultNS:     kube.defaultNS,
-		forwardSaName: forwardSa,
-		forwardSaNS:   forwardSaNamespace,
-		tokenTTL:      tokenTTLSeconds,
+		cfg:              cfg,
+		codes:            codes,
+		kube:             kube,
+		orders:           orders,
+		changes:          changes,
+		sessionCookie:    sessionCookie,
+		tokens:           tokens,
+		defaultNS:        kube.defaultNS,
+		forwardSaName:    forwardSa,
+		forwardSaNS:      forwardSaNamespace,
+		kubeconfigSaName: kubeconfigSa,
+		kubeconfigSaNS:   kubeconfigSaNamespace,
+		tokenTTL:         tokenTTLSeconds,
 	})
 
 	addr := net.JoinHostPort(cfg.Host, cfg.Port)

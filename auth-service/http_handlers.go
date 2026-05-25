@@ -35,17 +35,19 @@ type publicBuildInfoResponse struct {
 }
 
 type handlerDeps struct {
-	cfg           config
-	codes         *joinCodeStore
-	kube          kubeHandler
-	orders        *coffeeRuntime
-	changes       *coffeeChangeRuntime
-	sessionCookie *securecookie.SecureCookie
-	tokens        *tokenCache
-	defaultNS     string
-	forwardSaName string
-	forwardSaNS   string
-	tokenTTL      int64
+	cfg              config
+	codes            *joinCodeStore
+	kube             kubeHandler
+	orders           *coffeeRuntime
+	changes          *coffeeChangeRuntime
+	sessionCookie    *securecookie.SecureCookie
+	tokens           *tokenCache
+	defaultNS        string
+	forwardSaName    string
+	forwardSaNS      string
+	kubeconfigSaName string
+	kubeconfigSaNS   string
+	tokenTTL         int64
 }
 
 func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
@@ -223,11 +225,31 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 				return
 			}
 
-			log.Printf("forward-auth-decision: %s X-Forwarded-Uri=%s ip=%s ua=%q", forwardedMethod, forwardedURI, clientIP(r), r.UserAgent())
+			// Derive the audience identity from the session BEFORE minting a
+			// token. A malformed identity is fail-closed (401) — we never want
+			// to return a 200 with Authorization but no Impersonate-User, since
+			// Traefik would still attach the bearer token upstream and the API
+			// server would then act as the raw impersonator SA.
+			session, ok := getBrowserSession(r)
+			if !ok {
+				http.Error(w, "session required", http.StatusUnauthorized)
+				return
+			}
+			identity, err := audienceIdentityFromSession(session.StableID, session.DisplayName, session.Email)
+			if err != nil {
+				log.Printf("forward-auth-decision: identity derivation failed ip=%s: %v", clientIP(r), err)
+				http.Error(w, "invalid session identity", http.StatusUnauthorized)
+				return
+			}
+
+			log.Printf("forward-auth-decision: %s X-Forwarded-Uri=%s ip=%s ua=%q user=%s", forwardedMethod, forwardedURI, clientIP(r), r.UserAgent(), identity.Username)
 
 			now := time.Now()
 
 			// All browser sessions now share the same short-lived forwarding token.
+			// The token is for the impersonator SA, which has impersonate-only
+			// RBAC. The actual authorization happens against the impersonated
+			// audience user (voter-audience group).
 			const skew = 20 * time.Second
 			tokenToUse, err := getOrRequestToken(deps.tokens, deps.kube, "shared", now, skew, deps.forwardSaNS, deps.forwardSaName, nil, deps.tokenTTL, r.Context())
 			if err != nil {
@@ -237,6 +259,17 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			}
 
 			w.Header().Set("Authorization", fmt.Sprintf("Bearer %s", tokenToUse))
+			// Impersonation headers — Traefik must list these in
+			// authResponseHeaders so they reach the kube-apiserver. The
+			// audit/RBAC identity will be the impersonated user, not the SA.
+			w.Header().Set("Impersonate-User", identity.Username)
+			w.Header().Set("Impersonate-Group", audienceGroupName)
+			if deps.cfg.ConfigButlerIdentityExtrasEnabled {
+				// Preserve the percent-encoded extra key spelling Traefik is
+				// configured to forward; Header.Set would MIME-canonicalize it.
+				w.Header()[impersonateExtraHeaderName(configButlerDisplayNameExtraKey)] = []string{identity.DisplayName}
+				w.Header()[impersonateExtraHeaderName(configButlerEmailExtraKey)] = []string{identity.Email}
+			}
 			w.Header().Set("X-Auth-Forwarder", "ok")
 			w.WriteHeader(http.StatusOK)
 		})(w, r)
@@ -258,11 +291,19 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 		if namespace == "" {
 			namespace = "default"
 		}
-		log.Printf("kubeconfig: minting token for namespace=%s ip=%s", namespace, clientIP(r))
+		saName := deps.kubeconfigSaName
+		if saName == "" {
+			saName = deps.forwardSaName
+		}
+		saNS := deps.kubeconfigSaNS
+		if saNS == "" {
+			saNS = deps.forwardSaNS
+		}
+		log.Printf("kubeconfig: minting token for namespace=%s sa=%s/%s ip=%s", namespace, saNS, saName, clientIP(r))
 
 		ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
 		defer cancel()
-		token, expiresAt, err := deps.kube.requestToken(ctx, deps.forwardSaNS, deps.forwardSaName, nil, deps.tokenTTL)
+		token, expiresAt, err := deps.kube.requestToken(ctx, saNS, saName, nil, deps.tokenTTL)
 		if err != nil {
 			log.Printf("kubeconfig: token request failed: %v", err)
 			http.Error(w, "token request failed", http.StatusInternalServerError)

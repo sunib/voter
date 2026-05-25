@@ -207,6 +207,8 @@ type stubKubeClient struct {
 	token               string
 	exp                 time.Time
 	tokenErr            error
+	lastTokenNamespace  string
+	lastTokenName       string
 	requestStarted      chan struct{}
 	releaseRequest      chan struct{}
 	reviewAuthenticated bool
@@ -224,9 +226,11 @@ type stubKubeClient struct {
 	lastCommitRequest   createCommitRequestParams
 }
 
-func (s *stubKubeClient) requestToken(_ context.Context, _, _ string, _ []string, _ int64) (string, time.Time, error) {
+func (s *stubKubeClient) requestToken(_ context.Context, namespace, name string, _ []string, _ int64) (string, time.Time, error) {
 	s.mu.Lock()
 	s.calls++
+	s.lastTokenNamespace = namespace
+	s.lastTokenName = name
 	token := s.token
 	exp := s.exp
 	tokenErr := s.tokenErr
@@ -1083,6 +1087,110 @@ func TestAdminPatchSucceedsWhenCommitRequestFails(t *testing.T) {
 	}
 }
 
+// TestForwardAuthBrowserSessionImpersonation locks down the new behavior: a
+// valid session cookie causes forwardAuth to attach Impersonate-* headers
+// derived from the session on top of the bearer token. Traefik then forwards
+// those headers, and the kube-apiserver re-authorizes as the audience user.
+//
+// The failure mode this guards against is regressing to a 200 with
+// Authorization but no Impersonate-User — that would put the raw impersonator
+// SA on the upstream request, which is silently broader RBAC than intended.
+func TestForwardAuthBrowserSessionImpersonation(t *testing.T) {
+	cfg := config{
+		SessionCookieName:                 "auth_session",
+		SessionCookieMaxAgeSecs:           3600,
+		CookieSecure:                      false,
+		ConfigButlerIdentityExtrasEnabled: true,
+	}
+	hashKey, blockKey, err := generateCookieKeys()
+	if err != nil {
+		t.Fatalf("unexpected key error: %v", err)
+	}
+	sc, err := newSessionSecureCookie(hashKey, blockKey)
+	if err != nil {
+		t.Fatalf("unexpected securecookie error: %v", err)
+	}
+
+	cases := []struct {
+		name          string
+		extrasEnabled bool
+		wantExtras    bool
+	}{
+		{name: "extras enabled emits display-name + email", extrasEnabled: true, wantExtras: true},
+		{name: "extras disabled omits the two Impersonate-Extra headers", extrasEnabled: false, wantExtras: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			runCfg := cfg
+			runCfg.ConfigButlerIdentityExtrasEnabled = tc.extrasEnabled
+
+			stub := &stubKubeClient{token: "impersonator-token", exp: time.Now().Add(10 * time.Minute)}
+			deps := handlerDeps{
+				cfg:           runCfg,
+				kube:          stub,
+				sessionCookie: sc,
+				tokens:        newTokenCache(),
+				forwardSaName: "voter-audience-impersonator",
+				forwardSaNS:   "voter",
+				tokenTTL:      600,
+			}
+
+			mux := http.NewServeMux()
+			registerHandlers(mux, deps)
+
+			cookieRec := httptest.NewRecorder()
+			if err := setTestSessionCookie(t, cookieRec, runCfg, sc, testStableID, testDisplayName, testEmail, time.Now()); err != nil {
+				t.Fatalf("set session cookie: %v", err)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "http://auth-service/private/forward-auth-decision", nil)
+			req.Header.Set("X-Forwarded-Uri", "/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/quizsubmissions")
+			req.Header.Set("X-Forwarded-Method", "POST")
+			for _, c := range cookieRec.Result().Cookies() {
+				req.AddCookie(c)
+			}
+
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status: got %d want 200 (body=%q)", rec.Code, rec.Body.String())
+			}
+			if got := rec.Header().Get("Authorization"); got != "Bearer impersonator-token" {
+				t.Errorf("Authorization: got %q want %q", got, "Bearer impersonator-token")
+			}
+			wantUser := demoIdentityUsernamePrefix + testStableID
+			if got := rec.Header().Get("Impersonate-User"); got != wantUser {
+				t.Errorf("Impersonate-User: got %q want %q", got, wantUser)
+			}
+			if got := rec.Header().Get("Impersonate-Group"); got != audienceGroupName {
+				t.Errorf("Impersonate-Group: got %q want %q", got, audienceGroupName)
+			}
+			displayHeader := impersonateExtraHeaderName(configButlerDisplayNameExtraKey)
+			emailHeader := impersonateExtraHeaderName(configButlerEmailExtraKey)
+			if tc.wantExtras {
+				if got := rec.Header()[displayHeader]; len(got) != 1 || got[0] != testDisplayName {
+					t.Errorf("raw response headers missing exact key %q", displayHeader)
+				}
+				if got := rec.Header()[emailHeader]; len(got) != 1 || got[0] != testEmail {
+					t.Errorf("raw response headers missing exact key %q", emailHeader)
+				}
+			} else {
+				if got := rec.Header()[displayHeader]; len(got) != 0 {
+					t.Errorf("%s should be empty when extras disabled, got %q", displayHeader, got)
+				}
+				if got := rec.Header()[emailHeader]; len(got) != 0 {
+					t.Errorf("%s should be empty when extras disabled, got %q", emailHeader, got)
+				}
+			}
+			if got := rec.Header().Get("X-Auth-Forwarder"); got != "ok" {
+				t.Errorf("X-Auth-Forwarder: got %q want %q", got, "ok")
+			}
+		})
+	}
+}
+
 func TestForwardAuthBearerPassthrough(t *testing.T) {
 	cfg := config{
 		JoinCodeRotate:    15 * time.Second,
@@ -1252,13 +1360,15 @@ func TestKubeconfigHandler(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := &stubKubeClient{token: "stub-token", exp: tokenExp, tokenErr: tc.tokenErr}
 			deps := handlerDeps{
-				cfg:           cfg,
-				kube:          stub,
-				sessionCookie: sc,
-				defaultNS:     "voter",
-				forwardSaName: "quiz-access",
-				forwardSaNS:   "voter",
-				tokenTTL:      600,
+				cfg:              cfg,
+				kube:             stub,
+				sessionCookie:    sc,
+				defaultNS:        "voter",
+				forwardSaName:    "voter-audience-impersonator",
+				forwardSaNS:      "voter",
+				kubeconfigSaName: "quiz-access",
+				kubeconfigSaNS:   "voter",
+				tokenTTL:         600,
 			}
 
 			mux := http.NewServeMux()
@@ -1286,6 +1396,11 @@ func TestKubeconfigHandler(t *testing.T) {
 
 			if rec.Code != tc.wantCode {
 				t.Errorf("status: got %d, want %d (body: %q)", rec.Code, tc.wantCode, rec.Body.String())
+			}
+			if stub.calls > 0 {
+				if stub.lastTokenNamespace != "voter" || stub.lastTokenName != "quiz-access" {
+					t.Errorf("token request SA: got %s/%s want voter/quiz-access", stub.lastTokenNamespace, stub.lastTokenName)
+				}
 			}
 			body := rec.Body.String()
 			for _, want := range tc.wantInBody {

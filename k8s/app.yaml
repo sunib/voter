@@ -71,9 +71,20 @@ spec:
           image: zot.z65.nl/voter/auth-service:coffee
           imagePullPolicy: Always
           env:
+            # The token minted for this SA is what Traefik attaches to browser
+            # requests as `Authorization`. It has impersonate-only RBAC — the
+            # actual write authorization is via Impersonate-* headers that
+            # forwardAuth derives from the session cookie. See plans/
+            # quiz-submission-impersonation-plan.md.
             - name: FORWARD_SA
-              value: quiz-access
+              value: voter-audience-impersonator
             - name: FORWARD_SA_NAMESPACE
+              value: voter
+            # Kubeconfigs still use the legacy quiz-access SA because Traefik
+            # strips inbound Impersonate-* headers before bearer passthrough.
+            - name: KUBECONFIG_SA
+              value: quiz-access
+            - name: KUBECONFIG_SA_NAMESPACE
               value: voter
             - name: COOKIE_SECURE
               value: "true"

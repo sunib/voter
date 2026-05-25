@@ -34,6 +34,61 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: quiz-access
+---
+# voter-audience-impersonator is the SA whose token Traefik attaches to browser
+# requests after forwardAuth. It does NOT have any direct CRUD on the quiz CRDs
+# — it can ONLY impersonate audience identities (user prefix demo:<stableID>,
+# group voter-audience, optional ConfigButler display-name / email extras).
+#
+# Authorization on the actual resource is granted via the voter-audience
+# RoleBinding in auth-service-rbac.yaml. That keeps the blast radius small:
+# if this SA token leaks, the holder can impersonate audience users but cannot
+# do anything as the SA itself.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: voter-audience-impersonator
+  namespace: voter
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: voter-audience-impersonator
+rules:
+  # Users are unrestricted at the RBAC layer because nicknames are slugged in
+  # code to demo:<stableID> before reaching the API server. The forwardAuth
+  # response always sets Impersonate-User, and Traefik strips any
+  # client-supplied Impersonate-* before forwardAuth runs — see
+  # ingress-kubeapi.yaml.
+  - apiGroups: [""]
+    resources: ["users"]
+    verbs: ["impersonate"]
+  # Group is pinned to a single value so impersonated identities can only ever
+  # inherit the limited voter-audience RBAC.
+  - apiGroups: [""]
+    resources: ["groups"]
+    verbs: ["impersonate"]
+    resourceNames: ["voter-audience"]
+  # ConfigButler reads display-name and email off impersonation extras to
+  # author the Git commit. Each extra key needs its own impersonate permission.
+  - apiGroups: ["authentication.k8s.io"]
+    resources:
+      - "userextras/configbutler.ai/claims/display-name"
+      - "userextras/configbutler.ai/claims/email"
+    verbs: ["impersonate"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: voter-audience-impersonator
+subjects:
+  - kind: ServiceAccount
+    name: voter-audience-impersonator
+    namespace: voter
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: voter-audience-impersonator
 
 
 # You can the token then with 'kubectl -n voter create token quiz-access'

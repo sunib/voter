@@ -14,12 +14,16 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "create", "update"]
-  # Access to create tokens for ServiceAccounts (for quiz-access SA)
+  # Access to create tokens for ServiceAccounts. quiz-access is the legacy
+  # browser-flow SA (kept while we transition); voter-audience-impersonator is
+  # the SA whose token is now attached to browser requests so the API server
+  # can apply Impersonate-* headers set by forwardAuth.
   - apiGroups: [""]
     resources: ["serviceaccounts/token"]
     verbs: ["create"]
     resourceNames:  # This is really cool: now we can limit it to what we absolutelty need
     - quiz-access
+    - voter-audience-impersonator
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

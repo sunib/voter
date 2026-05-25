@@ -65,12 +65,12 @@ func TestValidateStableIDRejects(t *testing.T) {
 		"",
 		"   ",
 		"abc",
-		"12345",     // too short
-		"1234567",   // too long
-		"012345",    // leading zero
-		"52154a",    // non-digit
-		"52154 ",    // trailing space
-		"521541\n",  // newline
+		"12345",    // too short
+		"1234567",  // too long
+		"012345",   // leading zero
+		"52154a",   // non-digit
+		"52154 ",   // trailing space
+		"521541\n", // newline
 		"٥٢١٥٤١",   // non-ASCII digits
 	}
 	for _, raw := range bad {
@@ -134,5 +134,16 @@ func TestAudienceIdentityFromSessionTrimsEmail(t *testing.T) {
 	}
 	if id.Email != "simon@example.com" {
 		t.Fatalf("Email: got %q want %q", id.Email, "simon@example.com")
+	}
+}
+
+func TestImpersonateExtraHeaderNameEscapesKubernetesExtraKey(t *testing.T) {
+	got := impersonateExtraHeaderName(configButlerDisplayNameExtraKey)
+	want := "Impersonate-Extra-configbutler.ai%2Fclaims%2Fdisplay-name"
+	if got != want {
+		t.Fatalf("header name: got %q want %q", got, want)
+	}
+	if strings.Contains(got, "/") {
+		t.Fatalf("header name must not contain raw slash: %q", got)
 	}
 }

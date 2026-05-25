@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"net/mail"
+	"net/url"
 	"regexp"
 	"strings"
 )
@@ -29,6 +30,10 @@ const (
 	configButlerDisplayNameExtraKey = "configbutler.ai/claims/display-name"
 	configButlerEmailExtraKey       = "configbutler.ai/claims/email"
 )
+
+func impersonateExtraHeaderName(extraKey string) string {
+	return "Impersonate-Extra-" + url.PathEscape(extraKey)
+}
 
 // stableIDPattern: 6 ASCII digits, no leading zero. Matches the frontend
 // generator and keeps the K8s username short and grep-friendly.
