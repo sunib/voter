@@ -1,3 +1,4 @@
 auth-service/bin/
 auth-service/auth-service
 k8s-examples/zot-pull.secret.example.yaml
+external-code

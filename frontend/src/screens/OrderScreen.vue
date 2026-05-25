@@ -170,7 +170,6 @@ watch(
 <template>
   <main class="page-shell">
     <section class="hero-card">
-      <p class="eyebrow">TestNet Coffee</p>
       <h1>{{ storefront?.shop.name ?? 'Coffee Loading…' }}</h1>
       <p class="hero-copy">
         {{ storefront?.shop.bannerText ?? 'Scan the QR code, pick a coffee, and see what the voucher really does at submit time.' }}

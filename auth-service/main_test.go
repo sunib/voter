@@ -216,6 +216,7 @@ type stubKubeClient struct {
 	coffeeConfigErr     error
 	patchCoffeeErr      error
 	lastPatchBody       []byte
+	lastPatchActor      string
 }
 
 func (s *stubKubeClient) requestToken(_ context.Context, _, _ string, _ []string, _ int64) (string, time.Time, error) {
@@ -253,8 +254,9 @@ func (s *stubKubeClient) getCoffeeConfig(_ context.Context) (coffeeConfig, error
 	return s.coffeeConfig, s.coffeeConfigErr
 }
 
-func (s *stubKubeClient) patchCoffeeConfig(_ context.Context, patch []byte) (coffeeConfig, error) {
+func (s *stubKubeClient) patchCoffeeConfig(_ context.Context, patch []byte, actor string) (coffeeConfig, error) {
 	s.lastPatchBody = append([]byte(nil), patch...)
+	s.lastPatchActor = actor
 	return s.patchResult, s.patchCoffeeErr
 }
 

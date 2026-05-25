@@ -93,17 +93,23 @@ type kubeHandler interface {
 	getQuizSession(ctx context.Context, ref sessionRef) (quizSessionSpec, error)
 	reviewToken(ctx context.Context, token string) (authenticated bool, username string, err error)
 	getCoffeeConfig(ctx context.Context) (coffeeConfig, error)
-	patchCoffeeConfig(ctx context.Context, patch []byte) (coffeeConfig, error)
+	patchCoffeeConfig(ctx context.Context, patch []byte, actor string) (coffeeConfig, error)
 	watchCoffeeConfig(ctx context.Context) (coffeeConfig, k8swatch.Interface, error)
 }
 
 type kubeClient struct {
 	clientset    kubernetes.Interface
 	dynamic      dynamic.Interface
+	restConfig   *rest.Config
 	defaultNS    string
 	sessionCache *quizSessionCache
 	coffeeName   string
 }
+
+// audienceGroupName is the Kubernetes group assigned to impersonated audience
+// members. RBAC bindings target this group so any nickname inherits the same
+// limited permissions.
+const audienceGroupName = "voter-audience"
 
 const (
 	kubeTokenPath   = "/var/run/secrets/kubernetes.io/serviceaccount/token"
@@ -154,6 +160,7 @@ func loadKubeClient(cfg config) (kubeClient, error) {
 	return kubeClient{
 		clientset:    clientset,
 		dynamic:      dynamicClient,
+		restConfig:   restConfig,
 		defaultNS:    defaultNS,
 		sessionCache: newQuizSessionCache(),
 		coffeeName:   strings.TrimSpace(cfg.CoffeeConfigName),
@@ -337,12 +344,21 @@ func (c kubeClient) getCoffeeConfig(ctx context.Context) (coffeeConfig, error) {
 	return toCoffeeConfig(obj)
 }
 
-func (c kubeClient) patchCoffeeConfig(ctx context.Context, patch []byte) (coffeeConfig, error) {
+func (c kubeClient) patchCoffeeConfig(ctx context.Context, patch []byte, actor string) (coffeeConfig, error) {
 	if c.defaultNS == "" || c.coffeeName == "" {
 		return coffeeConfig{}, errors.New("coffee config name not configured in runtime namespace")
 	}
 
-	obj, err := c.dynamic.Resource(coffeeConfigGVR()).Namespace(c.defaultNS).Patch(
+	client := c.dynamic
+	if user := sanitizeImpersonationUser(actor); user != "" {
+		impersonated, err := c.impersonatedDynamic(user)
+		if err != nil {
+			return coffeeConfig{}, fmt.Errorf("failed to build impersonated client for %q: %w", user, err)
+		}
+		client = impersonated
+	}
+
+	obj, err := client.Resource(coffeeConfigGVR()).Namespace(c.defaultNS).Patch(
 		ctx,
 		c.coffeeName,
 		types.MergePatchType,
@@ -353,6 +369,37 @@ func (c kubeClient) patchCoffeeConfig(ctx context.Context, patch []byte) (coffee
 		return coffeeConfig{}, fmt.Errorf("failed to patch coffee config: %w", err)
 	}
 	return toCoffeeConfig(obj)
+}
+
+// impersonatedDynamic returns a dynamic client that submits requests with
+// Impersonate-User and Impersonate-Group headers so that the audit log and any
+// downstream listener (e.g. gitops-reverser) see the audience member rather
+// than the auth-service ServiceAccount.
+func (c kubeClient) impersonatedDynamic(user string) (dynamic.Interface, error) {
+	if c.restConfig == nil {
+		return nil, errors.New("rest config unavailable for impersonation")
+	}
+	cfg := rest.CopyConfig(c.restConfig)
+	cfg.Impersonate = rest.ImpersonationConfig{
+		UserName: user,
+		Groups:   []string{audienceGroupName},
+	}
+	return dynamic.NewForConfig(cfg)
+}
+
+// sanitizeImpersonationUser returns a safe username to put in the
+// Impersonate-User header, or "" if the input cannot be safely impersonated.
+// We reject anything starting with "system:" to avoid colliding with built-in
+// identities even if RBAC happened to allow it.
+func sanitizeImpersonationUser(actor string) string {
+	user := strings.TrimSpace(actor)
+	if user == "" {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(user), "system:") {
+		return ""
+	}
+	return user
 }
 
 func (c kubeClient) watchCoffeeConfig(ctx context.Context) (coffeeConfig, k8swatch.Interface, error) {

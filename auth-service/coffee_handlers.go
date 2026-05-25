@@ -140,13 +140,13 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 				writeKubeError(w, err)
 				return
 			}
-			updated, err := deps.kube.patchCoffeeConfig(ctx, patchBody)
+			session, _ := getBrowserSession(r)
+			updated, err := deps.kube.patchCoffeeConfig(ctx, patchBody, session.Nickname)
 			if err != nil {
 				writeKubeError(w, err)
 				return
 			}
 			if deps.changes != nil {
-				session, _ := getBrowserSession(r)
 				deps.changes.record(newCoffeeConfigChange(
 					time.Now(),
 					current,

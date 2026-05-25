@@ -60,6 +60,55 @@ rules:
   - apiGroups: ["examples.configbutler.ai"]
     resources: ["coffeeconfigs"]
     verbs: ["get", "list", "watch", "patch"]
+  # Impersonation: auth-service forwards user-initiated writes to K8s under the
+  # audience member's identity so audit logs (and gitops-reverser) see the
+  # nickname instead of the auth-service ServiceAccount.
+  #
+  # Username is free-form (cosmetic; it ends up in audit logs and the GitOps
+  # commit author). The "system:" prefix is rejected in code to avoid colliding
+  # with built-in identities.
+  - apiGroups: [""]
+    resources: ["users"]
+    verbs: ["impersonate"]
+  # Group is locked down to a single value so impersonated identities can only
+  # ever inherit the limited voter-audience RBAC below.
+  - apiGroups: [""]
+    resources: ["groups"]
+    verbs: ["impersonate"]
+    resourceNames: ["voter-audience"]
+---
+# Permissions granted to impersonated audience members. Everyone who logs in via
+# auth-service is mapped into the voter-audience group, so a single binding
+# covers all of them.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: voter-audience
+  namespace: voter
+rules:
+  - apiGroups: ["examples.configbutler.ai"]
+    resources: ["coffeeconfigs"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: ["examples.configbutler.ai"]
+    resources: ["quizsessions"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["examples.configbutler.ai"]
+    resources: ["quizsubmissions"]
+    verbs: ["get", "list", "watch", "create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: voter-audience
+  namespace: voter
+subjects:
+  - kind: Group
+    name: voter-audience
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: voter-audience
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
