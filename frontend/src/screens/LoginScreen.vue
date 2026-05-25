@@ -124,8 +124,8 @@ function normalizeNextPath(raw: unknown): string {
           <p class="metadata-copy">
             {{
               codeFromQr
-                ? 'De code kwam al mee uit de QR.'
-                : 'Open je deze pagina direct, vul dan ook de demo-code in.'
+                ? 'The code was included from the QR.'
+                : 'If you opened this page directly, also fill in the demo code.'
             }}
           </p>
         </div>
@@ -151,8 +151,8 @@ function normalizeNextPath(raw: unknown): string {
       <div v-else class="embedded-card">
         <strong>QR code attached</strong>
         <p class="metadata-copy">
-          Deze login gebruikt de code uit de link. Je kunt nu direct
-          <strong>Join the demo</strong> kiezen.
+          This login uses the code from the link. You can now press
+          <strong>Join the demo</strong> directly.
         </p>
       </div>
 
@@ -195,7 +195,7 @@ function normalizeNextPath(raw: unknown): string {
         >
           {{ busy ? 'Entering…' : 'Join the demo' }}
         </button>
-        <span class="metadata-copy">Na login ga je naar {{ nextPath }}</span>
+        <span class="metadata-copy">After login you'll go to {{ nextPath }}</span>
       </div>
     </section>
   </main>

@@ -273,6 +273,41 @@ p {
   background: rgba(255, 245, 242, 0.98);
 }
 
+.admin-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.admin-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.7rem;
+  height: 2.7rem;
+  border-radius: 999px;
+  color: rgb(var(--muted));
+  background: rgba(var(--line), 0.05);
+  text-decoration: none;
+  transition:
+    transform 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.admin-back:hover {
+  transform: translateX(-1px);
+  color: rgb(var(--ink));
+  background: rgba(var(--card), 0.98);
+  box-shadow: 0 10px 22px rgba(17, 12, 8, 0.08);
+}
+
+.admin-back__icon {
+  display: block;
+}
+
 .admin-tabs {
   display: inline-flex;
   flex-wrap: wrap;

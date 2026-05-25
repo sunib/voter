@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "VITE_DEV_API_ORIGIN=https://demo.configbutler.ai VITE_DEV_HTTPS=1 vite --host",
     "dev:mock": "VITE_DEV_KUBE_MOCK=1 vite --host",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
