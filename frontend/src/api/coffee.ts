@@ -1,4 +1,5 @@
 import { clearStableID } from '../lib/demoIdentity'
+import { setKubeNamespace } from './kube'
 import type {
   CoffeeConfig,
   CoffeeConfigChangeRecord,
@@ -24,6 +25,7 @@ export type PublicSessionResponse = {
   stableId: string
   displayName: string
   email: string
+  namespace?: string
 }
 
 export type LoginRequest = {
@@ -115,7 +117,9 @@ export async function loginPublic(input: LoginRequest): Promise<void> {
 }
 
 export async function getPublicSession(): Promise<PublicSessionResponse> {
-  return await requestJson<PublicSessionResponse>('/public/session')
+  const res = await requestJson<PublicSessionResponse>('/public/session')
+  setKubeNamespace(res.namespace)
+  return res
 }
 
 export async function logoutPublic(): Promise<void> {

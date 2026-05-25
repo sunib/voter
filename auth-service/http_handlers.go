@@ -97,10 +97,15 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			http.Error(w, "session required", http.StatusUnauthorized)
 			return
 		}
+		namespace := deps.defaultNS
+		if namespace == "" {
+			namespace = "default"
+		}
 		writeJSON(w, http.StatusOK, map[string]string{
 			"stableId":    session.StableID,
 			"displayName": session.DisplayName,
 			"email":       session.Email,
+			"namespace":   namespace,
 		})
 	}))
 

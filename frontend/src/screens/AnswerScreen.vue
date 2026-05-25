@@ -11,6 +11,16 @@ import SubmitBar from '../components/submission/SubmitBar.vue'
 import { useSessionStore } from '../stores/session'
 import { useDraftSubmissionStore } from '../stores/draftSubmission'
 import { createQuizSubmission } from '../api/kube'
+import { getPublicSession } from '../api/coffee'
+
+async function isSignedOut(): Promise<boolean> {
+  try {
+    await getPublicSession()
+    return false
+  } catch (e: any) {
+    return e?.status === 401
+  }
+}
 
 const props = defineProps<{ session: string }>()
 
@@ -35,7 +45,7 @@ onMounted(async () => {
     sessionStore.setCurrentSession(props.session)
   } catch (e: any) {
     const status = e?.status
-    if (status === 401 || status === 403) {
+    if ((status === 401 || status === 403) && (await isSignedOut())) {
       await router.replace({ name: 'login', query: { next: route.fullPath } })
       return
     }
@@ -62,7 +72,7 @@ async function submit() {
     await router.replace({ name: 'thanks', params: { session: props.session } })
   } catch (e: any) {
     const status = e?.status
-    if (status === 401 || status === 403) {
+    if ((status === 401 || status === 403) && (await isSignedOut())) {
       await router.replace({ name: 'login', query: { next: route.fullPath } })
       return
     }

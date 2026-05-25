@@ -12,9 +12,21 @@ export type KubeError = {
   body?: unknown
 }
 
-const defaultConfig: KubeConfig = {
-  apiPrefix: import.meta.env.VITE_KUBE_API_PREFIX ?? '/apis/examples.configbutler.ai/v1alpha1',
-  namespace: import.meta.env.VITE_KUBE_NAMESPACE ?? 'vote',  // vote-demo.configbutler.ai, vote.configbutler.ai, talk-demo.configbutler.ai, adam.configbutler.ai
+// Runtime override populated from /public/session.namespace so the frontend
+// doesn't have to hardcode where QuizSessions live. Falls back to the env var
+// (useful for offline dev) and then to a last-resort default.
+let runtimeNamespace: string | undefined
+
+export function setKubeNamespace(ns: string | undefined): void {
+  const trimmed = ns?.trim()
+  runtimeNamespace = trimmed ? trimmed : undefined
+}
+
+function currentConfig(): KubeConfig {
+  return {
+    apiPrefix: import.meta.env.VITE_KUBE_API_PREFIX ?? '/apis/examples.configbutler.ai/v1alpha1',
+    namespace: runtimeNamespace ?? import.meta.env.VITE_KUBE_NAMESPACE ?? 'voter',
+  }
 }
 
 function isAuthError(status: number) {
@@ -34,7 +46,7 @@ export async function kubeFetch<T>(
     body?: unknown
     joinCode?: string
   },
-  cfg: KubeConfig = defaultConfig,
+  cfg: KubeConfig = currentConfig(),
 ): Promise<T> {
   const isRootPath = input.path.startsWith('/auth/')
   const url = isRootPath ? input.path : `${cfg.apiPrefix}${input.path}`
@@ -66,7 +78,7 @@ export async function kubeFetch<T>(
   return (await res.json()) as T
 }
 
-export function kubePaths(cfg: KubeConfig = defaultConfig) {
+export function kubePaths(cfg: KubeConfig = currentConfig()) {
   return {
     session: (name: string) =>
       `/namespaces/${encodeURIComponent(cfg.namespace)}/quizsessions/${encodeURIComponent(name)}`,
