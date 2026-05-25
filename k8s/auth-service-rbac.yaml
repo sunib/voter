@@ -56,24 +56,21 @@ rules:
   - apiGroups: ["examples.configbutler.ai"]
     resources: ["quizsubmissions"]
     verbs: ["get", "list", "watch", "create"]
-  # Access to CoffeeConfig (namespaced config object used by the demo)
+  # Read access to CoffeeConfig so the auth-service can render the storefront
+  # and serve the admin GET. All writes go through impersonation, so the SA
+  # deliberately does NOT have patch/update on coffeeconfigs — that closes the
+  # silent-fallback-to-SA path if identity derivation ever returns empty.
   - apiGroups: ["examples.configbutler.ai"]
     resources: ["coffeeconfigs"]
-    verbs: ["get", "list", "watch", "patch"]
-  # Create ConfigButler CommitRequest objects to finalize the open commit
-  # window after a CoffeeConfig patch. The actual create call is performed
-  # under the impersonated audience identity, but the auth-service ClusterRole
-  # keeps a fallback rule so direct calls (e.g. with no actor) still work.
-  - apiGroups: ["configbutler.ai"]
-    resources: ["commitrequests"]
-    verbs: ["create", "get", "list", "watch"]
-  # Impersonation: auth-service forwards user-initiated writes to K8s under the
-  # audience member's identity so audit logs (and gitops-reverser) see the
-  # nickname instead of the auth-service ServiceAccount.
+    verbs: ["get", "list", "watch"]
+  # Impersonation: auth-service forwards user-initiated writes under the
+  # audience member's synthetic "demo:<slug>" identity so audit logs (and
+  # gitops-reverser) see the participant rather than the SA.
   #
-  # Username is free-form (cosmetic; it ends up in audit logs and the GitOps
-  # commit author). The "system:" prefix is rejected in code to avoid colliding
-  # with built-in identities.
+  # The "users" verb is left unrestricted at the RBAC layer because participant
+  # nicknames are slugged in code to "demo:<slug>" before reaching the API
+  # server, which prevents collisions with any directly-bound K8s user. If the
+  # attendee set ever becomes known, prefer resourceNames here too.
   - apiGroups: [""]
     resources: ["users"]
     verbs: ["impersonate"]
@@ -83,6 +80,13 @@ rules:
     resources: ["groups"]
     verbs: ["impersonate"]
     resourceNames: ["voter-audience"]
+  # ConfigButler reads the display-name and email off impersonation extras to
+  # author the Git commit. Each extra key needs its own impersonate permission.
+  - apiGroups: ["authentication.k8s.io"]
+    resources:
+      - "userextras/configbutler.ai/claims/display-name"
+      - "userextras/configbutler.ai/claims/email"
+    verbs: ["impersonate"]
 ---
 # Permissions granted to impersonated audience members. Everyone who logs in via
 # auth-service is mapped into the voter-audience group, so a single binding

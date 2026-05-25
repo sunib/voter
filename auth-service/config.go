@@ -33,6 +33,14 @@ type config struct {
 	// are created. Empty means "use the runtime namespace" (the same namespace
 	// the auth-service runs in, which must also be the GitTarget's namespace).
 	ConfigButlerCommitRequestNamespace string `envconfig:"CONFIGBUTLER_COMMITREQUEST_NAMESPACE"`
+	// ConfigButlerIdentityExtrasEnabled controls whether impersonated writes
+	// carry the configbutler.ai/claims/{display-name,email} extras. Requires
+	// matching RBAC on authentication.k8s.io/userextras/...; flip off if that
+	// RBAC is not yet applied to keep the demo working.
+	ConfigButlerIdentityExtrasEnabled bool `envconfig:"CONFIGBUTLER_IDENTITY_EXTRAS_ENABLED" default:"true"`
+	// ConfigButlerDemoEmailDomain is the domain used to synthesize a Git
+	// author email when the participant did not provide one (slug@domain).
+	ConfigButlerDemoEmailDomain string `envconfig:"CONFIGBUTLER_DEMO_EMAIL_DOMAIN" default:"demo.configbutler.ai"`
 }
 
 func loadConfig() (config, error) {

@@ -30,15 +30,19 @@ After, when `Simon` clicks "save" in the admin UI:
   "groups": ["system:authenticated", ...]
 },
 "impersonatedUser": {
-  "username": "Simon",
-  "groups": ["voter-audience", "system:authenticated"]
+  "username": "demo:simon-koudijs",
+  "groups": ["voter-audience", "system:authenticated"],
+  "extra": {
+    "configbutler.ai/claims/display-name": ["Simon Koudijs"],
+    "configbutler.ai/claims/email": ["simon-koudijs@demo.configbutler.ai"]
+  }
 }
 ```
 
-`gitops-reverser` reads the impersonated identity off the audit event and uses
-it as the author of the generated Git commit. The commit log on the demo
-screen then shows real names ("Simon committed: lowered espresso price") rather
-than the same opaque ServiceAccount over and over.
+`gitops-reverser` reads the impersonated identity and ConfigButler extras off
+the audit event and uses them as the author of the generated Git commit. The
+commit log on the demo screen then shows real names ("Simon committed: lowered
+espresso price") rather than the same opaque ServiceAccount over and over.
 
 ## When this is a fit
 
@@ -51,11 +55,13 @@ than the same opaque ServiceAccount over and over.
 ## How it works (one paragraph)
 
 Your backend keeps its existing ServiceAccount and bearer token. When it makes
-a write on behalf of an end user, it adds two headers:
+a write on behalf of an end user, it adds impersonation headers:
 
 ```
-Impersonate-User: Simon
+Impersonate-User: demo:simon-koudijs
 Impersonate-Group: voter-audience
+Impersonate-Extra-configbutler.ai%2Fclaims%2Fdisplay-name: Simon Koudijs
+Impersonate-Extra-configbutler.ai%2Fclaims%2Femail: simon-koudijs@demo.configbutler.ai
 ```
 
 The K8s API server then:
@@ -64,15 +70,80 @@ The K8s API server then:
 2. Checks that your SA has `impersonate` permission for the requested user and
    group.
 3. **Drops your SA's identity** for the rest of the request and replaces it
-   with the impersonated identity (`Simon`, with group `voter-audience` only —
-   no merging with your SA's groups).
+   with the impersonated identity (`demo:simon-koudijs`, with group
+   `voter-audience` only — no merging with your SA's groups).
 4. Authorizes the actual operation (e.g. `patch coffeeconfigs`) against the
    impersonated identity.
 5. Writes both identities into the audit event.
 
 Step 3 is the load-bearing part: nothing about Simon needs to exist in K8s.
-The group is what carries permissions; the username is essentially a label
-that flows into audit logs.
+The group is what carries permissions. The username and extras are attribution
+fields that flow into audit logs and, for ConfigButler, into Git authoring.
+
+## Recommended integration shape
+
+For apps integrating with ConfigButler, keep the human display name separate
+from the Kubernetes impersonation username.
+
+Example:
+
+```text
+display name: Simon Koudijs
+k8s user:     demo:simon-koudijs
+email:        simon-koudijs@demo.configbutler.ai
+group:        voter-audience
+```
+
+The display name and email do not both need to come from the user. A good demo
+or onboarding flow can generate a friendly display name, such as `Demo Guest
+42`, and can leave email blank. When email is blank, synthesize a valid address
+from the slug, for example `demo-guest-42@demo.configbutler.ai`.
+
+If a participant wants their real email in Git history, let them provide it as
+an optional field and validate it before using it. Make it clear in the UI that
+email is not required.
+
+Do not use a raw nickname, email, or OAuth display name as `Impersonate-User`.
+Kubernetes RBAC can bind permissions directly to `User` subjects, so names such
+as `admin`, `kubernetes-admin`, or `system:*` can collide with real cluster
+identities. A synthetic prefix such as `demo:` or your product/domain prefix
+keeps participant-controlled input away from real users.
+
+ConfigButler/gitops-reverser reads these audit extras when choosing the Git
+author:
+
+```text
+configbutler.ai/claims/display-name
+configbutler.ai/claims/email
+```
+
+If the extras are missing or unusable, ConfigButler falls back to the Kubernetes
+username. That is safe, but produces less friendly commit authors.
+
+## Integrator checklist
+
+If you are adding this pattern to another app, adjust these pieces together:
+
+- **Identity derivation:** derive a canonical Kubernetes username such as
+  `demo:<slug>` from the display name or login identity.
+- **Generated display name:** provide a friendly default such as `Demo Guest
+  42` so users can continue without typing personal details.
+- **Display name:** keep the human-readable name separate and pass it as
+  `configbutler.ai/claims/display-name`.
+- **Email:** pass a validated real email or a synthetic valid email such as
+  `<slug>@demo.configbutler.ai` as `configbutler.ai/claims/email`. Email should
+  be optional for the user.
+- **RBAC:** grant `impersonate` for users, the one allowed group, and the
+  ConfigButler user-extra keys.
+- **Authorization group:** bind resource permissions to the fixed group, for
+  example `voter-audience`, not to each user.
+- **Fail closed:** if a user-initiated request cannot derive a valid
+  impersonation identity, reject the request instead of using the backend
+  ServiceAccount.
+- **Consistent identity:** use the same impersonated identity and extras for
+  the watched resource write and the `CommitRequest` create.
+- **Verification:** check both the Kubernetes audit event and the resulting Git
+  commit author after deployment.
 
 ## Required Kubernetes resources
 
@@ -81,10 +152,14 @@ substitute your own.
 
 ### 1. Let your backend impersonate
 
-Grant your application's ServiceAccount the `impersonate` verb. The username
-is left unrestricted (it's just a label), but the **group is locked down** so
-a malicious or buggy nickname can never grant elevated rights — the worst case
-is "Simon" inheriting whatever `voter-audience` is allowed to do.
+Grant your application's ServiceAccount the `impersonate` verb. The example
+below leaves usernames unrestricted because demo users are generated with a
+non-colliding prefix such as `demo:<slug>`. If your participant set is known,
+prefer `resourceNames` on `users` too.
+
+The **group is locked down** so an integrating app can only attach the limited
+audience group. ConfigButler display name and email are carried as user extras,
+so the service account also needs permission to set those exact extra keys.
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -92,7 +167,8 @@ kind: ClusterRole
 metadata:
   name: voter-impersonator
 rules:
-  # Free-form usernames — cosmetic, end up in audit logs / commit authors.
+  # Synthetic usernames such as demo:simon-koudijs.
+  # If the set is known, add resourceNames here too.
   - apiGroups: [""]
     resources: ["users"]
     verbs: ["impersonate"]
@@ -101,6 +177,13 @@ rules:
     resources: ["groups"]
     verbs: ["impersonate"]
     resourceNames: ["voter-audience"]
+  # ConfigButler/gitops-reverser reads these extras from audit events to choose
+  # the Git author name and email.
+  - apiGroups: ["authentication.k8s.io"]
+    resources:
+      - "userextras/configbutler.ai/claims/display-name"
+      - "userextras/configbutler.ai/claims/email"
+    verbs: ["impersonate"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -118,6 +201,9 @@ roleRef:
 
 > ⚠️ Without the `resourceNames` constraint on `groups`, your backend could
 > impersonate `system:masters` and become cluster-admin. Always pin the group.
+>
+> ⚠️ Do not pass raw participant input as `Impersonate-User`. Prefix and slug it
+> first, or restrict the `users` rule with `resourceNames`.
 
 ### 2. Define what the impersonated users can do
 
@@ -177,11 +263,20 @@ keeps the impersonated config out of any shared cache.
 
 ```go
 import (
+    "errors"
+    "strings"
+
     "k8s.io/client-go/dynamic"
     "k8s.io/client-go/rest"
 )
 
 const audienceGroup = "voter-audience"
+
+type audienceIdentity struct {
+    Username    string // demo:simon-koudijs
+    DisplayName string // Simon Koudijs
+    Email       string // simon-koudijs@demo.configbutler.ai
+}
 
 // Stash the rest.Config on whatever wraps your kube client.
 type kubeClient struct {
@@ -190,11 +285,18 @@ type kubeClient struct {
     // ...
 }
 
-func (c kubeClient) impersonatedDynamic(user string) (dynamic.Interface, error) {
+func (c kubeClient) impersonatedDynamic(identity audienceIdentity) (dynamic.Interface, error) {
+    if strings.TrimSpace(identity.Username) == "" {
+        return nil, errors.New("missing impersonation username")
+    }
     cfg := rest.CopyConfig(c.restConfig)
     cfg.Impersonate = rest.ImpersonationConfig{
-        UserName: user,
+        UserName: identity.Username,
         Groups:   []string{audienceGroup},
+        Extra: map[string][]string{
+            "configbutler.ai/claims/display-name": {identity.DisplayName},
+            "configbutler.ai/claims/email":        {identity.Email},
+        },
     }
     return dynamic.NewForConfig(cfg)
 }
@@ -203,45 +305,113 @@ func (c kubeClient) impersonatedDynamic(user string) (dynamic.Interface, error) 
 Use it in the write path:
 
 ```go
-func (c kubeClient) patchCoffeeConfig(ctx context.Context, patch []byte, actor string) (coffeeConfig, error) {
-    client := c.dynamic
-    if user := sanitizeImpersonationUser(actor); user != "" {
-        impersonated, err := c.impersonatedDynamic(user)
-        if err != nil {
-            return coffeeConfig{}, err
-        }
-        client = impersonated
+func (c kubeClient) patchCoffeeConfig(ctx context.Context, patch []byte, identity audienceIdentity) (coffeeConfig, error) {
+    client, err := c.impersonatedDynamic(identity)
+    if err != nil {
+        return coffeeConfig{}, err
     }
     obj, err := client.Resource(gvr).Namespace(ns).Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
     // ...
 }
 ```
 
-`actor` comes from your existing session cookie / JWT / whatever. If it's
-empty the call falls back to the SA's own identity, which is fine for
-internal/system paths.
+The display name can come from your existing session cookie / JWT / OAuth
+claims, or from a generated default. The email can come from an optional login
+field or be synthesized from the display-name slug. Derive `identity.Username`
+before calling the Kubernetes client. For user-initiated writes, missing or
+invalid identity should return an error; do not silently fall back to the
+backend ServiceAccount.
 
-### Sanitizing the username
+### Deriving the Kubernetes username
 
-The username is free-form, so sanitize it before sending. Two rules matter:
+Do not sanitize by dropping unsafe input and continuing as the service account.
+For user-initiated writes, derive a synthetic username and fail closed if that
+cannot be done.
+
+Use `github.com/gosimple/slug` so non-ASCII names (`佐藤`, `Łukasz`, `Müller`)
+transliterate via `go-unidecode` and never collapse to empty — a hand-rolled
+ASCII-only slug locks those users out. Use `net/mail.ParseAddress` from the
+standard library for email validation and additionally reject `<>\n\r` so the
+value can't break a Git author signature line. The display name itself is also
+written into the Git author line, so apply the same char filter there.
 
 ```go
-func sanitizeImpersonationUser(actor string) string {
-    user := strings.TrimSpace(actor)
-    if user == "" {
-        return ""
+import (
+    "errors"
+    "net/mail"
+    "strings"
+
+    "github.com/gosimple/slug"
+)
+
+const (
+    demoSlugMaxLen        = 40
+    demoDisplayNameMaxLen = 64
+)
+
+func audienceIdentityFromDisplayName(displayName, optionalEmail, emailDomain string) (audienceIdentity, error) {
+    name, err := normalizeDisplayName(displayName)
+    if err != nil {
+        return audienceIdentity{}, err
     }
-    // Refuse to ever impersonate a built-in identity even if RBAC happened
-    // to allow it. This is a defense-in-depth check, not the primary guard.
-    if strings.HasPrefix(strings.ToLower(user), "system:") {
-        return ""
+
+    s := slug.MakeLang(name, "en")
+    if len(s) > demoSlugMaxLen {
+        s = strings.TrimRight(s[:demoSlugMaxLen], "-")
     }
-    return user
+    if s == "" {
+        return audienceIdentity{}, errors.New("display name cannot form an identity")
+    }
+
+    domain := strings.TrimSpace(emailDomain)
+    if domain == "" {
+        domain = "demo.configbutler.ai"
+    }
+    email := strings.TrimSpace(optionalEmail)
+    if email == "" {
+        email = s + "@" + domain
+    } else if err := validateAuthorEmail(email); err != nil {
+        return audienceIdentity{}, err
+    }
+
+    return audienceIdentity{
+        Username:    "demo:" + s,
+        DisplayName: name,
+        Email:       email,
+    }, nil
+}
+
+func normalizeDisplayName(raw string) (string, error) {
+    name := strings.TrimSpace(raw)
+    if name == "" {
+        return "", errors.New("display name is required")
+    }
+    if strings.ContainsAny(name, "<>\n\r") {
+        return "", errors.New("display name contains characters unsafe for git author lines")
+    }
+    if len(name) > demoDisplayNameMaxLen {
+        return "", errors.New("display name is too long")
+    }
+    return name, nil
+}
+
+// validateAuthorEmail accepts only bare addresses (no "Name <addr>" form) and
+// rejects characters that would break a git author signature line.
+func validateAuthorEmail(raw string) error {
+    if strings.ContainsAny(raw, "<>\n\r") {
+        return errors.New("invalid author email")
+    }
+    addr, err := mail.ParseAddress(raw)
+    if err != nil || addr.Name != "" || addr.Address != raw {
+        return errors.New("invalid author email")
+    }
+    return nil
 }
 ```
 
-The primary guard is still the group restriction in RBAC — sanitization is
-just to keep the audit log readable and to refuse footguns at the edge.
+The group restriction in RBAC is still the primary authorization guard, but the
+synthetic username prevents participant-controlled names from colliding with
+real cluster users.
 
 ## Verification
 
@@ -258,6 +428,14 @@ kubectl auth can-i --as=system:serviceaccount:voter:auth-service \
   impersonate groups/voter-audience
 # expect: yes
 
+kubectl auth can-i --as=system:serviceaccount:voter:auth-service \
+  impersonate userextras/configbutler.ai/claims/display-name.authentication.k8s.io
+# expect: yes
+
+kubectl auth can-i --as=system:serviceaccount:voter:auth-service \
+  impersonate userextras/configbutler.ai/claims/email.authentication.k8s.io
+# expect: yes
+
 kubectl auth can-i --as=system:masters --as-group=voter-audience \
   patch coffeeconfigs -n voter
 # expect: yes (the impersonated identity has the permission)
@@ -272,8 +450,9 @@ whatever consumes them):
 kubectl logs -n configbutler deploy/gitops-reverser | grep impersonatedUser
 ```
 
-Expect the `impersonatedUser.username` field to carry the nickname you signed
-in with.
+Expect `impersonatedUser.username` to carry the synthetic user
+(`demo:simon-koudijs`) and `impersonatedUser.extra` to carry the ConfigButler
+display name and email keys.
 
 **3. Group restriction holds:**
 
@@ -324,7 +503,7 @@ spec:
   message: "Lowered espresso price"  # optional; subject + body, 1–1024 chars
 ```
 
-Go code that creates it under impersonation, lifted from the auth-service:
+Go code that creates it under the same impersonated identity:
 
 ```go
 func (c kubeClient) createCommitRequest(ctx context.Context, params createCommitRequestParams) (string, error) {
@@ -332,13 +511,9 @@ func (c kubeClient) createCommitRequest(ctx context.Context, params createCommit
         return "", errors.New("missing git target name")
     }
 
-    client := c.dynamic
-    if user := sanitizeImpersonationUser(params.Actor); user != "" {
-        impersonated, err := c.impersonatedDynamic(user)  // same helper as the patch path
-        if err != nil {
-            return "", err
-        }
-        client = impersonated
+    client, err := c.impersonatedDynamic(params.Identity)
+    if err != nil {
+        return "", err
     }
 
     spec := map[string]interface{}{
@@ -373,8 +548,14 @@ func (c kubeClient) createCommitRequest(ctx context.Context, params createCommit
 Wiring it into a handler:
 
 ```go
+identity, err := audienceIdentityFromDisplayName(session.Nickname, session.Email, "demo.configbutler.ai")
+if err != nil {
+    http.Error(w, "invalid session identity", http.StatusBadRequest)
+    return
+}
+
 // 1. Patch the watched resource as the user.
-updated, err := kube.patchCoffeeConfig(ctx, body, session.Nickname)
+updated, err := kube.patchCoffeeConfig(ctx, body, identity)
 if err != nil {
     writeKubeError(w, err)
     return
@@ -384,7 +565,7 @@ if err != nil {
 //    Failures here must not fail the response — the resource is already saved.
 if target := cfg.ConfigButlerGitTargetName; target != "" {
     if _, err := kube.createCommitRequest(ctx, createCommitRequestParams{
-        Actor:         session.Nickname,
+        Identity:      identity,
         GitTargetName: target,
         Message:       strings.TrimSpace(r.Header.Get("X-Change-Reason")),
     }); err != nil {
@@ -424,10 +605,16 @@ RBAC block above under "Required Kubernetes resources" as an optional rule.
 - **Multiple groups:** if you outgrow one group, list them in
   `ImpersonationConfig.Groups`. Each one needs its own `resourceNames` entry on
   the impersonate rule.
-- **Extra fields:** K8s also supports `Impersonate-Extra-<key>` headers (set
-  via `ImpersonationConfig.Extra`). `gitops-reverser` and most audit consumers
-  ignore them; use them only if you have a downstream that explicitly reads
-  one.
+- **Extra fields:** K8s supports `Impersonate-Extra-<key>` headers via
+  `ImpersonationConfig.Extra`. ConfigButler/gitops-reverser reads
+  `configbutler.ai/claims/display-name` and `configbutler.ai/claims/email`;
+  other extras should only be added when a downstream consumer explicitly
+  reads them.
+- **Rollout order for `userextras` RBAC:** apply the
+  `authentication.k8s.io/userextras/...` impersonate rules *before* rolling a
+  binary that sends those extras — without them, every patch 403s. If you can't
+  guarantee the ordering, gate the `Extra:` map behind a config flag (default
+  on) so you have a kill switch while the RBAC propagates.
 
 ## Limitations
 
@@ -438,13 +625,14 @@ RBAC block above under "Required Kubernetes resources" as an optional rule.
   - put a proxy in front that injects impersonate headers based on a session
     cookie (more complex), or
   - move to OIDC, where the identity is in the token itself.
-- **No automatic group resolution.** "Simon" doesn't mean anything to K8s.
+- **No automatic group resolution.** `demo:simon-koudijs` doesn't mean anything
+  to K8s.
   If you forget to set `Groups` on the impersonation config, the request
-  authenticates as Simon with zero groups and gets a `403` on every
+  authenticates as the synthetic user with zero groups and gets a `403` on every
   authorization check.
 - **`system:authenticated` is auto-added** to the impersonated identity's
   groups by the API server. Don't bind `system:authenticated` to anything
-  privileged in your cluster — it now includes every nickname that ever
+  privileged in your cluster — it now includes every synthetic user that ever
   signs in.
 
 ## Why not (alternatives in one line)

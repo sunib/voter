@@ -134,6 +134,13 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 				return
 			}
 
+			session, _ := getBrowserSession(r)
+			identity, err := audienceIdentityFromSession(session.Nickname, "", deps.cfg.ConfigButlerDemoEmailDomain)
+			if err != nil {
+				http.Error(w, "invalid session identity: "+err.Error(), http.StatusBadRequest)
+				return
+			}
+
 			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 			defer cancel()
 			current, err := deps.kube.getCoffeeConfig(ctx)
@@ -141,8 +148,7 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 				writeKubeError(w, err)
 				return
 			}
-			session, _ := getBrowserSession(r)
-			updated, err := deps.kube.patchCoffeeConfig(ctx, patchBody, session.Nickname)
+			updated, err := deps.kube.patchCoffeeConfig(ctx, patchBody, identity)
 			if err != nil {
 				writeKubeError(w, err)
 				return
@@ -156,15 +162,15 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 			// — the CoffeeConfig is already written.
 			if target := strings.TrimSpace(deps.cfg.ConfigButlerGitTargetName); target != "" {
 				crName, crErr := deps.kube.createCommitRequest(ctx, createCommitRequestParams{
-					Actor:         session.Nickname,
+					Identity:      identity,
 					GitTargetName: target,
 					Namespace:     deps.cfg.ConfigButlerCommitRequestNamespace,
 					Message:       reason,
 				})
 				if crErr != nil {
-					log.Printf("commitrequest: create failed actor=%q target=%q: %v", session.Nickname, target, crErr)
+					log.Printf("commitrequest: create failed user=%q display=%q target=%q: %v", identity.Username, identity.DisplayName, target, crErr)
 				} else {
-					log.Printf("commitrequest: created name=%s actor=%q target=%q", crName, session.Nickname, target)
+					log.Printf("commitrequest: created name=%s user=%q display=%q target=%q", crName, identity.Username, identity.DisplayName, target)
 				}
 			}
 

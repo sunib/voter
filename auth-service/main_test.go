@@ -217,7 +217,7 @@ type stubKubeClient struct {
 	coffeeConfigErr     error
 	patchCoffeeErr      error
 	lastPatchBody       []byte
-	lastPatchActor      string
+	lastPatchIdentity   audienceIdentity
 	commitRequestName   string
 	commitRequestErr    error
 	commitRequestCalls  int
@@ -259,9 +259,9 @@ func (s *stubKubeClient) getCoffeeConfig(_ context.Context) (coffeeConfig, error
 	return s.coffeeConfig, s.coffeeConfigErr
 }
 
-func (s *stubKubeClient) patchCoffeeConfig(_ context.Context, patch []byte, actor string) (coffeeConfig, error) {
+func (s *stubKubeClient) patchCoffeeConfig(_ context.Context, patch []byte, identity audienceIdentity) (coffeeConfig, error) {
 	s.lastPatchBody = append([]byte(nil), patch...)
-	s.lastPatchActor = actor
+	s.lastPatchIdentity = identity
 	return s.patchResult, s.patchCoffeeErr
 }
 
@@ -942,8 +942,14 @@ func TestAdminPatchCreatesCommitRequestWhenConfigured(t *testing.T) {
 		t.Fatalf("expected exactly 1 CommitRequest call, got %d", env.stub.commitRequestCalls)
 	}
 	got := env.stub.lastCommitRequest
-	if got.Actor != "Alice" {
-		t.Fatalf("Actor: got %q want %q", got.Actor, "Alice")
+	if got.Identity.Username != "demo:alice" {
+		t.Fatalf("Identity.Username: got %q want %q", got.Identity.Username, "demo:alice")
+	}
+	if got.Identity.DisplayName != "Alice" {
+		t.Fatalf("Identity.DisplayName: got %q want %q", got.Identity.DisplayName, "Alice")
+	}
+	if got.Identity.Email != "alice@demo.configbutler.ai" {
+		t.Fatalf("Identity.Email: got %q want %q", got.Identity.Email, "alice@demo.configbutler.ai")
 	}
 	if got.GitTargetName != "voter-coffee" {
 		t.Fatalf("GitTargetName: got %q want %q", got.GitTargetName, "voter-coffee")
@@ -965,6 +971,28 @@ func TestAdminPatchSkipsCommitRequestWhenGitTargetNotSet(t *testing.T) {
 	}
 	if env.stub.commitRequestCalls != 0 {
 		t.Fatalf("expected no CommitRequest calls, got %d", env.stub.commitRequestCalls)
+	}
+}
+
+// TestAdminPatchRejectsInvalidSessionIdentity is the security regression test
+// for the fail-closed contract: a session nickname that cannot form a valid
+// audience identity (here: contains angle brackets that would break a git
+// author signature) must result in 400 with no patch and no CommitRequest —
+// not a silent fall-through to the auth-service SA.
+func TestAdminPatchRejectsInvalidSessionIdentity(t *testing.T) {
+	env := newAdminPatchTestEnv(t, config{
+		ConfigButlerGitTargetName: "voter-coffee",
+	})
+
+	rec := env.sendPatch(t, "Mallory <m@evil.example>", "demo update")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid session identity, got %d body=%q", rec.Code, rec.Body.String())
+	}
+	if env.stub.lastPatchIdentity.Username != "" {
+		t.Fatalf("expected no patch call, got identity %+v", env.stub.lastPatchIdentity)
+	}
+	if env.stub.commitRequestCalls != 0 {
+		t.Fatalf("expected no CommitRequest, got %d", env.stub.commitRequestCalls)
 	}
 }
 

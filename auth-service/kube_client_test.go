@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -13,34 +14,6 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 )
-
-func TestSanitizeImpersonationUser(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{name: "plain nickname", in: "Simon", want: "Simon"},
-		{name: "trims whitespace", in: "  Simon  ", want: "Simon"},
-		{name: "preserves spaces in name", in: "Simon Koudijs", want: "Simon Koudijs"},
-		{name: "empty rejected", in: "", want: ""},
-		{name: "whitespace-only rejected", in: "   ", want: ""},
-		{name: "system prefix rejected", in: "system:masters", want: ""},
-		{name: "uppercase system prefix rejected", in: "SYSTEM:admin", want: ""},
-		{name: "mixed-case system prefix rejected", in: "System:Anything", want: ""},
-		{name: "system prefix with leading whitespace rejected", in: "  system:masters", want: ""},
-		{name: "system as substring is fine", in: "ecosystem-bot", want: "ecosystem-bot"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := sanitizeImpersonationUser(tc.in)
-			if got != tc.want {
-				t.Fatalf("sanitizeImpersonationUser(%q): got %q want %q", tc.in, got, tc.want)
-			}
-		})
-	}
-}
 
 // capturedRequest records what arrived at the fake API server. Tests inspect
 // both the impersonation headers and the JSON payload to verify wire shape.
@@ -78,8 +51,6 @@ func newHeaderCapturingAPIServer(t *testing.T) *headerCapturingAPIServer {
 		handler := c.handler
 		c.mu.Unlock()
 
-		// Replay body so the handler can decode if needed (it doesn't yet,
-		// but keeps the helper composable).
 		r.Body = io.NopCloser(strings.NewReader(string(body)))
 		handler(w, r)
 	}))
@@ -136,11 +107,44 @@ func newTestKubeClient(t *testing.T, serverURL string) kubeClient {
 		t.Fatalf("dynamic.NewForConfig: %v", err)
 	}
 	return kubeClient{
-		dynamic:    dyn,
-		restConfig: cfg,
-		defaultNS:  "voter",
-		coffeeName: "test-coffee",
+		dynamic:        dyn,
+		restConfig:     cfg,
+		defaultNS:      "voter",
+		coffeeName:     "test-coffee",
+		identityExtras: true,
 	}
+}
+
+// simonIdentity is the canonical identity used across these tests.
+func simonIdentity() audienceIdentity {
+	return audienceIdentity{
+		Username:    "demo:simon-koudijs",
+		DisplayName: "Simon Koudijs",
+		Email:       "simon-koudijs@demo.configbutler.ai",
+	}
+}
+
+// findImpersonateExtra returns the values for an Impersonate-Extra-<key>
+// header. client-go percent-encodes the key (slashes become %2F) and Go's
+// http.Header canonicalization mangles the case, so we iterate and match by
+// percent-decoded, case-insensitive key.
+func findImpersonateExtra(headers http.Header, key string) []string {
+	needle := strings.ToLower(key)
+	var out []string
+	for h, vs := range headers {
+		if !strings.HasPrefix(strings.ToLower(h), "impersonate-extra-") {
+			continue
+		}
+		rest := h[len("Impersonate-Extra-"):]
+		decoded, err := url.PathUnescape(rest)
+		if err != nil {
+			continue
+		}
+		if strings.EqualFold(decoded, needle) {
+			out = append(out, vs...)
+		}
+	}
+	return out
 }
 
 func TestPatchCoffeeConfigSetsImpersonationHeaders(t *testing.T) {
@@ -150,7 +154,7 @@ func TestPatchCoffeeConfigSetsImpersonationHeaders(t *testing.T) {
 	_, err := kc.patchCoffeeConfig(
 		context.Background(),
 		[]byte(`{"spec":{"shopName":"X"}}`),
-		"Simon Koudijs",
+		simonIdentity(),
 	)
 	if err != nil {
 		t.Fatalf("patchCoffeeConfig: %v", err)
@@ -158,86 +162,79 @@ func TestPatchCoffeeConfigSetsImpersonationHeaders(t *testing.T) {
 
 	headers := api.lastHeaders(t)
 
-	if got := headers.Get("Impersonate-User"); got != "Simon Koudijs" {
-		t.Fatalf("Impersonate-User: got %q want %q", got, "Simon Koudijs")
+	if got := headers.Get("Impersonate-User"); got != "demo:simon-koudijs" {
+		t.Fatalf("Impersonate-User: got %q want %q", got, "demo:simon-koudijs")
 	}
 
-	// Impersonate-Group can be set multiple times in the request — client-go
-	// emits one header per group. Assert the audience group is present and is
-	// the *only* group, so we don't accidentally widen permissions.
+	// Impersonate-Group must be the audience group and ONLY the audience group;
+	// any additional group would silently widen what voter-audience inherits.
 	groups := headers.Values("Impersonate-Group")
 	if len(groups) != 1 || groups[0] != audienceGroupName {
 		t.Fatalf("Impersonate-Group: got %v want [%q]", groups, audienceGroupName)
 	}
+
+	if got := findImpersonateExtra(headers, configButlerDisplayNameExtraKey); len(got) != 1 || got[0] != "Simon Koudijs" {
+		t.Fatalf("display-name extra: got %v want [%q]", got, "Simon Koudijs")
+	}
+	if got := findImpersonateExtra(headers, configButlerEmailExtraKey); len(got) != 1 || got[0] != "simon-koudijs@demo.configbutler.ai" {
+		t.Fatalf("email extra: got %v want [%q]", got, "simon-koudijs@demo.configbutler.ai")
+	}
 }
 
-func TestPatchCoffeeConfigSkipsImpersonationForEmptyActor(t *testing.T) {
+// TestPatchCoffeeConfigRequiresIdentity verifies the fail-closed contract:
+// without a derived identity, the write must error out without hitting the
+// API server (and therefore can never silently fall back to the SA).
+func TestPatchCoffeeConfigRequiresIdentity(t *testing.T) {
 	api := newHeaderCapturingAPIServer(t)
 	kc := newTestKubeClient(t, api.server.URL)
 
 	_, err := kc.patchCoffeeConfig(
 		context.Background(),
 		[]byte(`{"spec":{"shopName":"X"}}`),
-		"",
+		audienceIdentity{}, // empty username
 	)
-	if err != nil {
-		t.Fatalf("patchCoffeeConfig: %v", err)
+	if err == nil {
+		t.Fatalf("expected error for empty identity, got nil")
 	}
 
-	headers := api.lastHeaders(t)
-	if got := headers.Get("Impersonate-User"); got != "" {
-		t.Fatalf("expected no Impersonate-User header, got %q", got)
-	}
-	if got := headers.Values("Impersonate-Group"); len(got) != 0 {
-		t.Fatalf("expected no Impersonate-Group header, got %v", got)
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.reqs) != 0 {
+		t.Fatalf("expected 0 requests for empty identity, got %d", len(api.reqs))
 	}
 }
 
-func TestPatchCoffeeConfigRejectsSystemActor(t *testing.T) {
+func TestPatchCoffeeConfigOmitsExtrasWhenDisabled(t *testing.T) {
 	api := newHeaderCapturingAPIServer(t)
 	kc := newTestKubeClient(t, api.server.URL)
+	kc.identityExtras = false
 
-	// A nickname starting with "system:" must never be propagated to the API
-	// server, even though the impersonate-groups RBAC is locked down — the
-	// sanitizer is defense-in-depth.
 	_, err := kc.patchCoffeeConfig(
 		context.Background(),
 		[]byte(`{"spec":{"shopName":"X"}}`),
-		"system:masters",
+		simonIdentity(),
 	)
 	if err != nil {
 		t.Fatalf("patchCoffeeConfig: %v", err)
 	}
 
 	headers := api.lastHeaders(t)
-	if got := headers.Get("Impersonate-User"); got != "" {
-		t.Fatalf("expected no Impersonate-User header for system: actor, got %q", got)
+	if got := findImpersonateExtra(headers, configButlerDisplayNameExtraKey); len(got) != 0 {
+		t.Fatalf("expected no display-name extra when disabled, got %v", got)
 	}
-	if got := headers.Values("Impersonate-Group"); len(got) != 0 {
-		t.Fatalf("expected no Impersonate-Group header for system: actor, got %v", got)
+	if got := findImpersonateExtra(headers, configButlerEmailExtraKey); len(got) != 0 {
+		t.Fatalf("expected no email extra when disabled, got %v", got)
+	}
+	// Group + user must still be set.
+	if got := headers.Get("Impersonate-User"); got != "demo:simon-koudijs" {
+		t.Fatalf("Impersonate-User: got %q want %q", got, "demo:simon-koudijs")
 	}
 }
 
-func TestImpersonatedDynamicCarriesAudienceGroup(t *testing.T) {
-	// Direct unit check on the config builder, to keep the audienceGroupName
-	// constant pinned. The wire-level tests above prove this travels to the
-	// API server; this one prevents an accidental refactor from silently
-	// dropping the group.
+func TestImpersonatedDynamicRejectsEmptyUsername(t *testing.T) {
 	kc := kubeClient{restConfig: &rest.Config{Host: "https://example.invalid"}}
-	if _, err := kc.impersonatedDynamic("Simon"); err != nil {
-		t.Fatalf("impersonatedDynamic: %v", err)
-	}
-
-	cfg := rest.CopyConfig(kc.restConfig)
-	cfg.Impersonate = rest.ImpersonationConfig{
-		UserName: "Simon",
-		Groups:   []string{audienceGroupName},
-	}
-	if cfg.Impersonate.UserName != "Simon" {
-		t.Fatalf("Impersonate.UserName: got %q want %q", cfg.Impersonate.UserName, "Simon")
-	}
-	if len(cfg.Impersonate.Groups) != 1 || cfg.Impersonate.Groups[0] != "voter-audience" {
-		t.Fatalf("Impersonate.Groups: got %v want [voter-audience]", cfg.Impersonate.Groups)
+	if _, err := kc.impersonatedDynamic(audienceIdentity{}); err == nil {
+		t.Fatalf("expected impersonatedDynamic to reject empty identity")
 	}
 }
 
@@ -257,7 +254,7 @@ func TestCreateCommitRequestSendsExpectedShape(t *testing.T) {
 	kc := newTestKubeClient(t, api.server.URL)
 
 	name, err := kc.createCommitRequest(context.Background(), createCommitRequestParams{
-		Actor:         "Simon",
+		Identity:      simonIdentity(),
 		GitTargetName: "voter-coffee",
 		Message:       "Update voucher copy",
 	})
@@ -308,7 +305,7 @@ func TestCreateCommitRequestSetsImpersonationHeaders(t *testing.T) {
 	kc := newTestKubeClient(t, api.server.URL)
 
 	_, err := kc.createCommitRequest(context.Background(), createCommitRequestParams{
-		Actor:         "Simon Koudijs",
+		Identity:      simonIdentity(),
 		GitTargetName: "voter-coffee",
 	})
 	if err != nil {
@@ -316,33 +313,37 @@ func TestCreateCommitRequestSetsImpersonationHeaders(t *testing.T) {
 	}
 
 	headers := api.lastHeaders(t)
-	if got := headers.Get("Impersonate-User"); got != "Simon Koudijs" {
-		t.Fatalf("Impersonate-User: got %q want %q", got, "Simon Koudijs")
+	if got := headers.Get("Impersonate-User"); got != "demo:simon-koudijs" {
+		t.Fatalf("Impersonate-User: got %q want %q", got, "demo:simon-koudijs")
 	}
 	groups := headers.Values("Impersonate-Group")
 	if len(groups) != 1 || groups[0] != audienceGroupName {
 		t.Fatalf("Impersonate-Group: got %v want [%q]", groups, audienceGroupName)
 	}
+	if got := findImpersonateExtra(headers, configButlerDisplayNameExtraKey); len(got) != 1 || got[0] != "Simon Koudijs" {
+		t.Fatalf("display-name extra: got %v want [%q]", got, "Simon Koudijs")
+	}
+	if got := findImpersonateExtra(headers, configButlerEmailExtraKey); len(got) != 1 || got[0] != "simon-koudijs@demo.configbutler.ai" {
+		t.Fatalf("email extra: got %v want [%q]", got, "simon-koudijs@demo.configbutler.ai")
+	}
 }
 
-func TestCreateCommitRequestRejectsSystemActor(t *testing.T) {
+func TestCreateCommitRequestRequiresIdentity(t *testing.T) {
 	api := newHeaderCapturingAPIServer(t)
 	kc := newTestKubeClient(t, api.server.URL)
 
 	_, err := kc.createCommitRequest(context.Background(), createCommitRequestParams{
-		Actor:         "system:masters",
+		Identity:      audienceIdentity{},
 		GitTargetName: "voter-coffee",
 	})
-	if err != nil {
-		t.Fatalf("createCommitRequest: %v", err)
+	if err == nil {
+		t.Fatalf("expected error for empty identity, got nil")
 	}
 
-	headers := api.lastHeaders(t)
-	if got := headers.Get("Impersonate-User"); got != "" {
-		t.Fatalf("expected no Impersonate-User header for system: actor, got %q", got)
-	}
-	if got := headers.Values("Impersonate-Group"); len(got) != 0 {
-		t.Fatalf("expected no Impersonate-Group header for system: actor, got %v", got)
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.reqs) != 0 {
+		t.Fatalf("expected 0 requests for empty identity, got %d", len(api.reqs))
 	}
 }
 
@@ -360,7 +361,7 @@ func TestCreateCommitRequestOmitsEmptyMessage(t *testing.T) {
 			kc := newTestKubeClient(t, api.server.URL)
 
 			_, err := kc.createCommitRequest(context.Background(), createCommitRequestParams{
-				Actor:         "Simon",
+				Identity:      simonIdentity(),
 				GitTargetName: "voter-coffee",
 				Message:       tc.message,
 			})
@@ -382,7 +383,7 @@ func TestCreateCommitRequestTrimsMessage(t *testing.T) {
 	kc := newTestKubeClient(t, api.server.URL)
 
 	_, err := kc.createCommitRequest(context.Background(), createCommitRequestParams{
-		Actor:         "Simon",
+		Identity:      simonIdentity(),
 		GitTargetName: "voter-coffee",
 		Message:       "  Update voucher copy  \n",
 	})
@@ -402,13 +403,12 @@ func TestCreateCommitRequestRequiresGitTargetName(t *testing.T) {
 	kc := newTestKubeClient(t, api.server.URL)
 
 	_, err := kc.createCommitRequest(context.Background(), createCommitRequestParams{
-		Actor: "Simon",
+		Identity: simonIdentity(),
 	})
 	if err == nil {
 		t.Fatalf("expected error when GitTargetName is empty")
 	}
 
-	// Should not have issued any HTTP call.
 	api.mu.Lock()
 	defer api.mu.Unlock()
 	if len(api.reqs) != 0 {
@@ -421,7 +421,7 @@ func TestCreateCommitRequestOverridesNamespace(t *testing.T) {
 	kc := newTestKubeClient(t, api.server.URL)
 
 	_, err := kc.createCommitRequest(context.Background(), createCommitRequestParams{
-		Actor:         "Simon",
+		Identity:      simonIdentity(),
 		GitTargetName: "other-target",
 		Namespace:     "configbutler",
 	})
