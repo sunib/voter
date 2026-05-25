@@ -61,7 +61,7 @@ onBeforeUnmount(() => {
       <h1>Recent history</h1>
       <p class="hero-copy">
         This tab follows saved <code>CoffeeConfig</code> patches, including the
-        actor nickname and the fields changed in each save.
+        actor display name and the fields changed in each save.
       </p>
       <div class="hero-actions">
         <AdminNav />
@@ -92,7 +92,7 @@ onBeforeUnmount(() => {
         </div>
         <p class="metadata-copy recent-changes__intro">
           This list is kept in memory and resets when the server app restarts. Actor
-          names come from the shared demo session nickname.
+          names come from the demo session display name.
         </p>
 
         <div v-if="recentChanges.length === 0" class="empty-state">

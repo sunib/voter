@@ -2,11 +2,18 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getPublicSession, loginPublic, type ApiError } from '../api/coffee'
+import {
+  defaultDisplayName,
+  defaultEmail,
+  getOrGenerateStableID,
+} from '../lib/demoIdentity'
 
 const route = useRoute()
 const router = useRouter()
 
-const nickname = ref('')
+const stableId = ref('')
+const displayName = ref('')
+const email = ref('')
 const code = ref('')
 const checkingSession = ref(true)
 const busy = ref(false)
@@ -20,7 +27,10 @@ const queryCode = computed(() => {
 const nextPath = computed(() => normalizeNextPath(route.query.next))
 const codeFromQr = computed(() => queryCode.value !== '')
 const canSubmit = computed(
-  () => nickname.value.trim() !== '' && code.value.trim() !== '',
+  () =>
+    displayName.value.trim() !== '' &&
+    email.value.trim() !== '' &&
+    code.value.trim() !== '',
 )
 
 watch(
@@ -34,6 +44,10 @@ watch(
 )
 
 onMounted(async () => {
+  stableId.value = getOrGenerateStableID()
+  displayName.value = defaultDisplayName(stableId.value)
+  email.value = defaultEmail(stableId.value)
+
   try {
     await getPublicSession()
     await router.replace(nextPath.value)
@@ -55,7 +69,12 @@ async function submit() {
   busy.value = true
   error.value = ''
   try {
-    await loginPublic(nickname.value, code.value)
+    await loginPublic({
+      code: code.value.trim(),
+      stableId: stableId.value,
+      displayName: displayName.value.trim(),
+      email: email.value.trim(),
+    })
     await router.replace(nextPath.value)
   } catch (caught) {
     error.value = (caught as Error).message
@@ -92,8 +111,9 @@ function normalizeNextPath(raw: unknown): string {
       <p class="eyebrow">Demo Access</p>
       <h1>Enter</h1>
       <p class="hero-copy">
-        Kies een nickname en gebruik de gedeelde toegangscode om koffie, admin
-        en verborgen questionnaire-routes te openen.
+        Press <strong>Join the demo</strong> to enter with the pre-filled
+        defaults, or personalize your display name and email to see them in the
+        commit history.
       </p>
     </section>
 
@@ -114,18 +134,6 @@ function normalizeNextPath(raw: unknown): string {
       <p v-if="error" class="error-copy">{{ error }}</p>
       <p v-else-if="checkingSession" class="metadata-copy">Checking session…</p>
 
-      <label class="field">
-        <span>Nickname</span>
-        <input
-          v-model="nickname"
-          type="text"
-          maxlength="40"
-          placeholder="Simon"
-          :disabled="busy || checkingSession"
-          @keyup.enter="submit"
-        />
-      </label>
-
       <label v-if="!codeFromQr" class="field">
         <span>Access code</span>
         <input
@@ -143,10 +151,41 @@ function normalizeNextPath(raw: unknown): string {
       <div v-else class="embedded-card">
         <strong>QR code attached</strong>
         <p class="metadata-copy">
-          Deze login gebruikt de code uit de link. Jij hoeft alleen nog een
-          nickname te kiezen.
+          Deze login gebruikt de code uit de link. Je kunt nu direct
+          <strong>Join the demo</strong> kiezen.
         </p>
       </div>
+
+      <label class="field">
+        <span>Display name</span>
+        <input
+          v-model="displayName"
+          type="text"
+          maxlength="64"
+          :disabled="busy || checkingSession"
+          @keyup.enter="submit"
+        />
+        <small class="metadata-copy"
+          >Shown as the commit author on your changes.</small
+        >
+      </label>
+
+      <label class="field">
+        <span>Email</span>
+        <input
+          v-model="email"
+          type="email"
+          inputmode="email"
+          autocapitalize="none"
+          spellcheck="false"
+          :disabled="busy || checkingSession"
+          @keyup.enter="submit"
+        />
+        <small class="metadata-copy"
+          >Used as the commit author email. Replace it with your own to see
+          your real address in Git.</small
+        >
+      </label>
 
       <div class="hero-actions">
         <button
@@ -154,7 +193,7 @@ function normalizeNextPath(raw: unknown): string {
           :disabled="!canSubmit || busy || checkingSession"
           @click="submit"
         >
-          {{ busy ? 'Entering…' : 'Continue' }}
+          {{ busy ? 'Entering…' : 'Join the demo' }}
         </button>
         <span class="metadata-copy">Na login ga je naar {{ nextPath }}</span>
       </div>

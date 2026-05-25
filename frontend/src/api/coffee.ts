@@ -1,3 +1,4 @@
+import { clearStableID } from '../lib/demoIdentity'
 import type {
   CoffeeConfig,
   CoffeeConfigChangeRecord,
@@ -20,7 +21,16 @@ export type PublicBuildInfoResponse = {
 }
 
 export type PublicSessionResponse = {
-  nickname: string
+  stableId: string
+  displayName: string
+  email: string
+}
+
+export type LoginRequest = {
+  code: string
+  stableId: string
+  displayName: string
+  email: string
 }
 
 export type ApiError = Error & {
@@ -89,17 +99,14 @@ export async function submitOrder(
   })
 }
 
-export async function loginPublic(
-  nickname: string,
-  code: string,
-): Promise<void> {
+export async function loginPublic(input: LoginRequest): Promise<void> {
   const res = await fetch('/public/login', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
     },
     credentials: 'include',
-    body: JSON.stringify({ nickname, code }),
+    body: JSON.stringify(input),
   })
 
   if (!res.ok) {
@@ -120,6 +127,7 @@ export async function logoutPublic(): Promise<void> {
   if (!res.ok) {
     throw createApiError(res.status, await readJsonOrText(res))
   }
+  clearStableID()
 }
 
 export async function getAdminCoffeeConfig(): Promise<CoffeeConfig> {

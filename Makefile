@@ -11,10 +11,10 @@ test-auth-service:
 	cd auth-service && go test ./...
 
 frontend-dev-remote:
-	cd frontend && VITE_DEV_API_ORIGIN=https://voter.z65.nl npm run dev
+	cd frontend && VITE_DEV_API_ORIGIN=https://demo.configbutler.ai npm run dev
 
 frontend-dev-remote-https:
-	cd frontend && VITE_DEV_API_ORIGIN=https://voter.z65.nl VITE_DEV_HTTPS=1 npm run dev -- --host
+	cd frontend && VITE_DEV_API_ORIGIN=https://demo.configbutler.ai VITE_DEV_HTTPS=1 npm run dev -- --host
 
 build-push-auth-service:
 	docker buildx build --push \

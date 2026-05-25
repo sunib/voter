@@ -5,24 +5,24 @@ import { getPublicSession, type ApiError } from '../../api/coffee'
 
 const route = useRoute()
 
-const nickname = ref('')
+const displayName = ref('')
 
 const visible = computed(
-  () => route.name !== 'login' && nickname.value.trim().length > 0,
+  () => route.name !== 'login' && displayName.value.trim().length > 0,
 )
 
 async function loadSession() {
   if (route.name === 'login') {
-    nickname.value = ''
+    displayName.value = ''
     return
   }
 
   try {
     const session = await getPublicSession()
-    nickname.value = session.nickname.trim()
+    displayName.value = session.displayName.trim()
   } catch (error) {
     if ((error as ApiError).status === 401) {
-      nickname.value = ''
+      displayName.value = ''
     }
   }
 }
@@ -31,10 +31,10 @@ watch(
   () => route.fullPath,
   () => {
     if (route.name === 'login') {
-      nickname.value = ''
+      displayName.value = ''
       return
     }
-    if (nickname.value.trim() !== '') {
+    if (displayName.value.trim() !== '') {
       return
     }
     void loadSession()
@@ -47,13 +47,13 @@ watch(
   <div
     v-if="visible"
     class="session-badge"
-    :title="`Signed in as ${nickname}`"
+    :title="`Signed in as ${displayName}`"
     aria-label="Current user"
   >
     <span class="session-badge__icon-wrap" aria-hidden="true">
       <i class="pi pi-user session-badge__icon" />
     </span>
     <span class="session-badge__label">signed in</span>
-    <strong class="session-badge__name">{{ nickname }}</strong>
+    <strong class="session-badge__name">{{ displayName }}</strong>
   </div>
 </template>
