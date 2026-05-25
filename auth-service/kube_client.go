@@ -95,6 +95,18 @@ type kubeHandler interface {
 	getCoffeeConfig(ctx context.Context) (coffeeConfig, error)
 	patchCoffeeConfig(ctx context.Context, patch []byte, actor string) (coffeeConfig, error)
 	watchCoffeeConfig(ctx context.Context) (coffeeConfig, k8swatch.Interface, error)
+	createCommitRequest(ctx context.Context, params createCommitRequestParams) (string, error)
+}
+
+// createCommitRequestParams is the input shape for createCommitRequest. The
+// Actor drives Kubernetes impersonation so the CommitRequest's audit identity
+// matches the CoffeeConfig patch that preceded it — gitops-reverser binds the
+// finalize signal to the open commit window by (effective user, GitTarget).
+type createCommitRequestParams struct {
+	Actor         string
+	GitTargetName string
+	Namespace     string
+	Message       string
 }
 
 type kubeClient struct {
@@ -369,6 +381,73 @@ func (c kubeClient) patchCoffeeConfig(ctx context.Context, patch []byte, actor s
 		return coffeeConfig{}, fmt.Errorf("failed to patch coffee config: %w", err)
 	}
 	return toCoffeeConfig(obj)
+}
+
+// createCommitRequest creates a ConfigButler CommitRequest, which finalizes
+// the open commit window for the referenced GitTarget. The request is sent
+// under the same impersonated identity as the preceding write, so the audit
+// event matches and gitops-reverser can bind the finalize signal correctly.
+//
+// The trimmed Message is set on spec.message when non-empty; an empty/whitespace
+// Message leaves spec.message off the object entirely so ConfigButler falls
+// back to its generated grouped-commit message.
+func (c kubeClient) createCommitRequest(ctx context.Context, params createCommitRequestParams) (string, error) {
+	gitTarget := strings.TrimSpace(params.GitTargetName)
+	if gitTarget == "" {
+		return "", errors.New("missing git target name")
+	}
+
+	ns := strings.TrimSpace(params.Namespace)
+	if ns == "" {
+		ns = c.defaultNS
+	}
+	if ns == "" {
+		return "", errors.New("missing commit request namespace")
+	}
+
+	client := c.dynamic
+	if user := sanitizeImpersonationUser(params.Actor); user != "" {
+		impersonated, err := c.impersonatedDynamic(user)
+		if err != nil {
+			return "", fmt.Errorf("failed to build impersonated client for %q: %w", user, err)
+		}
+		client = impersonated
+	}
+
+	spec := map[string]interface{}{
+		"gitTargetRef": map[string]interface{}{
+			"name": gitTarget,
+		},
+	}
+	if msg := strings.TrimSpace(params.Message); msg != "" {
+		spec["message"] = msg
+	}
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "configbutler.ai/v1alpha1",
+			"kind":       "CommitRequest",
+			"metadata": map[string]interface{}{
+				"generateName": "coffee-save-",
+				"namespace":    ns,
+			},
+			"spec": spec,
+		},
+	}
+
+	created, err := client.Resource(commitRequestGVR()).Namespace(ns).Create(ctx, obj, metav1.CreateOptions{})
+	if err != nil {
+		return "", fmt.Errorf("failed to create commit request: %w", err)
+	}
+	return created.GetName(), nil
+}
+
+func commitRequestGVR() schema.GroupVersionResource {
+	return schema.GroupVersionResource{
+		Group:    "configbutler.ai",
+		Version:  "v1alpha1",
+		Resource: "commitrequests",
+	}
 }
 
 // impersonatedDynamic returns a dynamic client that submits requests with

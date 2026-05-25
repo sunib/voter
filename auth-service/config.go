@@ -24,6 +24,15 @@ type config struct {
 	ForwardServiceAccount          string        `envconfig:"FORWARD_SA"`
 	ForwardServiceAccountNamespace string        `envconfig:"FORWARD_SA_NAMESPACE"`
 	CoffeeConfigName               string        `envconfig:"COFFEE_CONFIG_NAME" default:"testnet-coffee"`
+
+	// ConfigButlerGitTargetName names the ConfigButler GitTarget whose open
+	// commit window should be finalized after a successful CoffeeConfig patch.
+	// Set to "" to disable the save-message side effect entirely.
+	ConfigButlerGitTargetName string `envconfig:"CONFIGBUTLER_GIT_TARGET_NAME" default:"voter-demo"`
+	// ConfigButlerCommitRequestNamespace overrides where CommitRequest objects
+	// are created. Empty means "use the runtime namespace" (the same namespace
+	// the auth-service runs in, which must also be the GitTarget's namespace).
+	ConfigButlerCommitRequestNamespace string `envconfig:"CONFIGBUTLER_COMMITREQUEST_NAMESPACE"`
 }
 
 func loadConfig() (config, error) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -146,6 +147,27 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 				writeKubeError(w, err)
 				return
 			}
+
+			reason := strings.TrimSpace(r.Header.Get("X-Change-Reason"))
+
+			// Side effect: ask ConfigButler to finalize its open commit window
+			// for this GitTarget so the Git commit author and message match
+			// what the user just did. Failures here must not fail the response
+			// — the CoffeeConfig is already written.
+			if target := strings.TrimSpace(deps.cfg.ConfigButlerGitTargetName); target != "" {
+				crName, crErr := deps.kube.createCommitRequest(ctx, createCommitRequestParams{
+					Actor:         session.Nickname,
+					GitTargetName: target,
+					Namespace:     deps.cfg.ConfigButlerCommitRequestNamespace,
+					Message:       reason,
+				})
+				if crErr != nil {
+					log.Printf("commitrequest: create failed actor=%q target=%q: %v", session.Nickname, target, crErr)
+				} else {
+					log.Printf("commitrequest: created name=%s actor=%q target=%q", crName, session.Nickname, target)
+				}
+			}
+
 			if deps.changes != nil {
 				deps.changes.record(newCoffeeConfigChange(
 					time.Now(),
@@ -153,7 +175,7 @@ func registerCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 					updated,
 					patchBody,
 					session.Nickname,
-					r.Header.Get("X-Change-Reason"),
+					reason,
 				))
 			}
 			writeJSON(w, http.StatusOK, updated)

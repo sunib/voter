@@ -60,6 +60,13 @@ rules:
   - apiGroups: ["examples.configbutler.ai"]
     resources: ["coffeeconfigs"]
     verbs: ["get", "list", "watch", "patch"]
+  # Create ConfigButler CommitRequest objects to finalize the open commit
+  # window after a CoffeeConfig patch. The actual create call is performed
+  # under the impersonated audience identity, but the auth-service ClusterRole
+  # keeps a fallback rule so direct calls (e.g. with no actor) still work.
+  - apiGroups: ["configbutler.ai"]
+    resources: ["commitrequests"]
+    verbs: ["create", "get", "list", "watch"]
   # Impersonation: auth-service forwards user-initiated writes to K8s under the
   # audience member's identity so audit logs (and gitops-reverser) see the
   # nickname instead of the auth-service ServiceAccount.
@@ -95,6 +102,12 @@ rules:
   - apiGroups: ["examples.configbutler.ai"]
     resources: ["quizsubmissions"]
     verbs: ["get", "list", "watch", "create"]
+  # Audience members trigger ConfigButler save-now via CommitRequest. Create is
+  # enough for the first cut; get/list/watch only matter if the UI surfaces
+  # commit status (branch/SHA/phase) — see plans/configbutler-save-message-plan.md.
+  - apiGroups: ["configbutler.ai"]
+    resources: ["commitrequests"]
+    verbs: ["create", "get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

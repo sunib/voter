@@ -137,6 +137,12 @@ rules:
   - apiGroups: ["examples.configbutler.ai"]
     resources: ["quizsubmissions"]
     verbs: ["get", "list", "watch", "create"]
+  # Optional — only needed if your backend also creates a ConfigButler
+  # CommitRequest under the same impersonated identity (see "Post-write
+  # finalize signals" below).
+  - apiGroups: ["configbutler.ai"]
+    resources: ["commitrequests"]
+    verbs: ["create", "get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -285,6 +291,126 @@ curl -k \
 
 If this returns `200`, the `resourceNames` constraint on the group rule isn't
 applied — fix that before going further.
+
+## Post-write finalize signals (ConfigButler CommitRequest)
+
+If you're using [gitops-reverser](https://github.com/configbutler/gitops-reverser),
+you'll often want to do **two** things under the user's identity:
+
+1. Mutate the watched resource (here: `CoffeeConfig`) — so the change shows up
+   in the audit log as the user.
+2. Create a `CommitRequest` to finalize the open commit window immediately,
+   with the user's typed save-message as the Git commit message — so the
+   resulting Git commit has both the right author *and* the right subject
+   line.
+
+Both calls must be made under the **same** impersonated identity. ConfigButler
+binds the finalize signal to its open window by `(effective audit user,
+GitTarget)`; if the patch is impersonated and the CommitRequest is not (or
+vice versa), the bind fails silently and the CommitRequest terminates with
+`NoOpenWindow`.
+
+The CommitRequest resource itself is small:
+
+```yaml
+apiVersion: configbutler.ai/v1alpha1
+kind: CommitRequest
+metadata:
+  generateName: coffee-save-
+  namespace: voter        # must match the referenced GitTarget's namespace
+spec:
+  gitTargetRef:
+    name: voter-coffee    # the GitTarget you configured at install time
+  message: "Lowered espresso price"  # optional; subject + body, 1–1024 chars
+```
+
+Go code that creates it under impersonation, lifted from the auth-service:
+
+```go
+func (c kubeClient) createCommitRequest(ctx context.Context, params createCommitRequestParams) (string, error) {
+    if strings.TrimSpace(params.GitTargetName) == "" {
+        return "", errors.New("missing git target name")
+    }
+
+    client := c.dynamic
+    if user := sanitizeImpersonationUser(params.Actor); user != "" {
+        impersonated, err := c.impersonatedDynamic(user)  // same helper as the patch path
+        if err != nil {
+            return "", err
+        }
+        client = impersonated
+    }
+
+    spec := map[string]interface{}{
+        "gitTargetRef": map[string]interface{}{"name": params.GitTargetName},
+    }
+    if msg := strings.TrimSpace(params.Message); msg != "" {
+        spec["message"] = msg
+    }
+
+    obj := &unstructured.Unstructured{
+        Object: map[string]interface{}{
+            "apiVersion": "configbutler.ai/v1alpha1",
+            "kind":       "CommitRequest",
+            "metadata": map[string]interface{}{
+                "generateName": "coffee-save-",
+                "namespace":    params.Namespace,
+            },
+            "spec": spec,
+        },
+    }
+
+    created, err := client.Resource(commitRequestGVR()).
+        Namespace(params.Namespace).
+        Create(ctx, obj, metav1.CreateOptions{})
+    if err != nil {
+        return "", err
+    }
+    return created.GetName(), nil
+}
+```
+
+Wiring it into a handler:
+
+```go
+// 1. Patch the watched resource as the user.
+updated, err := kube.patchCoffeeConfig(ctx, body, session.Nickname)
+if err != nil {
+    writeKubeError(w, err)
+    return
+}
+
+// 2. After a successful patch, ask ConfigButler to finalize the window.
+//    Failures here must not fail the response — the resource is already saved.
+if target := cfg.ConfigButlerGitTargetName; target != "" {
+    if _, err := kube.createCommitRequest(ctx, createCommitRequestParams{
+        Actor:         session.Nickname,
+        GitTargetName: target,
+        Message:       strings.TrimSpace(r.Header.Get("X-Change-Reason")),
+    }); err != nil {
+        log.Printf("commitrequest: create failed: %v", err)
+    }
+}
+
+writeJSON(w, http.StatusOK, updated)
+```
+
+Three rules that catch the common bugs:
+
+- **Build one impersonated client and reuse it for both calls** (or recreate
+  it consistently via the same helper — the implementation above does the
+  latter). The audit identities must match exactly.
+- **Trim the message before send.** ConfigButler's CEL validation rejects
+  pure-whitespace strings and most ASCII control characters. Empty/whitespace
+  → omit `spec.message` entirely so it falls back to the grouped message.
+- **Don't fail the HTTP response on a CommitRequest error.** The user's data
+  is already in `etcd`. Log it, surface it later in a status feed if you
+  want, but return `200`.
+
+Extra RBAC the audience group needs for this path is one rule on
+`configbutler.ai/commitrequests` with verb `create` (plus `get/list/watch` if
+you later poll `status.phase` / `status.sha`). It's already shown in the
+RBAC block above under "Required Kubernetes resources" as an optional rule.
 
 ## Operational notes
 

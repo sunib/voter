@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 
+	"github.com/gorilla/securecookie"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8swatch "k8s.io/apimachinery/pkg/watch"
 )
@@ -217,6 +218,10 @@ type stubKubeClient struct {
 	patchCoffeeErr      error
 	lastPatchBody       []byte
 	lastPatchActor      string
+	commitRequestName   string
+	commitRequestErr    error
+	commitRequestCalls  int
+	lastCommitRequest   createCommitRequestParams
 }
 
 func (s *stubKubeClient) requestToken(_ context.Context, _, _ string, _ []string, _ int64) (string, time.Time, error) {
@@ -262,6 +267,18 @@ func (s *stubKubeClient) patchCoffeeConfig(_ context.Context, patch []byte, acto
 
 func (s *stubKubeClient) watchCoffeeConfig(_ context.Context) (coffeeConfig, k8swatch.Interface, error) {
 	return coffeeConfig{}, nil, errors.New("not implemented")
+}
+
+func (s *stubKubeClient) createCommitRequest(_ context.Context, params createCommitRequestParams) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.commitRequestCalls++
+	s.lastCommitRequest = params
+	name := s.commitRequestName
+	if name == "" {
+		name = "coffee-save-stub"
+	}
+	return name, s.commitRequestErr
 }
 
 func TestCoffeeConfigFromWatchEventIgnoresBookmark(t *testing.T) {
@@ -838,6 +855,134 @@ func TestAdminPatchUsesNicknameFromSessionCookie(t *testing.T) {
 	}
 	if snapshot.Changes[0].Reason != "demo update" {
 		t.Fatalf("unexpected reason: got %q want %q", snapshot.Changes[0].Reason, "demo update")
+	}
+}
+
+// adminPatchTestEnv bundles the boilerplate for the CommitRequest integration
+// tests below — secure cookie, session-bearing request, and a stub kube client.
+type adminPatchTestEnv struct {
+	mux  *http.ServeMux
+	stub *stubKubeClient
+	cfg  config
+	sc   *securecookie.SecureCookie
+}
+
+func newAdminPatchTestEnv(t *testing.T, cfg config) *adminPatchTestEnv {
+	t.Helper()
+	if cfg.SessionCookieName == "" {
+		cfg.SessionCookieName = "auth_session"
+	}
+	if cfg.SessionCookieMaxAgeSecs == 0 {
+		cfg.SessionCookieMaxAgeSecs = 3600
+	}
+	hashKey, blockKey, err := generateCookieKeys()
+	if err != nil {
+		t.Fatalf("generateCookieKeys: %v", err)
+	}
+	sc, err := newSessionSecureCookie(hashKey, blockKey)
+	if err != nil {
+		t.Fatalf("newSessionSecureCookie: %v", err)
+	}
+
+	stub := &stubKubeClient{
+		coffeeConfig: coffeeConfig{Spec: coffeeConfigSpec{ShopName: "Before"}},
+		patchResult:  coffeeConfig{Spec: coffeeConfigSpec{ShopName: "After"}},
+	}
+
+	mux := http.NewServeMux()
+	registerHandlers(mux, handlerDeps{
+		cfg:           cfg,
+		kube:          stub,
+		sessionCookie: sc,
+		orders:        newCoffeeRuntime(),
+		changes:       newCoffeeChangeRuntime(8),
+	})
+
+	return &adminPatchTestEnv{mux: mux, stub: stub, cfg: cfg, sc: sc}
+}
+
+func (e *adminPatchTestEnv) sendPatch(t *testing.T, nickname, reason string) *httptest.ResponseRecorder {
+	t.Helper()
+	cookieRec := httptest.NewRecorder()
+	if err := setSessionCookie(cookieRec, e.cfg, e.sc, nickname, time.Now()); err != nil {
+		t.Fatalf("setSessionCookie: %v", err)
+	}
+	cookies := cookieRec.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatalf("expected session cookie")
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "http://auth-service/public/admin/coffeeconfig",
+		strings.NewReader(`{"spec":{"shopName":"After"}}`))
+	req.Header.Set("Content-Type", "application/merge-patch+json")
+	if reason != "" {
+		req.Header.Set("X-Change-Reason", reason)
+	}
+	req.AddCookie(cookies[0])
+	rec := httptest.NewRecorder()
+	e.mux.ServeHTTP(rec, req)
+	return rec
+}
+
+// TestAdminPatchCreatesCommitRequestWhenConfigured verifies the happy-path
+// integration: a configured GitTarget name causes a CommitRequest create to
+// follow a successful CoffeeConfig patch, with the same actor and a trimmed
+// message taken from the X-Change-Reason header.
+func TestAdminPatchCreatesCommitRequestWhenConfigured(t *testing.T) {
+	env := newAdminPatchTestEnv(t, config{
+		ConfigButlerGitTargetName: "voter-coffee",
+	})
+
+	rec := env.sendPatch(t, "Alice", "demo update")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d body=%q", rec.Code, rec.Body.String())
+	}
+
+	if env.stub.commitRequestCalls != 1 {
+		t.Fatalf("expected exactly 1 CommitRequest call, got %d", env.stub.commitRequestCalls)
+	}
+	got := env.stub.lastCommitRequest
+	if got.Actor != "Alice" {
+		t.Fatalf("Actor: got %q want %q", got.Actor, "Alice")
+	}
+	if got.GitTargetName != "voter-coffee" {
+		t.Fatalf("GitTargetName: got %q want %q", got.GitTargetName, "voter-coffee")
+	}
+	if got.Message != "demo update" {
+		t.Fatalf("Message: got %q want %q", got.Message, "demo update")
+	}
+}
+
+// TestAdminPatchSkipsCommitRequestWhenGitTargetNotSet ensures the side effect
+// is fully opt-in: with no CONFIGBUTLER_GIT_TARGET_NAME the patch path must
+// behave exactly as before (no CommitRequest create).
+func TestAdminPatchSkipsCommitRequestWhenGitTargetNotSet(t *testing.T) {
+	env := newAdminPatchTestEnv(t, config{})
+
+	rec := env.sendPatch(t, "Alice", "demo update")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unexpected status: got %d body=%q", rec.Code, rec.Body.String())
+	}
+	if env.stub.commitRequestCalls != 0 {
+		t.Fatalf("expected no CommitRequest calls, got %d", env.stub.commitRequestCalls)
+	}
+}
+
+// TestAdminPatchSucceedsWhenCommitRequestFails proves the contract from the
+// plan: once the CoffeeConfig is written, a CommitRequest failure must not
+// turn the response into an error. The user already saved.
+func TestAdminPatchSucceedsWhenCommitRequestFails(t *testing.T) {
+	env := newAdminPatchTestEnv(t, config{
+		ConfigButlerGitTargetName: "voter-coffee",
+	})
+	env.stub.commitRequestErr = errors.New("simulated commit request failure")
+
+	rec := env.sendPatch(t, "Alice", "demo update")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK even when CommitRequest fails, got %d body=%q", rec.Code, rec.Body.String())
+	}
+	if env.stub.commitRequestCalls != 1 {
+		t.Fatalf("expected one CommitRequest attempt, got %d", env.stub.commitRequestCalls)
 	}
 }
 
