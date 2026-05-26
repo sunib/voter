@@ -30,7 +30,7 @@ Everything else flows from those.
 ```
 Browser  ──POST /apis/.../<crd>───►  Traefik
                                        │
-                                       │  1) strip-impersonate middleware
+                                       │  1) strip-client-auth middleware
                                        │     wipes any client-supplied
                                        │     Impersonate-* request headers
                                        ▼
@@ -173,7 +173,7 @@ public endpoint, and because the impersonator SA has unrestricted
 apiVersion: traefik.io/v1alpha1
 kind: Middleware
 metadata:
-  name: strip-impersonate
+  name: strip-client-auth
   namespace: <your-ns>
 spec:
   headers:
@@ -235,7 +235,7 @@ spec:
     - match: Host(`coffee.example.com`) && (PathPrefix(`/api`) || PathPrefix(`/apis`))
       kind: Rule
       middlewares:
-        - name: strip-impersonate    # ORDER MATTERS: this first
+        - name: strip-client-auth    # ORDER MATTERS: this first
         - name: auth-forwarder       # then this
       services:
         - name: kubernetes
@@ -299,7 +299,7 @@ the whole thing collapses into "anyone can impersonate anyone."
 
 | Invariant | Enforced where | What breaks if missing |
 |---|---|---|
-| Inbound `Impersonate-*` are stripped | `strip-impersonate` middleware (step 3) chained before forwardAuth (step 5) | Client supplies `Impersonate-User: kubernetes-admin`. Auth-service also sets `Impersonate-User: demo:521541`. Traefik sees both — auth response wins for headers Traefik forwards, but headers Traefik does **not** know about (e.g. an `Impersonate-Extra-*` the auth-service never sets) pass through. |
+| Inbound `Impersonate-*` are stripped | `strip-client-auth` middleware (step 3) chained before forwardAuth (step 5) | Client supplies `Impersonate-User: kubernetes-admin`. Auth-service also sets `Impersonate-User: demo:521541`. Traefik sees both — auth response wins for headers Traefik forwards, but headers Traefik does **not** know about (e.g. an `Impersonate-Extra-*` the auth-service never sets) pass through. |
 | Only listed headers reach upstream | `forwardAuth.authResponseHeaders` (step 4) is a whitelist | Same as above, in the reverse direction — auth-service sets a header that never reaches the API server. |
 | Impersonator SA token cannot do anything *as itself* | ClusterRole in step 1 has only `impersonate` verbs, no CRUD | A leaked token becomes a backdoor to whatever else you grant it. |
 | Auth-service fails closed on bad identity | Code contract in step 6 | A 200 with `Authorization` but no `Impersonate-User` lets the raw SA through. |

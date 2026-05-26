@@ -6,7 +6,7 @@ resources:
   - crds/coffeeconfigs.yaml
   - crds/quizsessions.yaml
   - crds/quizsubmissions.yaml
-  - quiz-rbac.yaml
+  - audience-impersonator-rbac.yaml
   - auth-service-rbac.yaml
   - app.yaml
   - examples/coffeeconfig-testnet.yaml

@@ -1,5 +1,12 @@
 # Plan: Auth Service as OIDC Issuer
 
+> **Status: superseded.** This plan assumes a downloadable kubeconfig /
+> audience-kubectl path that no longer exists. The audit-identity goal it
+> describes is now solved by server-side impersonation — see
+> [remove-audience-kubectl-access.md](remove-audience-kubectl-access.md)
+> and the live `Impersonate-*` flow in the auth-service. Kept as historical
+> design context only.
+
 ## The idea in one sentence
 
 Instead of minting Kubernetes ServiceAccount tokens, the auth service signs its own JWTs and exposes a JWKS endpoint — making it a proper OIDC issuer that K8s trusts natively. Every audience member gets a token with their real email in it, visible in the audit trail.

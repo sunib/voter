@@ -1,6 +1,6 @@
 # auth-service
 
-Traefik ForwardAuth service for the voter demo. It validates join codes, manages encrypted session cookies, injects short-lived Kubernetes tokens for browser traffic, and can also validate and pass through bearer tokens from downloaded kubeconfigs.
+Traefik ForwardAuth service for the voter demo. It validates join codes, manages encrypted session cookies, and injects short-lived Kubernetes tokens plus impersonation headers into browser traffic. Kubernetes bearer tokens are server-side only — clients never receive one, and any inbound `Authorization` is rejected.
 
 ## How it works
 
@@ -43,11 +43,11 @@ status:
 
 ### Token strategy
 
-- Tokens are minted via the Kubernetes TokenRequest API against the `FORWARD_SA` ServiceAccount
-- TTL is 10 minutes (Kubernetes minimum)
-- A shared token is cached for browser requests; the kubeconfig endpoint mints a fresh token per download
-- Tokens are injected by Traefik into upstream requests — they never reach the browser
-- If a request already carries an `Authorization: Bearer ...` header, auth-service validates it with `TokenReview` and passes it through instead of minting a replacement token
+- Tokens are minted via the Kubernetes TokenRequest API against the `FORWARD_SA` ServiceAccount (impersonator-only RBAC)
+- TTL is 10 minutes (Kubernetes minimum), shared across browser sessions and cached
+- Traefik injects the token plus server-derived `Impersonate-User` / `Impersonate-Group` / extras into upstream requests — the audit identity is the impersonated audience member, not the SA
+- Tokens never reach the browser
+- Any inbound `Authorization` on `/private/forward-auth-decision` is rejected with 401 before session lookup — there is no client-bearer path
 
 ### Session lookup strategy
 
@@ -63,28 +63,13 @@ On startup, auth-service looks for the Kubernetes Secret `auth-session-cookie-ke
 |------|-------------|
 | `GET /healthz` | Health check |
 | `GET /public/session-info` | Returns current session metadata (namespace/name/state/title) |
-| `GET /public/kubeconfig` | Returns a ready-to-use kubeconfig for `kubectl` access |
-| `GET` or `POST /private/forward-auth-decision` | Traefik ForwardAuth endpoint for browser traffic and kubeconfig bearer-token passthrough |
+| `GET` or `POST /private/forward-auth-decision` | Traefik ForwardAuth endpoint — browser-only, rejects inbound `Authorization` |
 
 All `/public/` endpoints accept either a `?code=XXXX` join code or an existing session cookie.
 
-## Audience kubectl access
+## Audience access
 
-Once you have the join code on screen, the audience can get `kubectl` access with a single command:
-
-```sh
-# One-liner — no file written
-KUBECONFIG=<(curl -s "https://vote.reversegitops.dev/auth/kubeconfig?code=XXXX") \
-  kubectl get quizsessions.examples.configbutler.ai
-
-# Multi-command version (more reliable on macOS)
-curl -s "https://vote.reversegitops.dev/auth/kubeconfig?code=XXXX" > /tmp/voter.yaml
-export KUBECONFIG=/tmp/voter.yaml
-kubectl get quizsessions.examples.configbutler.ai
-kubectl get quizsubmissions.examples.configbutler.ai
-```
-
-The returned kubeconfig uses the same `quiz-access` ServiceAccount as the browser and contains a token valid for ~10 minutes.
+Audience members reach the demo through the browser only. The Kubernetes API surface (`/api`, `/apis`, `/openapi`) is fronted by Traefik, which strips any client-supplied `Authorization` / `Impersonate-*` headers, calls auth-service to mint a short-lived impersonator-SA token, and attaches the audience member's identity as `Impersonate-User` / `Impersonate-Group`. There is no downloadable kubeconfig and no `kubectl` path.
 
 ## Run locally
 
@@ -92,7 +77,7 @@ Local runs need Kubernetes access via `KUBECONFIG` or `~/.kube/config` because t
 
 ```bash
 cd auth-service
-FORWARD_SA=quiz-access FORWARD_SA_NAMESPACE=voter COOKIE_SECURE=false go run .
+FORWARD_SA=voter-audience-impersonator FORWARD_SA_NAMESPACE=voter COOKIE_SECURE=false go run .
 ```
 
 Health check:

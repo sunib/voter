@@ -91,7 +91,6 @@ func (c *quizSessionCache) set(key string, session quizSessionSpec, expiresAt ti
 type kubeHandler interface {
 	requestToken(ctx context.Context, namespace, serviceAccount string, audiences []string, ttlSeconds int64) (string, time.Time, error)
 	getQuizSession(ctx context.Context, ref sessionRef) (quizSessionSpec, error)
-	reviewToken(ctx context.Context, token string) (authenticated bool, username string, err error)
 	getCoffeeConfig(ctx context.Context) (coffeeConfig, error)
 	patchCoffeeConfig(ctx context.Context, patch []byte, identity audienceIdentity) (coffeeConfig, error)
 	watchCoffeeConfig(ctx context.Context) (coffeeConfig, k8swatch.Interface, error)
@@ -206,19 +205,6 @@ func (c kubeClient) requestToken(ctx context.Context, namespace, serviceAccount 
 		return "", time.Time{}, errors.New("token request returned empty token")
 	}
 	return token, result.Status.ExpirationTimestamp.Time, nil
-}
-
-func (c kubeClient) reviewToken(ctx context.Context, token string) (bool, string, error) {
-	tr := &authenticationv1.TokenReview{
-		Spec: authenticationv1.TokenReviewSpec{
-			Token: token,
-		},
-	}
-	result, err := c.clientset.AuthenticationV1().TokenReviews().Create(ctx, tr, metav1.CreateOptions{})
-	if err != nil {
-		return false, "", fmt.Errorf("token review failed: %w", err)
-	}
-	return result.Status.Authenticated, result.Status.User.Username, nil
 }
 
 func (c kubeClient) getQuizSession(ctx context.Context, ref sessionRef) (quizSessionSpec, error) {

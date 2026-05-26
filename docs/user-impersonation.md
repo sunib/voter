@@ -618,12 +618,14 @@ RBAC block above under "Required Kubernetes resources" as an optional rule.
 
 ## Limitations
 
-- **kubectl path is not covered.** Users who download a kubeconfig and run
-  `kubectl get ...` directly hit the API server with a ServiceAccount token
-  and bypass your backend. The audit log shows the SA, not the user, for
-  those calls. If you need attribution there too, you have to either:
+- **Browser-only by design.** This demo deliberately has no downloadable
+  kubeconfig or direct `kubectl` path — Traefik strips any inbound
+  `Authorization` / `Impersonate-*` headers and the auth-service rejects them
+  before minting a token, so identity always comes from the session cookie.
+  If you instead want to *support* a kubectl path while keeping per-user
+  audit attribution, you have two options:
   - put a proxy in front that injects impersonate headers based on a session
-    cookie (more complex), or
+    cookie (the approach taken here, but exposed only to the browser), or
   - move to OIDC, where the identity is in the token itself.
 - **No automatic group resolution.** `demo:simon-koudijs` doesn't mean anything
   to K8s.

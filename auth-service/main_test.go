@@ -202,28 +202,25 @@ func TestJoinCodeStoreEnsureActiveCodeReusesValidCode(t *testing.T) {
 }
 
 type stubKubeClient struct {
-	mu                  sync.Mutex
-	calls               int
-	token               string
-	exp                 time.Time
-	tokenErr            error
-	lastTokenNamespace  string
-	lastTokenName       string
-	requestStarted      chan struct{}
-	releaseRequest      chan struct{}
-	reviewAuthenticated bool
-	reviewUsername      string
-	reviewErr           error
-	coffeeConfig        coffeeConfig
-	patchResult         coffeeConfig
-	coffeeConfigErr     error
-	patchCoffeeErr      error
-	lastPatchBody       []byte
-	lastPatchIdentity   audienceIdentity
-	commitRequestName   string
-	commitRequestErr    error
-	commitRequestCalls  int
-	lastCommitRequest   createCommitRequestParams
+	mu                 sync.Mutex
+	calls              int
+	token              string
+	exp                time.Time
+	tokenErr           error
+	lastTokenNamespace string
+	lastTokenName      string
+	requestStarted     chan struct{}
+	releaseRequest     chan struct{}
+	coffeeConfig       coffeeConfig
+	patchResult        coffeeConfig
+	coffeeConfigErr    error
+	patchCoffeeErr     error
+	lastPatchBody      []byte
+	lastPatchIdentity  audienceIdentity
+	commitRequestName  string
+	commitRequestErr   error
+	commitRequestCalls int
+	lastCommitRequest  createCommitRequestParams
 }
 
 func (s *stubKubeClient) requestToken(_ context.Context, namespace, name string, _ []string, _ int64) (string, time.Time, error) {
@@ -253,10 +250,6 @@ func (s *stubKubeClient) requestToken(_ context.Context, namespace, name string,
 
 func (s *stubKubeClient) getQuizSession(_ context.Context, _ sessionRef) (quizSessionSpec, error) {
 	return quizSessionSpec{}, nil
-}
-
-func (s *stubKubeClient) reviewToken(_ context.Context, _ string) (bool, string, error) {
-	return s.reviewAuthenticated, s.reviewUsername, s.reviewErr
 }
 
 func (s *stubKubeClient) getCoffeeConfig(_ context.Context) (coffeeConfig, error) {
@@ -1191,7 +1184,11 @@ func TestForwardAuthBrowserSessionImpersonation(t *testing.T) {
 	}
 }
 
-func TestForwardAuthBearerPassthrough(t *testing.T) {
+// TestForwardAuthRejectsInboundAuthorization is the regression guard for the
+// "no user-supplied bearer token ever reaches the API server" invariant. Any
+// inbound Authorization must produce a 401 without minting a token, even when
+// a valid session cookie is also attached.
+func TestForwardAuthRejectsInboundAuthorization(t *testing.T) {
 	cfg := config{
 		JoinCodeRotate:    15 * time.Second,
 		JoinCodeTTL:       60 * time.Second,
@@ -1202,57 +1199,29 @@ func TestForwardAuthBearerPassthrough(t *testing.T) {
 	store := newJoinCodeStore(cfg)
 	hashKey, blockKey, _ := generateCookieKeys()
 	sc, _ := newSessionSecureCookie(hashKey, blockKey)
+	now := time.Now()
 
 	cases := []struct {
-		name                string
-		authHeader          string
-		reviewAuthenticated bool
-		reviewUsername      string
-		reviewErr           error
-		wantCode            int
-		wantAuthForwarder   string
+		name       string
+		authHeader string
+		withCookie bool
 	}{
-		{
-			name:                "valid token is passed through",
-			authHeader:          "Bearer good-token",
-			reviewAuthenticated: true,
-			reviewUsername:      "system:serviceaccount:vote:quiz-access",
-			wantCode:            http.StatusOK,
-			wantAuthForwarder:   "passthrough",
-		},
-		{
-			name:                "invalid token is rejected",
-			authHeader:          "Bearer bad-token",
-			reviewAuthenticated: false,
-			wantCode:            http.StatusUnauthorized,
-		},
-		{
-			name:       "token review error returns 500",
-			authHeader: "Bearer error-token",
-			reviewErr:  errors.New("kube unavailable"),
-			wantCode:   http.StatusInternalServerError,
-		},
-		{
-			name:       "no bearer token falls through to session check (no session → 401)",
-			authHeader: "",
-			wantCode:   http.StatusUnauthorized,
-		},
+		{name: "bearer without session", authHeader: "Bearer good-token", withCookie: false},
+		{name: "bearer with valid session", authHeader: "Bearer good-token", withCookie: true},
+		{name: "malformed auth header", authHeader: "garbage", withCookie: true},
+		{name: "no bearer, no session", authHeader: "", withCookie: false},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			stub := &stubKubeClient{
-				reviewAuthenticated: tc.reviewAuthenticated,
-				reviewUsername:      tc.reviewUsername,
-				reviewErr:           tc.reviewErr,
-			}
+			stub := &stubKubeClient{token: "stub-token", exp: now.Add(10 * time.Minute)}
 			deps := handlerDeps{
 				cfg:           cfg,
 				codes:         store,
 				kube:          stub,
 				sessionCookie: sc,
-				forwardSaName: "quiz-access",
-				forwardSaNS:   "vote",
+				forwardSaName: "voter-audience-impersonator",
+				forwardSaNS:   "voter",
 				tokenTTL:      600,
 			}
 
@@ -1260,128 +1229,12 @@ func TestForwardAuthBearerPassthrough(t *testing.T) {
 			registerHandlers(mux, deps)
 
 			req := httptest.NewRequest(http.MethodGet, "http://auth-service/private/forward-auth-decision", nil)
-			req.Header.Set("X-Forwarded-Uri", "/apis/examples.configbutler.ai/v1alpha1/namespaces/vote/quizsessions")
+			req.Header.Set("X-Forwarded-Uri", "/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/quizsessions")
 			req.Header.Set("X-Forwarded-Method", "GET")
 			if tc.authHeader != "" {
 				req.Header.Set("Authorization", tc.authHeader)
 			}
-
-			rec := httptest.NewRecorder()
-			mux.ServeHTTP(rec, req)
-
-			if rec.Code != tc.wantCode {
-				t.Errorf("status: got %d, want %d (body: %q)", rec.Code, tc.wantCode, rec.Body.String())
-			}
-			if tc.wantAuthForwarder != "" {
-				if got := rec.Header().Get("X-Auth-Forwarder"); got != tc.wantAuthForwarder {
-					t.Errorf("X-Auth-Forwarder: got %q, want %q", got, tc.wantAuthForwarder)
-				}
-			}
-			if tc.wantCode == http.StatusOK && tc.authHeader != "" {
-				if got := rec.Header().Get("Authorization"); got != tc.authHeader {
-					t.Errorf("Authorization echoed back: got %q, want %q", got, tc.authHeader)
-				}
-			}
-		})
-	}
-}
-
-func TestKubeconfigHandler(t *testing.T) {
-	cfg := config{
-		SessionCookieName:       "auth_session",
-		SessionCookieMaxAgeSecs: 3600,
-		CookieSecure:            false,
-	}
-	now := time.Now()
-
-	hashKey, blockKey, err := generateCookieKeys()
-	if err != nil {
-		t.Fatalf("unexpected key error: %v", err)
-	}
-	sc, err := newSessionSecureCookie(hashKey, blockKey)
-	if err != nil {
-		t.Fatalf("unexpected securecookie error: %v", err)
-	}
-
-	tokenExp := now.Add(10 * time.Minute)
-
-	cases := []struct {
-		name           string
-		method         string
-		url            string
-		forwardedHost  string
-		forwardedProto string
-		tokenErr       error
-		wantCode       int
-		wantInBody     []string
-		wantMissing    []string
-	}{
-		{
-			name:       "valid session returns kubeconfig",
-			method:     http.MethodGet,
-			url:        "http://auth-service/public/kubeconfig",
-			wantCode:   http.StatusOK,
-			wantInBody: []string{"kind: Config", "token: stub-token", "namespace: voter", "server: https://auth-service"},
-		},
-		{
-			name:           "server URL comes from X-Forwarded headers",
-			method:         http.MethodGet,
-			url:            "http://auth-service/public/kubeconfig",
-			forwardedHost:  "voter.z65.nl",
-			forwardedProto: "https",
-			wantCode:       http.StatusOK,
-			wantInBody:     []string{"server: https://voter.z65.nl"},
-		},
-		{
-			name:        "no code and no cookie returns 401",
-			method:      http.MethodGet,
-			url:         "http://auth-service/public/kubeconfig",
-			wantCode:    http.StatusUnauthorized,
-			wantMissing: []string{"kind: Config"},
-		},
-		{
-			name:        "POST returns 405",
-			method:      http.MethodPost,
-			url:         "http://auth-service/public/kubeconfig",
-			wantCode:    http.StatusMethodNotAllowed,
-			wantMissing: []string{"kind: Config"},
-		},
-		{
-			name:        "token request failure returns 500",
-			method:      http.MethodGet,
-			url:         "http://auth-service/public/kubeconfig",
-			tokenErr:    errors.New("kube unavailable"),
-			wantCode:    http.StatusInternalServerError,
-			wantMissing: []string{"kind: Config"},
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			stub := &stubKubeClient{token: "stub-token", exp: tokenExp, tokenErr: tc.tokenErr}
-			deps := handlerDeps{
-				cfg:              cfg,
-				kube:             stub,
-				sessionCookie:    sc,
-				defaultNS:        "voter",
-				forwardSaName:    "voter-audience-impersonator",
-				forwardSaNS:      "voter",
-				kubeconfigSaName: "quiz-access",
-				kubeconfigSaNS:   "voter",
-				tokenTTL:         600,
-			}
-
-			mux := http.NewServeMux()
-			registerHandlers(mux, deps)
-
-			req := httptest.NewRequest(tc.method, tc.url, nil)
-			if tc.forwardedHost != "" {
-				req.Header.Set("X-Forwarded-Host", tc.forwardedHost)
-			}
-			if tc.forwardedProto != "" {
-				req.Header.Set("X-Forwarded-Proto", tc.forwardedProto)
-			}
-			if tc.wantCode != http.StatusUnauthorized {
+			if tc.withCookie {
 				cookieRec := httptest.NewRecorder()
 				if err := setTestSessionCookie(t, cookieRec, cfg, sc, testStableID, testDisplayName, testEmail, now); err != nil {
 					t.Fatalf("failed to set session cookie: %v", err)
@@ -1394,25 +1247,34 @@ func TestKubeconfigHandler(t *testing.T) {
 			rec := httptest.NewRecorder()
 			mux.ServeHTTP(rec, req)
 
-			if rec.Code != tc.wantCode {
-				t.Errorf("status: got %d, want %d (body: %q)", rec.Code, tc.wantCode, rec.Body.String())
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status: got %d want 401 (body: %q)", rec.Code, rec.Body.String())
 			}
-			if stub.calls > 0 {
-				if stub.lastTokenNamespace != "voter" || stub.lastTokenName != "quiz-access" {
-					t.Errorf("token request SA: got %s/%s want voter/quiz-access", stub.lastTokenNamespace, stub.lastTokenName)
-				}
+			if rec.Header().Get("Authorization") != "" {
+				t.Errorf("Authorization header must not be set on rejection, got %q", rec.Header().Get("Authorization"))
 			}
-			body := rec.Body.String()
-			for _, want := range tc.wantInBody {
-				if !strings.Contains(body, want) {
-					t.Errorf("body missing %q\ngot:\n%s", want, body)
-				}
-			}
-			for _, missing := range tc.wantMissing {
-				if strings.Contains(body, missing) {
-					t.Errorf("body should not contain %q\ngot:\n%s", missing, body)
-				}
+			if tc.authHeader != "" && stub.calls != 0 {
+				t.Errorf("kube.requestToken must not be called when inbound Authorization is present, got calls=%d", stub.calls)
 			}
 		})
+	}
+}
+
+// TestKubeconfigEndpointGone confirms the /public/kubeconfig route is no
+// longer registered. The catch-all "/" handler returns 404 for any unknown
+// path.
+func TestKubeconfigEndpointGone(t *testing.T) {
+	mux := http.NewServeMux()
+	registerHandlers(mux, handlerDeps{kube: &stubKubeClient{}})
+
+	req := httptest.NewRequest(http.MethodGet, "http://auth-service/public/kubeconfig", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status: got %d want 404 (body: %q)", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "kind: Config") {
+		t.Errorf("response body must not look like a kubeconfig, got: %s", rec.Body.String())
 	}
 }

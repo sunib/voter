@@ -14,15 +14,14 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "create", "update"]
-  # Access to create tokens for ServiceAccounts. quiz-access is the legacy
-  # browser-flow SA (kept while we transition); voter-audience-impersonator is
-  # the SA whose token is now attached to browser requests so the API server
-  # can apply Impersonate-* headers set by forwardAuth.
+  # Mint short-lived tokens for the impersonator SA. Traefik attaches that
+  # token to browser requests so the API server applies the Impersonate-*
+  # headers set by forwardAuth. resourceNames pins this to the one SA we
+  # actually need — no other SA in the namespace can be minted from here.
   - apiGroups: [""]
     resources: ["serviceaccounts/token"]
     verbs: ["create"]
-    resourceNames:  # This is really cool: now we can limit it to what we absolutelty need
-    - quiz-access
+    resourceNames:
     - voter-audience-impersonator
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -44,10 +43,6 @@ kind: ClusterRole
 metadata:
   name: auth-service
 rules:
-  # Validate bearer tokens presented by kubectl / kubeconfig users
-  - apiGroups: ["authentication.k8s.io"]
-    resources: ["tokenreviews"]
-    verbs: ["create"]
   # Access to quizsessions (cluster-scoped CRD)
   - apiGroups: ["examples.configbutler.ai"]
     resources: ["quizsessions"]

@@ -23,8 +23,6 @@ type config struct {
 	JoinCodeLength                 int           `envconfig:"JOIN_CODE_LENGTH" default:"4"`
 	ForwardServiceAccount          string        `envconfig:"FORWARD_SA"`
 	ForwardServiceAccountNamespace string        `envconfig:"FORWARD_SA_NAMESPACE"`
-	KubeconfigServiceAccount       string        `envconfig:"KUBECONFIG_SA"`
-	KubeconfigServiceAccountNS     string        `envconfig:"KUBECONFIG_SA_NAMESPACE"`
 	CoffeeConfigName               string        `envconfig:"COFFEE_CONFIG_NAME" default:"testnet-coffee"`
 
 	// ConfigButlerGitTargetName names the ConfigButler GitTarget whose open
