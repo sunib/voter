@@ -97,8 +97,8 @@ func main() {
 	changes := newCoffeeChangeRuntime(64)
 
 	rotateGlobalAccessCode(cfg, codes, time.Now())
-	if strings.TrimSpace(cfg.DemoAccessCode) != "" {
-		log.Printf("demo-access-code: using static code from DEMO_ACCESS_CODE")
+	if staticCode := strings.TrimSpace(cfg.DemoAccessCode); staticCode != "" {
+		log.Printf("demo-access-code: using static code from DEMO_ACCESS_CODE code=%s", staticCode)
 	} else {
 		go func() {
 			ticker := time.NewTicker(cfg.JoinCodeRotate)
