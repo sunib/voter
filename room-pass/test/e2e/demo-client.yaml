@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-client
+  namespace: room-pass
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-client
+  template:
+    metadata:
+      labels:
+        app: demo-client
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: demo-client
+          image: room-pass-demo-client:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: issuer-ca
+              mountPath: /tls
+              readOnly: true
+            - name: kube-ca
+              mountPath: /kube
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+      volumes:
+        - name: issuer-ca
+          configMap:
+            name: issuer-ca
+        - name: kube-ca
+          configMap:
+            name: kube-root-ca.crt
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-client
+  namespace: room-pass
+spec:
+  selector:
+    app: demo-client
+  ports:
+    - port: 8080
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: demo-client
+  namespace: room-pass
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  tls:
+    - secretName: local-tls
+      hosts: [demo.roompass.test]
+  rules:
+    - host: demo.roompass.test
+      http:
+        paths:
+          - path: /app
+            pathType: Prefix
+            backend:
+              service:
+                name: demo-client
+                port:
+                  number: 8080

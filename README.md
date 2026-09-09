@@ -46,6 +46,12 @@ Alternatives and trade-offs:
 
 - [`docs/alternatives/README.md`](docs/alternatives/README.md:1)
 
+## Room Pass
+
+Room Pass development lives in [`room-pass/`](room-pass/README.md): an independent
+Go service, Dockerfile, Kubernetes enrollment APIs, and a runnable local Dex/OIDC demo.
+Start with `task room-pass:test` and `task room-pass:e2e-up`.
+
 # Skills
 
 Started to get some understanding for skills: I just installed

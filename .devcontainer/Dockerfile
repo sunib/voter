@@ -1,0 +1,486 @@
+# Multi-stage Dockerfile for Voter
+#
+# Adapted from the gitops-reverser devcontainer: same toolchain, same commit
+# signing setup, retargeted at this repo's layout (Go service in auth-service/,
+# Vue + Vite frontend in frontend/, manifests and CRDs in k8s/).
+#
+# Stage 1: CI base image with essential build tools
+# Pinned by digest (Scorecard "pinned dependencies"); Dependabot's docker
+# ecosystem keeps version + digest current together.
+FROM golang:1.27.1-bookworm@sha256:648f440f42a0958804efb24df176f806f9d353b41f1c0627f666428e40310f6b AS ci
+
+# Avoid warnings by switching to noninteractive
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Run RUN steps under bash with pipefail so a failure anywhere in a
+# `curl ... | tar` download pipeline aborts the build instead of silently
+# installing a truncated or empty binary.
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Install essential packages + Docker CLI (for DooD via socket mount in CI)
+RUN apt-get update \
+    && apt-get -y install --no-install-recommends \
+    git \
+    curl \
+    ca-certificates \
+    vim \
+    less \
+    jq \
+    yq \
+    sudo \
+    acl \
+    rsync \
+    gettext-base \
+    gnupg \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+       > /etc/apt/sources.list.d/docker.list \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+       -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && chmod a+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+       > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get -y install --no-install-recommends docker-ce-cli docker-buildx-plugin gh \
+    && apt-get autoremove -y \
+    && apt-get clean -y \
+    && rm -rf /var/lib/apt/lists/*
+
+# Tool versions - centralized for easy updates.
+# This devcontainer currently supports amd64 tool downloads only.
+
+# Finding the latest versions:
+# KUBECTL_VERSION -> https://github.com/kubernetes/kubernetes/releases
+# KUSTOMIZE_VERSION -> https://github.com/kubernetes-sigs/kustomize/releases
+# KUBEBUILDER_VERSION -> https://github.com/kubernetes-sigs/kubebuilder
+# GOLANGCI_LINT_VERSION -> https://github.com/golangci/golangci-lint/releases
+# K3D_VERSION -> https://github.com/k3d-io/k3d
+# FLUX_VERSION -> https://github.com/fluxcd/flux2
+# FLUX_OPERATOR_VERSION -> https://github.com/controlplaneio-fluxcd/flux-operator
+# TASK_VERSION -> https://github.com/go-task/task/releases
+# ACTIONLINT_VERSION -> https://github.com/rhysd/actionlint/releases
+# HADOLINT_VERSION -> https://github.com/hadolint/hadolint/releases
+# VALKEY_VERSION -> https://github.com/valkey-io/valkey/releases
+# COSIGN_VERSION -> https://github.com/sigstore/cosign/releases
+# ORAS_VERSION -> https://github.com/oras-project/oras/releases
+# NODE_MAJOR -> https://github.com/nodejs/node/releases (track a current LTS line)
+# MARKDOWNLINT_CLI2_VERSION -> https://www.npmjs.com/package/markdownlint-cli2?activeTab=versions
+# VALE_VERSION -> https://github.com/vale-cli/vale/releases
+# TRIVY_VERSION -> https://github.com/aquasecurity/trivy/releases
+# TALOSCTL_VERSION -> https://github.com/siderolabs/talos/releases
+# TALM_VERSION -> https://github.com/cozystack/talm/releases
+# TOFU_VERSION -> https://github.com/opentofu/opentofu/releases
+# SOPS_VERSION -> https://github.com/getsops/sops/releases
+# AGE_VERSION -> https://github.com/FiloSottile/age/releases
+
+ENV PATH="/go/bin:/usr/local/go/bin:${PATH}" \
+    KUBECTL_VERSION=v1.37.0 \
+    KUSTOMIZE_VERSION=5.8.1 \
+    KUBEBUILDER_VERSION=4.15.0 \
+    GOLANGCI_LINT_VERSION=v2.13.2 \
+    HELM_VERSION=v4.2.4 \
+    K3D_VERSION=v5.9.0 \
+    FLUX_VERSION=2.9.5 \
+    FLUX_OPERATOR_VERSION=0.59.0 \
+    TASK_VERSION=v3.53.1 \
+    ACTIONLINT_VERSION=1.7.12 \
+    HADOLINT_VERSION=2.15.1 \
+    VALKEY_VERSION=9.1.2 \
+    COSIGN_VERSION=v3.1.3 \
+    ORAS_VERSION=1.3.4 \
+    NODE_MAJOR=24 \
+    MARKDOWNLINT_CLI2_VERSION=0.23.2 \
+    VALE_VERSION=3.20.0 \
+    TRIVY_VERSION=0.74.0 \
+    TALOSCTL_VERSION=v1.13.4 \
+    TALM_VERSION=v0.31.0 \
+    TOFU_VERSION=1.12.3 \
+    SOPS_VERSION=v3.13.3 \
+    AGE_VERSION=v1.3.1
+
+# Fail early on unsupported architectures instead of producing a partial image.
+RUN test "$(dpkg --print-architecture)" = "amd64" \
+    || (echo "This devcontainer currently supports amd64 only." && exit 1)
+
+# Install kubectl
+RUN curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+    && chmod +x kubectl \
+    && mv kubectl /usr/local/bin/
+
+# Install Kustomize
+RUN curl -Lo kustomize.tar.gz "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv${KUSTOMIZE_VERSION}/kustomize_v${KUSTOMIZE_VERSION}_linux_amd64.tar.gz" && \
+    tar -zxvf kustomize.tar.gz && \
+    mv kustomize /usr/local/bin/ && \
+    rm kustomize.tar.gz
+
+# Install Kubebuilder
+RUN curl -L -o /usr/local/bin/kubebuilder "https://github.com/kubernetes-sigs/kubebuilder/releases/download/v${KUBEBUILDER_VERSION}/kubebuilder_linux_amd64" \
+    && chmod +x /usr/local/bin/kubebuilder
+
+# Install Helm
+RUN curl -fsSL https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz \
+    | tar -xzO linux-amd64/helm > /usr/local/bin/helm \
+    && chmod +x /usr/local/bin/helm
+
+# Install golangci-lint
+RUN curl -sSfL https://golangci-lint.run/install.sh \
+    | sh -s -- -b /usr/local/bin ${GOLANGCI_LINT_VERSION}
+
+# Install k3d (faster and kind alternative, also more stable with our docker-outside-docker setup)
+RUN curl -fsSL -o /usr/local/bin/k3d "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64" \
+    && chmod +x /usr/local/bin/k3d
+
+# Install Flux CLI
+RUN curl -fsSL "https://github.com/fluxcd/flux2/releases/download/v${FLUX_VERSION}/flux_${FLUX_VERSION}_linux_amd64.tar.gz" \
+    | tar -xzO flux > /usr/local/bin/flux \
+    && chmod +x /usr/local/bin/flux
+
+# Install Flux Operator CLI
+RUN asset="flux-operator_${FLUX_OPERATOR_VERSION}_linux_amd64.tar.gz" \
+    && base="https://github.com/controlplaneio-fluxcd/flux-operator/releases/download/v${FLUX_OPERATOR_VERSION}" \
+    && tmpdir="$(mktemp -d)" \
+    && curl -fsSL "${base}/${asset}" -o "${tmpdir}/${asset}" \
+    && curl -fsSL "${base}/flux-operator_${FLUX_OPERATOR_VERSION}_checksums.txt" -o "${tmpdir}/checksums.txt" \
+    && cd "${tmpdir}" \
+    && grep "  ${asset}$" checksums.txt | sha256sum -c - \
+    && tar -xzf "${asset}" \
+    && install -m 0755 flux-operator /usr/local/bin/flux-operator \
+    && rm -rf "${tmpdir}"
+
+# --- Platform toolchain (platform/ bring-up) ---------------------------------
+#
+# Section 8 of the platform implementation plan (private, ConfigButler/k8s) asks
+# for one root devcontainer holding the union of the tools each area needs, and
+# lists OpenTofu, Talos/talm and SOPS/age for platform/. Versions and install
+# recipes are taken from the cloud-native-delivery-workshop devcontainer rather
+# than picked fresh, so the platform runbook and this container agree on what
+# `tofu`, `talm` and `talosctl` mean.
+#
+# These live in the ci stage, not dev-only, because the plan's verification for
+# platform/ is "render Talos/Helm/Kustomize, validate config, inspect plan" --
+# checks a pipeline should be able to run against this stage without a second
+# tool install. None of them touch a cluster on their own: applying always needs
+# an explicit target, which is the plan's rule that opening a devcontainer must
+# never apply to the work cluster.
+
+# talosctl - talk to Talos nodes (gen secrets/config, bootstrap, kubeconfig).
+RUN curl -fsSL -o /usr/local/bin/talosctl "https://github.com/siderolabs/talos/releases/download/${TALOSCTL_VERSION}/talosctl-linux-amd64" \
+    && chmod 0755 /usr/local/bin/talosctl
+
+# talm - Helm-style Talos machine-config templating (cozystack/talm).
+RUN curl -fsSL "https://github.com/cozystack/talm/releases/download/${TALM_VERSION}/talm-linux-amd64.tar.gz" \
+    | tar -xzO talm > /usr/local/bin/talm \
+    && chmod 0755 /usr/local/bin/talm
+
+# tofu - OpenTofu: provisions the Proxmox VMs the demo cluster runs on.
+RUN curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.tar.gz" \
+    | tar -xzO tofu > /usr/local/bin/tofu \
+    && chmod 0755 /usr/local/bin/tofu
+
+# sops - encrypt/decrypt the Secret values committed under platform/. Also what
+# the gitops-reverser GitTarget CRD names as its `provider: sops`, so an
+# encrypted round trip can be reproduced here.
+RUN curl -fsSL -o /usr/local/bin/sops "https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.amd64" \
+    && chmod 0755 /usr/local/bin/sops
+
+# age - encryption backend for sops (provides both age and age-keygen).
+RUN curl -fsSL "https://github.com/FiloSottile/age/releases/download/${AGE_VERSION}/age-${AGE_VERSION}-linux-amd64.tar.gz" \
+    | tar -xz -C /usr/local/bin --strip-components=1 age/age age/age-keygen \
+    && chmod 0755 /usr/local/bin/age /usr/local/bin/age-keygen
+
+# Install Task
+RUN curl -fsSL "https://github.com/go-task/task/releases/download/${TASK_VERSION}/task_linux_amd64.tar.gz" \
+    | tar -xzO task > /usr/local/bin/task \
+    && chmod +x /usr/local/bin/task
+
+# Install actionlint (static linter for GitHub Actions workflows)
+RUN asset="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
+    && base="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}" \
+    && tmpdir="$(mktemp -d)" \
+    && curl -fsSL "${base}/${asset}" -o "${tmpdir}/${asset}" \
+    && curl -fsSL "${base}/actionlint_${ACTIONLINT_VERSION}_checksums.txt" -o "${tmpdir}/checksums.txt" \
+    && cd "${tmpdir}" \
+    && grep "  ${asset}$" checksums.txt | sha256sum -c - \
+    && tar -xzf "${asset}" actionlint \
+    && install -m 0755 actionlint /usr/local/bin/actionlint \
+    && rm -rf "${tmpdir}"
+
+# Install trivy (container image vulnerability scanner). It backs `task scan-image`,
+# which is the same command CI runs to gate the built image — so a maintainer can
+# reproduce a scan failure locally instead of pushing to find out what it said.
+#
+# The vulnerability DB is deliberately NOT pre-seeded here: it unpacks to 1.3GB, goes
+# stale in 24h, and ten CI jobs pull this image while only two scan. CI caches it instead.
+RUN asset="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+    && base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}" \
+    && tmpdir="$(mktemp -d)" \
+    && curl -fsSL "${base}/${asset}" -o "${tmpdir}/${asset}" \
+    && curl -fsSL "${base}/trivy_${TRIVY_VERSION}_checksums.txt" -o "${tmpdir}/checksums.txt" \
+    && cd "${tmpdir}" \
+    && grep "  ${asset}$" checksums.txt | sha256sum -c - \
+    && tar -xzf "${asset}" trivy \
+    && install -m 0755 trivy /usr/local/bin/trivy \
+    && rm -rf "${tmpdir}"
+
+# Install hadolint (static linter for Dockerfiles). Since 2.15.0 the release no
+# longer ships a per-asset .sha256 file, only one combined checksums.sha256 in
+# `sha256sum *filename` format (space-asterisk, not the two-space format the
+# other combined-checksum tools below use).
+RUN asset="hadolint-linux-x86_64" \
+    && base="https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}" \
+    && tmpdir="$(mktemp -d)" \
+    && curl -fsSL "${base}/${asset}" -o "${tmpdir}/${asset}" \
+    && curl -fsSL "${base}/checksums.sha256" -o "${tmpdir}/checksums.sha256" \
+    && cd "${tmpdir}" \
+    && grep " \*${asset}$" checksums.sha256 | sha256sum -c - \
+    && install -m 0755 "${asset}" /usr/local/bin/hadolint \
+    && rm -rf "${tmpdir}"
+
+# Install valkey-cli
+# Valkey only ships prebuilt binaries for Ubuntu jammy/noble; the jammy build
+# (glibc 2.35) is compatible with this bookworm image (glibc 2.36). Extract only
+# the CLI binary from the release tarball.
+RUN curl -fsSL "https://download.valkey.io/releases/valkey-${VALKEY_VERSION}-jammy-x86_64.tar.gz" \
+    | tar -xzO "valkey-${VALKEY_VERSION}-jammy-x86_64/bin/valkey-cli" > /usr/local/bin/valkey-cli \
+    && chmod +x /usr/local/bin/valkey-cli
+
+# Install cosign (Sigstore keyless signing/verification). Lives in the ci stage
+# rather than dev-only so a release pipeline can run against this stage directly.
+# Nothing in this repo invokes it yet: `make build-push` produces provenance and
+# an SBOM via buildx, but does not sign. It is here so images pushed to
+# zot.z65.nl *can* be signed, and so published artifacts can be verified by hand
+# (`cosign verify`, `cosign verify-blob`).
+RUN asset="cosign-linux-amd64" \
+    && base="https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}" \
+    && tmpdir="$(mktemp -d)" \
+    && curl -fsSL "${base}/${asset}" -o "${tmpdir}/${asset}" \
+    && curl -fsSL "${base}/cosign_checksums.txt" -o "${tmpdir}/checksums.txt" \
+    && cd "${tmpdir}" \
+    && grep "  ${asset}$" checksums.txt | sha256sum -c - \
+    && install -m 0755 "${asset}" /usr/local/bin/cosign \
+    && rm -rf "${tmpdir}"
+
+# Install oras (OCI registry client). Like cosign above it lives in the ci stage.
+# It pushes and inspects plain OCI artifacts — SBOMs, attestations, arbitrary
+# blobs — in the zot.z65.nl registry this repo publishes to, which is something
+# neither `docker push` nor `helm push` can produce or read back.
+RUN asset="oras_${ORAS_VERSION}_linux_amd64.tar.gz" \
+    && base="https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}" \
+    && tmpdir="$(mktemp -d)" \
+    && curl -fsSL "${base}/${asset}" -o "${tmpdir}/${asset}" \
+    && curl -fsSL "${base}/oras_${ORAS_VERSION}_checksums.txt" -o "${tmpdir}/checksums.txt" \
+    && cd "${tmpdir}" \
+    && grep "  ${asset}$" checksums.txt | sha256sum -c - \
+    && tar -xzf "${asset}" oras \
+    && install -m 0755 oras /usr/local/bin/oras \
+    && rm -rf "${tmpdir}"
+
+# Install Node.js (provides npm + npx).
+#
+# Node is needed by both halves of this repo: the Vite/Vue frontend in frontend/
+# (`npm run dev`, `npm run build`, eslint, prettier) and the markdownlint-cli2
+# docs linter installed below. It lives in the ci stage rather than dev-only so a
+# lint or frontend-build job can run against this stage directly; the dev stage
+# inherits it, so `npm`/`npx` are also there for local use.
+RUN curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+       | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
+    && chmod a+r /etc/apt/keyrings/nodesource.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
+       > /etc/apt/sources.list.d/nodesource.list \
+    && apt-get update \
+    && apt-get -y install --no-install-recommends nodejs \
+    && apt-get autoremove -y \
+    && apt-get clean -y \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install markdownlint-cli2 (structural markdown linter: fences, headings, lists,
+# tables). Ships as an npm package only -- there is no standalone binary release --
+# so it is installed globally with the version pinned in the ENV block above.
+RUN npm install -g "markdownlint-cli2@${MARKDOWNLINT_CLI2_VERSION}" \
+    && npm cache clean --force
+
+# Install Vale (prose linter). No repo-local style exists here yet, so it is inert
+# until one lands under .vale.ini; it needs no `vale sync` either way, which keeps
+# the image build hermetic.
+# The Linux asset is named "64-bit" rather than "amd64", unlike every other tool here.
+RUN asset="vale_${VALE_VERSION}_Linux_64-bit.tar.gz" \
+    && base="https://github.com/vale-cli/vale/releases/download/v${VALE_VERSION}" \
+    && tmpdir="$(mktemp -d)" \
+    && curl -fsSL "${base}/${asset}" -o "${tmpdir}/${asset}" \
+    && curl -fsSL "${base}/vale_${VALE_VERSION}_checksums.txt" -o "${tmpdir}/checksums.txt" \
+    && cd "${tmpdir}" \
+    && grep "  ${asset}$" checksums.txt | sha256sum -c - \
+    && tar -xzf "${asset}" vale \
+    && install -m 0755 vale /usr/local/bin/vale \
+    && rm -rf "${tmpdir}"
+
+# Set working directory
+WORKDIR /workspaces
+
+# Create godev group for shared Go development directory access
+# This allows both root (during build) and vscode user (during dev) to write to /go
+RUN groupadd --gid 2000 godev
+
+# Set group permissions on /go directory for shared access
+# This MUST be done BEFORE any go mod download or go install operations
+RUN chgrp -R godev /go && \
+    chmod -R 2775 /go && \
+    setfacl -d -m g:godev:rwx /go && \
+    setfacl -d -m u::rwx /go && \
+    setfacl -d -m o::rx /go
+
+# Install Go tools used by the project (using @version doesn't need go.mod)
+# These run AFTER permissions are set to ensure proper group ownership
+RUN go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.22.0 \
+    && go install github.com/onsi/ginkgo/v2/ginkgo@v2.32.1 \
+    && go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.0 \
+    && go install golang.org/x/tools/cmd/goimports@v0.49.0 \
+    && go install github.com/boyter/scc/v4@v4.0.0
+
+# Initialize golangci-lint cache by running it once on an empty directory
+# This downloads linter dependencies without needing source code
+RUN mkdir -p /tmp/golangci-init && cd /tmp/golangci-init \
+    && go mod init example.com/init \
+    && printf 'package main\n\nfunc main() {}\n' > main.go \
+    && golangci-lint run --timeout=5m || true \
+    && cd / && rm -rf /tmp/golangci-init
+
+# Pre-download Go modules for caching - placed AFTER tool installation
+# This layer will be cached and only rebuilt when go.mod/go.sum changes
+# Moving this down prevents tool reinstallation when dependencies change
+# The single-quoted lines below are shell written verbatim into the profile
+# script; build-time expansion must NOT happen, so single quotes are intended.
+# hadolint ignore=SC2016
+RUN printf '%s\n' \
+    'export PATH="/go/bin:/usr/local/go/bin:${PATH}"' \
+    > /etc/profile.d/go-toolchain-path.sh \
+    && chmod 0644 /etc/profile.d/go-toolchain-path.sh \
+    && printf '%s\n' \
+    '# Silently load the optional repo-root .env into login shells.' \
+    'workspace_dir="${PROJECT_PATH:-}"' \
+    'if [ -n "${workspace_dir}" ] && [ -f "${workspace_dir}/.env" ]; then' \
+    '  set -a' \
+    '  . "${workspace_dir}/.env"' \
+    '  set +a' \
+    'fi' \
+    > /etc/profile.d/workspace-dotenv.sh \
+    && chmod 0644 /etc/profile.d/workspace-dotenv.sh
+
+# The Go module lives in auth-service/, not at the repo root, so the warm-up
+# copy reaches into it. The build context is the repo root (see the `build`
+# block in devcontainer.json), which is what makes that path resolvable.
+COPY auth-service/go.mod auth-service/go.sum ./
+RUN go mod download
+
+# Switch back to dialog for any ad-hoc use of apt-get
+ENV DEBIAN_FRONTEND=dialog
+
+# Default command
+CMD ["/bin/bash"]
+
+# Stage 2: Development container, used for local development (https://github.com/devcontainers/spec)
+FROM ci AS dev
+
+USER root
+
+# Switch to noninteractive for package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Same pipefail hardening as the ci stage (SHELL is not inherited across stages).
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# Dev-only tool versions - centralized for easy updates.
+# These tools are only used inside the devcontainer (local development, IDE
+# tooling, debugging), never in CI, so they live in the dev stage.
+#
+# Finding the latest versions:
+# TILT_VERSION -> https://github.com/tilt-dev/tilt/releases
+# DLV_VERSION -> https://github.com/go-delve/delve/releases
+# GOPLS_VERSION -> https://github.com/golang/tools/releases
+# STATICCHECK_VERSION -> https://github.com/dominikh/go-tools/releases
+ENV TILT_VERSION=v0.37.7 \
+    DLV_VERSION=v1.27.1 \
+    GOPLS_VERSION=v0.23.0 \
+    STATICCHECK_VERSION=v0.8.1
+
+# k3d is already installed in the ci stage above.
+RUN apt-get update \
+    && apt-get -y install --no-install-recommends bash-completion \
+    && apt-get autoremove -y \
+    && apt-get clean -y \
+    && rm -rf /var/lib/apt/lists/*
+
+# Enable bash completion and auto-load Task completions for interactive shells in the dev image only.
+# Single-quoted lines are written verbatim into bash.bashrc; no build-time expansion intended.
+# hadolint ignore=SC2016
+RUN printf '%s\n' \
+    '' \
+    '# Enable bash completion and Task completions in interactive shells.' \
+    'if ! shopt -oq posix; then' \
+    '  if [ -f /usr/share/bash-completion/bash_completion ]; then' \
+    '    . /usr/share/bash-completion/bash_completion' \
+    '  elif [ -f /etc/bash_completion ]; then' \
+    '    . /etc/bash_completion' \
+    '  fi' \
+    '  if command -v task >/dev/null 2>&1 && ! complete -p task >/dev/null 2>&1; then' \
+    '    eval "$(task --completion bash)"' \
+    '  fi' \
+    'fi' \
+    >> /etc/bash.bashrc
+
+# Node.js is installed in the ci stage (markdownlint-cli2 needs it there) and
+# inherited here, so there is no dev-stage Node install.
+
+# Install Tilt CLI (local dev loop orchestration; dev stage only)
+RUN arch="$(dpkg --print-architecture)" && \
+    case "${arch}" in \
+        amd64) tilt_arch="x86_64" ;; \
+        arm64) tilt_arch="arm64" ;; \
+        *) echo "unsupported architecture for Tilt: ${arch}" && exit 1 ;; \
+    esac && \
+    tilt_version_no_v="${TILT_VERSION#v}" && \
+    url="https://github.com/tilt-dev/tilt/releases/download/${TILT_VERSION}/tilt.${tilt_version_no_v}.linux.${tilt_arch}.tar.gz" && \
+    echo "Downloading ${url}" && \
+    curl -fsSL -o /tmp/tilt.tar.gz "${url}" && \
+    tar -xzf /tmp/tilt.tar.gz -C /tmp tilt && \
+    install -m 0755 /tmp/tilt /usr/local/bin/tilt && \
+    rm -f /tmp/tilt /tmp/tilt.tar.gz
+
+# Install Delve debugger for Go debugging in VSCode
+# ACLs from CI stage should be preserved, so no need to re-apply
+RUN go install github.com/go-delve/delve/cmd/dlv@${DLV_VERSION}
+
+# Install VSCode Go extension tools (gopls and staticcheck). Both are editor-only:
+# gopls is the language server, and this standalone staticcheck powers the editor's
+# live (as-you-type) diagnostics. Neither is a lint step -- `task lint` already runs
+# staticcheck's analyzers via golangci-lint's bundled staticcheck linter (configured in
+# .golangci.yml), so this binary is for the IDE, not a second lint pass.
+RUN go install golang.org/x/tools/gopls@${GOPLS_VERSION} \
+    && go install honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION}
+
+# Create vscode user for non-root development and add to godev group
+RUN groupadd --gid 1000 vscode \
+    && useradd --uid 1000 --gid vscode --shell /bin/bash --create-home vscode \
+    && echo 'vscode ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers.d/vscode \
+    && chmod 0440 /etc/sudoers.d/vscode \
+    && usermod -aG godev vscode
+
+# Ensure docker group exists and add vscode user to it
+# This works with the docker-in-docker feature
+RUN groupadd -f docker && usermod -aG docker vscode
+
+# Ensure vscode user can write to workspace (empty, so fast)
+# Note: /go permissions are already set in CI stage and preserved here
+RUN chown -R vscode:vscode /workspaces && \
+    chmod -R 755 /workspaces
+
+# Switch back to vscode user for development
+USER vscode
+
+# Switch back to dialog for any ad-hoc use of apt-get
+ENV DEBIAN_FRONTEND=dialog
+
+# Default command
+CMD ["/bin/bash"]

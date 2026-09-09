@@ -1,0 +1,17 @@
+# This .dockerignore uses an "allowlist" approach for security and a minimal build context.
+# For more info: https://docs.docker.com/engine/reference/builder/#dockerignore-file
+#
+# The repo root is only ever a build context for .devcontainer/Dockerfile, which copies
+# nothing but the Go module files. Without this, every devcontainer build would ship
+# external/ (~200MB of vendored checkouts) and frontend/node_modules to the daemon.
+#
+# The application images build from narrower contexts -- `docker buildx build ./auth-service`
+# and `./frontend` in the Makefile -- so they are unaffected by this file. If a root-context
+# build is ever added, re-include what it needs below.
+
+# 1. Ignore everything by default.
+**
+
+# 2. Explicitly re-include only what the build COPYs.
+!auth-service/go.mod
+!auth-service/go.sum

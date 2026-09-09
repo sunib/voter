@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: room-pass
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: room-pass
+  template:
+    metadata:
+      labels:
+        app: room-pass
+    spec:
+      serviceAccountName: room-pass
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: room-pass
+          image: room-pass:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: ROOM_NAME
+              value: demo
+            - name: ROOM_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: JOIN_ORIGIN
+              value: https://demo.roompass.test:18443
+            - name: ISSUER_ORIGIN
+              value: https://login.roompass.test:18443
+            - name: DEX_UPSTREAM
+              value: http://dex:5556
+            - name: ALLOWED_RETURN_URLS
+              value: https://demo.roompass.test:18443/app/
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: '1'
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http

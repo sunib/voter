@@ -1,0 +1,5 @@
+version: '3'
+includes:
+  room-pass:
+    taskfile: ./room-pass/Taskfile.yaml
+    dir: ./room-pass

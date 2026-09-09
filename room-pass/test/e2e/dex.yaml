@@ -1,0 +1,100 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex
+  namespace: room-pass
+data:
+  config.yaml: |
+    issuer: https://login.roompass.test:18443
+    storage:
+      type: memory
+    web:
+      http: 0.0.0.0:5556
+    expiry:
+      idTokens: 5m
+    oauth2:
+      skipApprovalScreen: true
+    staticClients:
+      - id: room-pass-demo
+        name: Room Pass demo
+        public: true
+        redirectURIs:
+          - https://demo.roompass.test:18443/app/callback
+          - /device/callback
+    connectors:
+      - type: authproxy
+        id: room
+        name: Join the room
+        config:
+          userIDHeader: X-Remote-User-Id
+          userHeader: X-Remote-User
+          userNameHeader: X-Remote-User-Name
+          emailHeader: X-Remote-User-Email
+          groupHeader: X-Remote-Group
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  namespace: room-pass
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dex
+  template:
+    metadata:
+      labels:
+        app: dex
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.45.1
+          args: [dex, serve, /etc/dex/config.yaml]
+          ports:
+            - containerPort: 5556
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dex
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /.well-known/openid-configuration
+              port: 5556
+      volumes:
+        - name: config
+          configMap:
+            name: dex
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+  namespace: room-pass
+spec:
+  selector:
+    app: dex
+  ports:
+    - port: 5556
+      targetPort: 5556
+---
+# Dex has no ingress of its own. Only Room Pass may assert authproxy headers.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dex-only-from-room-pass
+  namespace: room-pass
+spec:
+  podSelector:
+    matchLabels:
+      app: dex
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: room-pass
+      ports:
+        - protocol: TCP
+          port: 5556

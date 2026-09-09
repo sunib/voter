@@ -1,0 +1,25 @@
+# Render the generated local CA before mounting into the API server.
+# Kubernetes 1.31 uses v1beta1; use apiserver.config.k8s.io/v1 on Kubernetes 1.34+.
+apiVersion: apiserver.config.k8s.io/v1beta1
+kind: AuthenticationConfiguration
+jwt:
+  - issuer:
+      url: https://login.roompass.test:18443
+      audiences: [room-pass-demo]
+      certificateAuthority: |
+CA_PEM
+    claimMappings:
+      username:
+        claim: sub
+        prefix: 'demo:'
+      groups:
+        claim: groups
+        prefix: ''
+      extra:
+        - key: configbutler.ai/claims/display-name
+          valueExpression: claims.name
+        - key: configbutler.ai/claims/email
+          valueExpression: claims.email
+    claimValidationRules:
+      - expression: "dyn(claims.groups).all(g, g.startsWith('demo:'))"
+        message: Only demo groups are accepted by this issuer

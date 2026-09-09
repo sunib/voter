@@ -1,0 +1,81 @@
+# A generous per-source edge bucket tolerates the shared conference NAT; the
+# service separately limits code attempts and handoff creation across all sources.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: room-pass-edge-limit
+  namespace: room-pass
+spec:
+  rateLimit:
+    average: 200
+    burst: 500
+---
+# K3s supplies Traefik. Both hosts go only to Room Pass, including all Dex aliases.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: room-pass
+  namespace: room-pass
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.middlewares: room-pass-room-pass-edge-limit@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - secretName: local-tls
+      hosts: [demo.roompass.test, login.roompass.test]
+  rules:
+    - host: demo.roompass.test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: room-pass
+                port:
+                  number: 8080
+    - host: login.roompass.test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: room-pass
+                port:
+                  number: 8080
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: work
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: demo-editor
+  namespace: demo
+rules:
+  - apiGroups: ['']
+    resources: [configmaps]
+    verbs: [create, get, update, patch, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: demo-editor
+  namespace: demo
+subjects:
+  - kind: Group
+    name: demo:room-pass-test
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: demo-editor
+  apiGroup: rbac.authorization.k8s.io
