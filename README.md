@@ -52,6 +52,30 @@ Room Pass development lives in [`room-pass/`](room-pass/README.md): an independe
 Go service, Dockerfile, Kubernetes enrollment APIs, and a runnable local Dex/OIDC demo.
 Start with `task room-pass:test` and `task room-pass:e2e-up`.
 
+## Building and testing
+
+Everything runs through Task; `task` on its own lists the vocabulary.
+
+```bash
+task setup   # install dependencies for every component
+task lint    # golangci-lint, hadolint, actionlint, ESLint
+task test    # Go tests, frontend type-check and build
+task build   # build both container images locally
+```
+
+CI runs exactly these tasks inside the container built from
+[`.devcontainer/Dockerfile`](.devcontainer/Dockerfile), so a red pipeline
+reproduces with the command in its own log. A push to `main` publishes two
+images to GitHub Container Registry:
+
+| Image | From |
+|---|---|
+| `ghcr.io/sunib/room-pass` | [`room-pass/`](room-pass/) |
+| `ghcr.io/sunib/voter` | [`frontend/`](frontend/) |
+
+See [`docs/ci.md`](docs/ci.md) for the pipeline design, the trust model, and
+which digest to pin in `platform/`.
+
 # Skills
 
 Started to get some understanding for skills: I just installed

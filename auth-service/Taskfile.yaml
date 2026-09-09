@@ -1,0 +1,37 @@
+# auth-service (Go) tasks. Included by the root Taskfile with dir: ./auth-service.
+#
+# This service is mid-migration: section 7 of the platform implementation plan
+# replaces its impersonation paths with participant ID tokens forwarded from
+# Room Pass. The tasks below keep it building and tested meanwhile.
+version: '3'
+
+tasks:
+  deps:
+    desc: Download Go module dependencies
+    sources:
+      - go.mod
+      - go.sum
+    cmds:
+      - go mod download
+
+  build:
+    desc: Build the auth-service binary into bin/
+    cmds:
+      - mkdir -p bin
+      - go build -o ./bin/auth-service ./...
+
+  test:
+    desc: Run go vet and the unit tests
+    cmds:
+      - go vet ./...
+      - go test ./...
+
+  lint:
+    desc: Lint with golangci-lint (config is the repository root .golangci.yml)
+    cmds:
+      - golangci-lint run ./...
+
+  lint-fix:
+    desc: Apply golangci-lint's automatic fixes
+    cmds:
+      - golangci-lint run --fix ./...

@@ -1,0 +1,56 @@
+# Frontend (Vue 3 + Vite) tasks. Included by the root Taskfile with dir: ./frontend,
+# so every command here runs with this directory as the working directory.
+version: '3'
+
+tasks:
+  deps:
+    desc: Install node modules from the lockfile
+    # `npm ci` deletes and recreates node_modules, which is slow and pointless when
+    # nothing changed. Fingerprint the lockfile so repeated `task setup`/`task lint`
+    # runs skip it; delete node_modules or touch the lockfile to force a reinstall.
+    sources:
+      - package.json
+      - package-lock.json
+    generates:
+      - node_modules/.package-lock.json
+    cmds:
+      - npm ci
+
+  lint:
+    desc: Lint the frontend with ESLint
+    deps: [deps]
+    cmds:
+      - npm run lint
+
+  format:
+    desc: Rewrite the frontend with Prettier
+    deps: [deps]
+    cmds:
+      - npm run format
+
+  test:
+    desc: Type-check and build the frontend
+    # There is no unit-test suite yet. `npm run build` runs `vue-tsc -b` first, so
+    # this is a real check: a type error in a .vue or .ts file fails it. Replace
+    # this task's body when a test runner lands -- CI calls `task test`, not npm.
+    deps: [deps]
+    cmds:
+      - npm run build
+
+  build:
+    desc: Build the production bundle into dist/
+    deps: [deps]
+    cmds:
+      - npm run build
+
+  dev:
+    desc: Run the Vite dev server against the remote API
+    deps: [deps]
+    cmds:
+      - npm run dev
+
+  dev-mock:
+    desc: Run the Vite dev server against the in-process Kubernetes mock
+    deps: [deps]
+    cmds:
+      - npm run dev:mock

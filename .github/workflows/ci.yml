@@ -1,0 +1,388 @@
+# Validation and publication for this repository.
+#
+# The design is copied from gitops-reverser, with one rule: this file knows how
+# to *move things around*, never how to check them. Everything that decides
+# whether the code is good runs as a `task` inside the container built from
+# .devcontainer/Dockerfile -- the same container developers work in. So:
+#
+#   * a red job reproduces locally with the command printed in its log;
+#   * changing what CI checks means editing Taskfile.yaml, not YAML here;
+#   * moving to another CI system means writing a file that calls the same tasks.
+#
+# The images published to ghcr.io are built by `task image-room-pass` and
+# `task image-voter` for the same reason: there is no second, workflow-only
+# definition of how a shipped artifact is built.
+#
+# Trust model, one rule: untrusted (pull request) code is built and tested, but
+# never meets a write token. Pull requests move the CI container between jobs as
+# an artifact; trusted runs push it to ghcr.io. GitHub enforces the fork side of
+# this regardless of the permissions declared below.
+name: CI
+
+on:
+  # Deliberately not filtered to `branches: [main]`. A stacked pull request whose
+  # base is another topic branch never matches a main-only filter, and would merge
+  # with nothing having run against it.
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_OWNER: sunib
+  # Where the workspace is mounted inside the CI container. Matches the
+  # devcontainer's workspaceFolder so paths in error messages are the same ones a
+  # developer sees.
+  CI_WORKDIR: /workspaces/${{ github.event.repository.name }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci-container:
+    name: CI base container
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+    permissions:
+      contents: read
+      # Only trusted runs push. A fork pull request gets a read-only token from
+      # GitHub whatever is declared here, and same-repo pull request authors
+      # already have write access, so nothing is escalated either way.
+      packages: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Log in to the container registry
+        if: github.event_name != 'pull_request'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login "${REGISTRY}" -u "${{ github.actor }}" --password-stdin
+
+      - name: Set the image name
+        id: image
+        run: |
+          IMAGE="${REGISTRY}/${IMAGE_OWNER}/voter-ci:${GITHUB_SHA}"
+          echo "Building the CI base container: ${IMAGE}"
+          echo "name=${IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Build the CI base container
+        # Pull requests build and load locally only: their token cannot publish,
+        # and untrusted code must not publish anyway. `:latest` moves only from
+        # main, so a workflow_dispatch on a topic branch cannot repoint it.
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: .devcontainer/Dockerfile
+          target: ci
+          push: ${{ github.event_name != 'pull_request' }}
+          load: true # so the validation step below runs without a pull
+          tags: |
+            ${{ steps.image.outputs.name }}
+            ${{ github.ref == 'refs/heads/main' && format('{0}/{1}/voter-ci:latest', env.REGISTRY, env.IMAGE_OWNER) || '' }}
+          cache-from: type=gha,scope=ci-container
+          cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=max,scope=ci-container' || '' }}
+
+      - name: Validate the CI container tools
+        # An image missing a tool is a broken pipeline three jobs later with a
+        # confusing error. Fail here instead, naming the tool.
+        run: |
+          docker run --rm "${{ steps.image.outputs.name }}" bash -lc "
+            set -e
+            echo '=== Validating CI container tools ==='
+            go version
+            node --version
+            npm --version
+            task --version
+            kubectl version --client
+            kustomize version
+            helm version
+            golangci-lint version
+            hadolint --version
+            actionlint --version
+            markdownlint-cli2 --version
+            controller-gen --version
+            command -v setup-envtest  # --help exits 2, so check presence instead
+            k3d version
+            docker --version
+            trivy --version
+            echo 'All CI container tools verified'
+          "
+
+      - name: Save the CI container image (pull request)
+        # Pull request builds are not pushed; hand the image to later jobs as an
+        # artifact instead.
+        if: github.event_name == 'pull_request'
+        run: docker save "${{ steps.image.outputs.name }}" -o ci-container-image.tar
+
+      - name: Upload the CI container image artifact (pull request)
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-container-image
+          path: ci-container-image.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  devcontainer:
+    name: Validate dev container
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # The dev stage is FROM ci, so waiting means its shared layers are already
+    # in the build cache rather than being built twice concurrently.
+    needs: ci-container
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build the dev container (validation only)
+        # Never pushed: this proves a fresh clone can open the devcontainer, which
+        # is otherwise only discovered by a developer whose rebuild fails.
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: .devcontainer/Dockerfile
+          target: dev
+          push: false
+          load: true
+          tags: voter-devcontainer:test
+          cache-from: type=gha,scope=devcontainer
+          cache-to: ${{ github.event_name == 'pull_request' && '' || 'type=gha,mode=max,scope=devcontainer' }}
+
+      - name: Validate the dev container tools
+        run: |
+          docker run --rm voter-devcontainer:test bash -lc "
+            set -e
+            echo '=== Validating dev container tools ==='
+            go version
+            node --version
+            task --version
+            tilt version
+            dlv version
+            gopls version
+            kubectl version --client
+            helm version
+            k3d version
+            docker --version
+            bash -ic 'complete -p task >/dev/null'
+            echo 'All dev container tools verified'
+          "
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: ci-container
+    permissions:
+      contents: read
+      packages: read
+    env:
+      CI_CONTAINER: ${{ needs.ci-container.outputs.image }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Provide the CI container
+        uses: ./.github/actions/ci-container
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run the linters
+        # Go (golangci-lint, both modules), Dockerfiles (hadolint), workflows
+        # (actionlint) and the frontend (ESLint). Reproduce with: task lint
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:${CI_WORKDIR}" \
+            -w "${CI_WORKDIR}" \
+            "${CI_CONTAINER}" \
+            bash -lc '
+              set -e
+              git config --global --add safe.directory "$PWD"
+              task lint
+            '
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: ci-container
+    permissions:
+      contents: read
+      packages: read
+    env:
+      CI_CONTAINER: ${{ needs.ci-container.outputs.image }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Provide the CI container
+        uses: ./.github/actions/ci-container
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run the tests
+        # auth-service and room-pass Go tests, plus the frontend type-check and
+        # production build. Reproduce with: task test
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:${CI_WORKDIR}" \
+            -w "${CI_WORKDIR}" \
+            "${CI_CONTAINER}" \
+            bash -lc '
+              set -e
+              git config --global --add safe.directory "$PWD"
+              task test
+            '
+
+      - name: Check that the generated Room Pass CRDs are current
+        # A change to room-pass/api/v1alpha1 that was never regenerated otherwise
+        # ships a CRD that rejects the field the controller expects. Fix a failure
+        # with: task room-pass:generate
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:${CI_WORKDIR}" \
+            -w "${CI_WORKDIR}" \
+            "${CI_CONTAINER}" \
+            bash -lc '
+              set -e
+              git config --global --add safe.directory "$PWD"
+              task room-pass:verify-generate
+            '
+
+      - name: Run the Room Pass API integration tests
+        # envtest: a real API server and etcd, no cluster. setup-envtest downloads
+        # the binaries on first use, so this is a separate step -- a download
+        # failure reads as itself rather than as a test failure.
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:${CI_WORKDIR}" \
+            -w "${CI_WORKDIR}" \
+            "${CI_CONTAINER}" \
+            bash -lc '
+              set -e
+              git config --global --add safe.directory "$PWD"
+              task test-integration
+            '
+
+  images:
+    name: Image (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [ci-container, lint, test]
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: room-pass
+            task: image-room-pass
+          - name: voter
+            task: image-voter
+    env:
+      CI_CONTAINER: ${{ needs.ci-container.outputs.image }}
+      # Only a push to main publishes. Not `!= 'pull_request'`, which would also
+      # let a workflow_dispatch on any branch publish.
+      PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Provide the CI container
+        uses: ./.github/actions/ci-container
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute the image tags
+        id: tags
+        run: |
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          if [ "${PUSH}" = "true" ]; then
+            # An immutable tag to pin, and a moving tag to follow.
+            echo "tag=sha-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+            echo "extra=${REGISTRY}/${IMAGE_OWNER}/${{ matrix.name }}:main" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=ci-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+            echo "extra=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build ${{ matrix.name }}
+        # Runs `task ${{ matrix.task }}` inside the CI container, with the host
+        # Docker socket mounted -- the same docker-outside-of-docker arrangement
+        # the devcontainer uses, so this is the command a developer already runs.
+        # The registry password is passed as an environment variable rather than
+        # interpolated into the command, so it is not visible in the process list.
+        env:
+          REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          REGISTRY_USERNAME: ${{ github.actor }}
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:${CI_WORKDIR}" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${RUNNER_TEMP}:/out" \
+            -w "${CI_WORKDIR}" \
+            -e PUSH -e REGISTRY -e IMAGE_OWNER -e REGISTRY_PASSWORD -e REGISTRY_USERNAME \
+            "${CI_CONTAINER}" \
+            bash -lc '
+              set -e
+              git config --global --add safe.directory "$PWD"
+              if [ "${PUSH}" = "true" ]; then
+                echo "${REGISTRY_PASSWORD}" | docker login "${REGISTRY}" -u "${REGISTRY_USERNAME}" --password-stdin
+              fi
+              task ${{ matrix.task }} \
+                TAG="${{ steps.tags.outputs.tag }}" \
+                EXTRA_TAGS="${{ steps.tags.outputs.extra }}" \
+                PUSH="${PUSH}" \
+                METADATA_FILE=/out/image-metadata.json
+            '
+
+      - name: Report the published digest
+        # What platform/ should pin, per section 8 of the implementation plan:
+        # "release images are built once by CI, tagged with a source revision,
+        # and referenced by digest".
+        if: env.PUSH == 'true'
+        run: |
+          DIGEST="$(jq -r '."containerimage.digest"' "${RUNNER_TEMP}/image-metadata.json")"
+          REF="${REGISTRY}/${IMAGE_OWNER}/${{ matrix.name }}@${DIGEST}"
+          {
+            echo "### ${{ matrix.name }}"
+            echo
+            echo "Pin this in \`platform/\`:"
+            echo
+            echo '```text'
+            echo "${REF}"
+            echo '```'
+            echo
+            echo "Also tagged \`${{ steps.tags.outputs.tag }}\` and \`main\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "${REF}"

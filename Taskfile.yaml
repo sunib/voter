@@ -1,5 +1,191 @@
+# Root task vocabulary for this repository.
+#
+# Section 8 of the platform implementation plan asks for one consistent set of
+# commands -- `task setup`, `task lint`, `task test`, `task build` -- plus
+# component tasks such as `task room-pass:test`. This file is that vocabulary.
+#
+# It is also the CI contract. The GitHub workflow in .github/workflows/ci.yml
+# does not know how to lint or test anything: it builds the container from
+# .devcontainer/Dockerfile and runs these tasks inside it. So every check CI
+# performs is reproducible with the identical command locally, and moving to a
+# different CI system means writing a new file that calls the same tasks.
 version: '3'
+
 includes:
   room-pass:
     taskfile: ./room-pass/Taskfile.yaml
     dir: ./room-pass
+  auth-service:
+    taskfile: ./auth-service/Taskfile.yaml
+    dir: ./auth-service
+  frontend:
+    taskfile: ./frontend/Taskfile.yaml
+    dir: ./frontend
+
+vars:
+  # Publishing target. Overridable so the same tasks can push to the private
+  # zot.z65.nl registry the Makefile used, or to a local k3d registry.
+  REGISTRY: '{{.REGISTRY | default "ghcr.io"}}'
+  IMAGE_OWNER: '{{.IMAGE_OWNER | default "sunib"}}'
+  # The demo cluster is Talos on Proxmox (amd64). Add linux/arm64 here when
+  # something actually needs to run on it -- multi-arch doubles every build.
+  PLATFORMS: '{{.PLATFORMS | default "linux/amd64"}}'
+
+tasks:
+  default:
+    desc: List the available tasks
+    silent: true
+    cmds:
+      - task --list
+
+  setup:
+    desc: Install dependencies for every component
+    cmds:
+      - task: auth-service:deps
+      - task: room-pass:deps
+      - task: frontend:deps
+
+  lint:
+    desc: Run every linter (Go, Dockerfiles, workflows, frontend)
+    cmds:
+      - task: lint-golang
+      - task: lint-dockerfiles
+      - task: lint-actions
+      - task: frontend:lint
+
+  lint-golang:
+    desc: Lint both Go modules with golangci-lint (config in .golangci.yml)
+    cmds:
+      - task: auth-service:lint
+      - task: room-pass:lint
+
+  lint-dockerfiles:
+    desc: Lint every Dockerfile with hadolint (config in .hadolint.yaml)
+    sources:
+      - .hadolint.yaml
+      - .devcontainer/Dockerfile
+      - '*/Dockerfile'
+    cmds:
+      - hadolint .devcontainer/Dockerfile auth-service/Dockerfile frontend/Dockerfile room-pass/Dockerfile
+
+  lint-actions:
+    desc: Lint the GitHub Actions workflows with actionlint
+    sources:
+      - .github/workflows/*.yml
+      - .github/workflows/*.yaml
+      - .github/actions/**/*.yml
+    # No path argument: actionlint discovers everything under .github/workflows,
+    # so a new workflow is checked without editing this task.
+    cmds:
+      - actionlint
+
+  test:
+    desc: Run every component's tests
+    cmds:
+      - task: auth-service:test
+      - task: room-pass:test
+      - task: frontend:test
+
+  test-integration:
+    desc: Run tests that need a real API server (envtest), but no cluster
+    cmds:
+      - task: room-pass:integration
+
+  test-e2e:
+    desc: Run the Room Pass end-to-end suite against a local k3d cluster
+    # Not part of `task test` and not run by CI yet: it creates a k3d cluster,
+    # deploys Dex and Traefik and drives a real login. See room-pass/Taskfile.yaml.
+    cmds:
+      - task: room-pass:e2e
+
+  build:
+    desc: Build both published container images locally (no push)
+    cmds:
+      - task: image-room-pass
+      - task: image-voter
+
+  # --- Container images -------------------------------------------------------
+  #
+  # These two tasks build the artifacts CI publishes to ghcr.io/sunib. CI calls
+  # exactly these tasks with PUSH=true, so `task image-voter` locally and the
+  # published image are produced by the same command with the same build args --
+  # there is no second, workflow-only definition of how an image is built.
+  #
+  #   task image-voter                              # build, load into local docker
+  #   task image-voter TAG=test PUSH=true           # build and push
+  #   task image-room-pass REGISTRY=zot.z65.nl IMAGE_OWNER=voter
+
+  image-room-pass:
+    desc: Build the Room Pass image (ghcr.io/sunib/room-pass)
+    cmds:
+      - task: image
+        vars:
+          NAME: room-pass
+          CONTEXT: ./room-pass
+
+  image-voter:
+    desc: Build the Voter frontend image (ghcr.io/sunib/voter)
+    cmds:
+      - task: image
+        vars:
+          NAME: voter
+          CONTEXT: ./frontend
+
+  image:
+    internal: true
+    requires:
+      vars: [NAME, CONTEXT]
+    vars:
+      TAG: '{{.TAG | default "dev"}}'
+      PUSH: '{{.PUSH | default "false"}}'
+      IMAGE: '{{.REGISTRY}}/{{.IMAGE_OWNER}}/{{.NAME}}'
+      # EXTRA_TAGS: newline- or space-separated additional full image refs.
+      EXTRA_TAGS: '{{.EXTRA_TAGS | default ""}}'
+      # METADATA_FILE: buildx writes the pushed digest here. CI reads it to
+      # report an immutable reference for platform/ to pin.
+      METADATA_FILE: '{{.METADATA_FILE | default ""}}'
+    cmds:
+      - |
+        set -euo pipefail
+        GIT_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+        GIT_DIRTY=0
+        [ -z "$(git status --porcelain 2>/dev/null)" ] || GIT_DIRTY=1
+        BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+        args=(
+          --platform "{{.PLATFORMS}}"
+          --build-arg "VERSION={{.TAG}}"
+          --build-arg "GIT_COMMIT=${GIT_COMMIT}"
+          --build-arg "GIT_DIRTY=${GIT_DIRTY}"
+          --build-arg "BUILD_DATE=${BUILD_DATE}"
+          --label "org.opencontainers.image.source=https://github.com/sunib/voter"
+          --label "org.opencontainers.image.revision=$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+          --label "org.opencontainers.image.created=${BUILD_DATE}"
+          --tag "{{.IMAGE}}:{{.TAG}}"
+        )
+        for extra in {{.EXTRA_TAGS}}; do args+=(--tag "${extra}"); done
+        {{if .METADATA_FILE}}args+=(--metadata-file "{{.METADATA_FILE}}"){{end}}
+        {{if eq .PUSH "true"}}
+        args+=(--push)
+        {{else}}
+        # --load only accepts a single platform; a multi-platform local build
+        # stays in the build cache, which is enough to prove it compiles.
+        case "{{.PLATFORMS}}" in *,*) : ;; *) args+=(--load) ;; esac
+        {{end}}
+
+        echo "Building {{.IMAGE}}:{{.TAG}} from {{.CONTEXT}} ({{.PLATFORMS}})"
+        docker buildx build "${args[@]}" "{{.CONTEXT}}"
+
+  # --- Container tooling ------------------------------------------------------
+
+  ci-image:
+    desc: Build the CI stage of the devcontainer image (what CI runs tasks inside)
+    vars:
+      CI_IMAGE: '{{.CI_IMAGE | default "voter-ci:local"}}'
+    cmds:
+      - docker build --target ci -f .devcontainer/Dockerfile -t {{.CI_IMAGE}} .
+
+  clean:
+    desc: Remove build output and task fingerprints
+    cmds:
+      - rm -rf .task frontend/dist auth-service/bin room-pass/bin

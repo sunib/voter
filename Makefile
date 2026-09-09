@@ -1,3 +1,13 @@
+# Legacy convenience targets, kept because they still work and are wired to the
+# private zot.z65.nl registry used before ghcr.io.
+#
+# The maintained definition of how this repository is built, tested and shipped
+# is Taskfile.yaml -- `task lint`, `task test`, `task build` -- and that is what
+# CI runs. Prefer it. The two published images come from `task image-room-pass`
+# and `task image-voter`; the equivalent of `build-push` below is:
+#
+#   task build REGISTRY=zot.z65.nl IMAGE_OWNER=voter TAG=coffee PUSH=true
+#
 .PHONY: build-auth-service test-auth-service debug-auth-service frontend-dev-remote frontend-dev-remote-https build-push-auth-service build-push-frontend build-push
 
 login:

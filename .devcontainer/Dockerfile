@@ -332,12 +332,34 @@ RUN chgrp -R godev /go && \
     setfacl -d -m o::rx /go
 
 # Install Go tools used by the project (using @version doesn't need go.mod)
-# These run AFTER permissions are set to ensure proper group ownership
-RUN go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.22.0 \
-    && go install github.com/onsi/ginkgo/v2/ginkgo@v2.32.1 \
-    && go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.0 \
-    && go install golang.org/x/tools/cmd/goimports@v0.49.0 \
-    && go install github.com/boyter/scc/v4@v4.0.0
+# These run AFTER permissions are set to ensure proper group ownership.
+#
+# Retried, unlike the pinned single-binary downloads above. This layer resolves
+# hundreds of modules through proxy.golang.org and verifies each against
+# sum.golang.org, so it has far more chances to meet a transient network fault:
+# CI run 34372040435 died here on an HTTP/2 stream error from the checksum
+# database ("reading https://sum.golang.org/tile/...: INTERNAL_ERROR"). A cold
+# CI image build reaches this point several minutes in, and a flake here fails
+# the whole pipeline before a single test runs.
+#
+# Three attempts with a growing pause; an exhausted loop exits non-zero rather
+# than falling through, so a genuinely broken install still fails the build
+# instead of producing an image that is missing controller-gen.
+RUN set -e; \
+    install_go_tools() { \
+        go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.22.0 \
+        && go install github.com/onsi/ginkgo/v2/ginkgo@v2.32.1 \
+        && go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.0 \
+        && go install golang.org/x/tools/cmd/goimports@v0.49.0 \
+        && go install github.com/boyter/scc/v4@v4.0.0; \
+    }; \
+    for attempt in 1 2 3; do \
+        if install_go_tools; then exit 0; fi; \
+        echo "go install attempt ${attempt}/3 failed; retrying" >&2; \
+        sleep $((attempt * 15)); \
+    done; \
+    echo "go install failed after 3 attempts" >&2; \
+    exit 1
 
 # Initialize golangci-lint cache by running it once on an empty directory
 # This downloads linter dependencies without needing source code
@@ -368,11 +390,30 @@ RUN printf '%s\n' \
     > /etc/profile.d/workspace-dotenv.sh \
     && chmod 0644 /etc/profile.d/workspace-dotenv.sh
 
-# The Go module lives in auth-service/, not at the repo root, so the warm-up
-# copy reaches into it. The build context is the repo root (see the `build`
-# block in devcontainer.json), which is what makes that path resolvable.
-COPY auth-service/go.mod auth-service/go.sum ./
-RUN go mod download
+# Dependency warm-up. There is no module or package at the repo root: the two Go
+# modules live in auth-service/ and room-pass/, and the frontend in frontend/.
+# The build context is the repo root (see the `build` block in devcontainer.json
+# and the allowlist in .dockerignore), which is what makes these paths resolvable.
+#
+# Warming into a scratch directory rather than WORKDIR: the previous version
+# copied auth-service's go.mod to /workspaces, where the workspace bind mount
+# then hid it in dev and left a stray root-level go.mod in CI. What the download
+# actually populates is /go/pkg/mod, which survives the rm.
+COPY auth-service/go.mod auth-service/go.sum /tmp/warm/auth-service/
+COPY room-pass/go.mod room-pass/go.sum /tmp/warm/room-pass/
+RUN cd /tmp/warm/auth-service && go mod download \
+    && cd /tmp/warm/room-pass && go mod download \
+    && rm -rf /tmp/warm
+
+# Warm the npm cache the same way. CI runs `npm ci` for the frontend in the lint,
+# test and image jobs; this makes those restore from cache instead of the network.
+# It populates the root user's cache (~/.npm), which is the CI stage's user. The
+# dev stage runs as vscode with its own npm cache volume, so nothing here shadows
+# a developer's cache.
+COPY frontend/package.json frontend/package-lock.json /tmp/warm-npm/
+RUN cd /tmp/warm-npm \
+    && npm ci --ignore-scripts --no-audit --no-fund \
+    && rm -rf /tmp/warm-npm
 
 # Switch back to dialog for any ad-hoc use of apt-get
 ENV DEBIAN_FRONTEND=dialog

@@ -1,35 +1,88 @@
+# Room Pass tasks. Included by the root Taskfile with dir: ./room-pass, so every
+# command here runs with this directory as the working directory.
 version: '3'
+
 tasks:
+  deps:
+    desc: Download Go module dependencies
+    sources:
+      - go.mod
+      - go.sum
+    cmds:
+      - go mod download
+
   generate:
     desc: Regenerate CRDs and deepcopy implementations
     cmds:
       - controller-gen object paths=./api/...
       - controller-gen crd paths=./api/... output:crd:artifacts:config=config/crd
+
+  verify-generate:
+    desc: Fail if the committed CRDs and deepcopy code are stale
+    # CI runs this so a change to api/v1alpha1 that was never regenerated shows up
+    # in review, rather than as a controller that silently rejects a field the CRD
+    # does not know about. Fix a failure with `task room-pass:generate` and commit.
+    cmds:
+      - task: generate
+      - |
+        if ! git diff --quiet -- api config/crd; then
+          echo "::error::Generated files are stale. Run 'task room-pass:generate' and commit the result." >&2
+          git --no-pager diff -- api config/crd
+          exit 1
+        fi
+        echo "generated files are current"
+
+  lint:
+    desc: Lint with golangci-lint (config is the repository root .golangci.yml)
+    cmds:
+      - golangci-lint run ./...
+
+  lint-fix:
+    desc: Apply golangci-lint's automatic fixes
+    cmds:
+      - golangci-lint run --fix ./...
+
   test:
     desc: Run Go vet and race tests
     cmds:
       - go vet ./...
       - go test -race ./...
+
   integration:
     desc: Test CRDs against a real local API server and etcd
+    # Needs envtest binaries. setup-envtest downloads them on first use, so this is
+    # not part of `task test` and CI runs it as its own step.
     cmds:
       - KUBEBUILDER_ASSETS="$(setup-envtest use 1.31.x -p path)" go test -count=1 ./test/integration
+
   build:
+    desc: Build the room-pass binary into bin/
+    cmds:
+      - mkdir -p bin
+      - go build -o ./bin/room-pass ./cmd/room-pass
+
+  image:
     desc: Build the standalone Room Pass image
+    # The published image is built by the root `task image-room-pass`, which stamps
+    # version/revision labels. This is the quick local variant.
     cmds:
       - docker build -t room-pass:dev .
+
   e2e-up:
     desc: Build and start the isolated Room Pass OIDC demo cluster
     cmds:
       - bash test/e2e/up.sh
+
   e2e-down:
     desc: Delete only the Room Pass demo cluster and its Docker resources
     cmds:
       - bash test/e2e/down.sh
+
   e2e:
     desc: Verify real Dex, device flow, RBAC, audit and the interactive demo
     cmds:
       - ROOM_PASS_E2E=1 ROOM_PASS_EDGE_IP="$(docker network inspect k3d-room-pass-e2e --format '{{"{{"}}(index .IPAM.Config 0).Gateway{{"}}"}}')" go test -v -count=1 ./test/e2e
+
   load:
     desc: Rehearse 300 enrollments in batches of 100, then clean up test participants
     cmds:

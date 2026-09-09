@@ -1,0 +1,37 @@
+name: 'Provide the CI container'
+description: >
+  Makes the CI base container available to the current job and echoes its name.
+  On trusted runs it is pulled from ghcr.io; on pull requests it arrives as the
+  artifact the ci-container job uploaded, because a fork PR's token cannot read
+  or write packages.
+inputs:
+  registry:
+    description: 'Registry to log in to on trusted runs'
+    required: true
+  username:
+    description: 'Registry username'
+    required: true
+  password:
+    description: 'Registry password'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Log in to the container registry
+      if: github.event_name != 'pull_request'
+      shell: bash
+      run: echo "${{ inputs.password }}" | docker login "${{ inputs.registry }}" -u "${{ inputs.username }}" --password-stdin
+
+    - name: Download the CI container image (pull request)
+      if: github.event_name == 'pull_request'
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: ci-container-image
+        path: .
+
+    - name: Load the CI container image (pull request)
+      if: github.event_name == 'pull_request'
+      shell: bash
+      # Delete the tarball right after loading: it is a multi-GB file that would
+      # otherwise occupy runner disk for the rest of the job.
+      run: docker load -i ci-container-image.tar && rm -f ci-container-image.tar

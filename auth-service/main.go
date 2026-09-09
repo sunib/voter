@@ -109,7 +109,7 @@ func main() {
 		}()
 	}
 
-	const tokenTTLSeconds int64 = 600 // Not allowed to make smaller tahn 10 minbutes?!
+	const tokenTTLSeconds int64 = 600 // Not allowed to make smaller than 10 minutes?!
 	forwardSa := strings.TrimSpace(cfg.ForwardServiceAccount)
 	if forwardSa == "" {
 		log.Fatalf("config error: FORWARD_SA is required")

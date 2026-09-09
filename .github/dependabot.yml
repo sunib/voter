@@ -1,0 +1,50 @@
+# Everything in this repository is pinned: action SHAs, the golang base image
+# digest, tool versions in .devcontainer/Dockerfile's ENV block. Pinning without
+# an update mechanism is just an old dependency with extra steps, so Dependabot
+# is what keeps the pins moving.
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    # Two independent modules; a directory left off this list silently drifts.
+    directories:
+      - "/auth-service"
+      - "/room-pass"
+    schedule:
+      interval: "weekly"
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    groups:
+      npm-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "docker"
+    # The devcontainer/CI base image plus the three application Dockerfiles, so
+    # their FROM lines keep moving with upstream.
+    directories:
+      - "/.devcontainer"
+      - "/auth-service"
+      - "/frontend"
+      - "/room-pass"
+    schedule:
+      interval: "weekly"
+    groups:
+      docker-dependencies:
+        patterns:
+          - "*"
