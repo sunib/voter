@@ -133,10 +133,8 @@ cleanup.
 
 ## Not yet in CI
 
-- **The Room Pass end-to-end suite** (`task test-e2e`). It creates a k3d cluster,
-  deploys Dex and Traefik and drives a real login. It is the check that matters
-  most for stage 2 of the plan, and it should land next.
-- **Image vulnerability scanning.** `trivy` is in the container; there is no
-  `.trivyignore.yaml` and no agreed severity gate yet.
-- **Release versioning.** Images are identified by commit, not semver. The
-  reverser's release-please setup is the model when this needs versioned releases.
+The backlog lives in [`.github/README.md`](../.github/README.md), next to the
+workflow it describes, so there is one list rather than two that drift.
+
+The short version: the Room Pass end-to-end suite is the significant gap — until
+it runs, a green pipeline does not mean a participant can log in.
