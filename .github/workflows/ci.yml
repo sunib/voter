@@ -112,7 +112,7 @@ jobs:
             actionlint --version
             markdownlint-cli2 --version
             controller-gen --version
-            setup-envtest --help >/dev/null
+            command -v setup-envtest  # --help exits 2, so check presence instead
             k3d version
             docker --version
             trivy --version
