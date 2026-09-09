@@ -332,12 +332,34 @@ RUN chgrp -R godev /go && \
     setfacl -d -m o::rx /go
 
 # Install Go tools used by the project (using @version doesn't need go.mod)
-# These run AFTER permissions are set to ensure proper group ownership
-RUN go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.22.0 \
-    && go install github.com/onsi/ginkgo/v2/ginkgo@v2.32.1 \
-    && go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.0 \
-    && go install golang.org/x/tools/cmd/goimports@v0.49.0 \
-    && go install github.com/boyter/scc/v4@v4.0.0
+# These run AFTER permissions are set to ensure proper group ownership.
+#
+# Retried, unlike the pinned single-binary downloads above. This layer resolves
+# hundreds of modules through proxy.golang.org and verifies each against
+# sum.golang.org, so it has far more chances to meet a transient network fault:
+# CI run 34372040435 died here on an HTTP/2 stream error from the checksum
+# database ("reading https://sum.golang.org/tile/...: INTERNAL_ERROR"). A cold
+# CI image build reaches this point several minutes in, and a flake here fails
+# the whole pipeline before a single test runs.
+#
+# Three attempts with a growing pause; an exhausted loop exits non-zero rather
+# than falling through, so a genuinely broken install still fails the build
+# instead of producing an image that is missing controller-gen.
+RUN set -e; \
+    install_go_tools() { \
+        go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.22.0 \
+        && go install github.com/onsi/ginkgo/v2/ginkgo@v2.32.1 \
+        && go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.0 \
+        && go install golang.org/x/tools/cmd/goimports@v0.49.0 \
+        && go install github.com/boyter/scc/v4@v4.0.0; \
+    }; \
+    for attempt in 1 2 3; do \
+        if install_go_tools; then exit 0; fi; \
+        echo "go install attempt ${attempt}/3 failed; retrying" >&2; \
+        sleep $((attempt * 15)); \
+    done; \
+    echo "go install failed after 3 attempts" >&2; \
+    exit 1
 
 # Initialize golangci-lint cache by running it once on an empty directory
 # This downloads linter dependencies without needing source code
