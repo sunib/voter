@@ -40,8 +40,10 @@ COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 8080
 
 # Basic container healthcheck (Kubernetes can also do HTTP probes)
+# JSON/exec form (hadolint DL3025). The check is a shell pipeline, so the shell is
+# named explicitly rather than inherited from the daemon's default.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8080/ >/dev/null || exit 1
+  CMD ["/bin/sh", "-c", "wget -qO- http://127.0.0.1:8080/ >/dev/null || exit 1"]
 
 # Single cmd build: 
 # docker buildx build --push -t zot.z65.nl/voter/frontend:coffee .

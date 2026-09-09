@@ -5,3 +5,6 @@ external-code
 external/
 # Local devcontainer environment (GH_TOKEN etc). Never commit.
 .env
+
+# Task's fingerprint cache (task --status / sources: checksums).
+.task/

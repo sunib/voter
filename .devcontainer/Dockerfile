@@ -368,11 +368,30 @@ RUN printf '%s\n' \
     > /etc/profile.d/workspace-dotenv.sh \
     && chmod 0644 /etc/profile.d/workspace-dotenv.sh
 
-# The Go module lives in auth-service/, not at the repo root, so the warm-up
-# copy reaches into it. The build context is the repo root (see the `build`
-# block in devcontainer.json), which is what makes that path resolvable.
-COPY auth-service/go.mod auth-service/go.sum ./
-RUN go mod download
+# Dependency warm-up. There is no module or package at the repo root: the two Go
+# modules live in auth-service/ and room-pass/, and the frontend in frontend/.
+# The build context is the repo root (see the `build` block in devcontainer.json
+# and the allowlist in .dockerignore), which is what makes these paths resolvable.
+#
+# Warming into a scratch directory rather than WORKDIR: the previous version
+# copied auth-service's go.mod to /workspaces, where the workspace bind mount
+# then hid it in dev and left a stray root-level go.mod in CI. What the download
+# actually populates is /go/pkg/mod, which survives the rm.
+COPY auth-service/go.mod auth-service/go.sum /tmp/warm/auth-service/
+COPY room-pass/go.mod room-pass/go.sum /tmp/warm/room-pass/
+RUN cd /tmp/warm/auth-service && go mod download \
+    && cd /tmp/warm/room-pass && go mod download \
+    && rm -rf /tmp/warm
+
+# Warm the npm cache the same way. CI runs `npm ci` for the frontend in the lint,
+# test and image jobs; this makes those restore from cache instead of the network.
+# It populates the root user's cache (~/.npm), which is the CI stage's user. The
+# dev stage runs as vscode with its own npm cache volume, so nothing here shadows
+# a developer's cache.
+COPY frontend/package.json frontend/package-lock.json /tmp/warm-npm/
+RUN cd /tmp/warm-npm \
+    && npm ci --ignore-scripts --no-audit --no-fund \
+    && rm -rf /tmp/warm-npm
 
 # Switch back to dialog for any ad-hoc use of apt-get
 ENV DEBIAN_FRONTEND=dialog

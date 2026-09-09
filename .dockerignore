@@ -12,6 +12,11 @@
 # 1. Ignore everything by default.
 **
 
-# 2. Explicitly re-include only what the build COPYs.
+# 2. Explicitly re-include only what the build COPYs: the dependency manifests
+#    for the two Go modules and the frontend, used for cache warm-up layers.
 !auth-service/go.mod
 !auth-service/go.sum
+!room-pass/go.mod
+!room-pass/go.sum
+!frontend/package.json
+!frontend/package-lock.json

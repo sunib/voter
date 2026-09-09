@@ -1,0 +1,20 @@
+# hadolint configuration - https://github.com/hadolint/hadolint#configure
+#
+# Adapted from gitops-reverser's, for this repo's four Dockerfiles:
+# .devcontainer/Dockerfile (tooling), auth-service/, frontend/ and room-pass/
+# (application images). `task lint-dockerfiles` runs it; CI runs the same task.
+ignored:
+  # Distro package versions are intentionally unpinned in the tooling image; the
+  # tools that matter are pinned by version in .devcontainer/Dockerfile's ENV block.
+  - DL3008 # apt-get install without a pinned version
+  - DL3018 # apk add without a pinned version
+  # The tool installers `cd` into an ephemeral `mktemp -d` and delete it inside the
+  # same RUN. WORKDIR would leave the image pointing at a path that no longer exists.
+  - DL3003 # use WORKDIR instead of `cd`
+
+# SC2016 (single-quoted lines written verbatim into profile scripts) is suppressed
+# inline at the two RUN blocks that do it, not globally.
+
+# Fail on warnings and errors; let info/style suggestions through so they are
+# visible without blocking `task lint`.
+failure-threshold: warning

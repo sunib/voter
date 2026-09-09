@@ -179,4 +179,3 @@ func clearSessionCookie(w http.ResponseWriter, cfg config) {
 		Expires:  time.Unix(0, 0),
 	})
 }
-
