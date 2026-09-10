@@ -1,0 +1,98 @@
+# Who may do what?
+
+Reviewed 2026-09-10 against application source and the local external platform
+checkout. These are configuration findings, not a fresh audit of the live cluster.
+
+## Three separate questions
+
+1. **Can I log in?** Room Pass checks room enrollment; GitHub/LinkedIn establish
+   provider identities through Dex.
+2. **Who does Kubernetes see?** The authenticator maps Dex's connector claim into
+   a distinct username prefix and validates groups.
+3. **May I do this operation now?** RBAC grants verbs/resources/namespaces.
+   Admission must enforce any additional object or lifecycle restrictions.
+
+An application route named `admin` grants nothing. Neither does choosing GitHub
+in the login URL. A successful Dex login can still produce a Kubernetes 403.
+
+## Checked-in platform policy
+
+| Identity | Login eligibility | Explicit application/platform grants |
+| --- | --- | --- |
+| No valid app cookie | No app session | CoffeeConfig handler returns 401 |
+| Room attendee, `demo:<sub>` in `demo:voter-audience` | Valid room code/enrollment and active Room at handoff | Demo Role in `voter` |
+| Ordinary `linkedin:<email>` | LinkedIn connector is open | No named grant by default; shared authenticated-user grants still apply |
+| Ordinary `github:<email>` | Currently restricted to `koudijs-dev` organization | Matching user/group grants only; no automatic demo membership |
+| `github:simonkoudijs@gmail.com` | GitHub connector | Named cluster-admin and Flux Web admin |
+| `linkedin:simon@configbutler.ai` | LinkedIn connector | Named cluster-admin and Flux Web admin |
+
+Source files in the external platform checkout:
+`2-gitops/voter-demo/participant-rbac.yaml`,
+`2-gitops/auth/rbac/humans-rbac.yaml`, and
+`1-talos/templates/_authentication-config.tpl`.
+The named LinkedIn grant is broader than just Flux UI access. Bare-email operator
+subjects and legacy connector acceptance also remain as migration leftovers.
+
+The demo Role grants these operations throughout the `voter` namespace:
+
+| Resource | Verbs |
+| --- | --- |
+| CoffeeConfigs | get, list, watch, patch, update |
+| CommitRequests | create, get, list, watch |
+| QuizSessions | get, list, watch |
+| QuizSubmissions | create, get, list, watch |
+
+This Role does not grant Secrets, RBAC changes, impersonation or deletion. It is
+not limited to one named CoffeeConfig and it permits reading other submissions.
+Voter's current handler addresses one configured CoffeeConfig, but callers with
+tokens can call Kubernetes directly within their RBAC grants.
+
+Opening GitHub login to everybody is compatible with granting only the owner
+extra rights. It is not implemented in this pass. First verify all clients on the
+shared issuer: oauth2-proxy currently uses a broad gmail domain gate; Grafana and
+Flux Web have their own rules. No matching explicit grant does not mean literally
+zero Kubernetes access: audit shared bindings such as `system:authenticated`.
+
+## Situations and expected behavior
+
+| Situation | Result |
+| --- | --- |
+| Missing, forged, legacy or expired app session | 401; no participant operation |
+| Valid app session, missing/wrong CSRF on mutation | 403 before contacting Kubernetes |
+| Valid CSRF, foreign Origin | 403 before contacting Kubernetes |
+| Valid CSRF, absent Origin | Voter permits the request to reach authorization |
+| Valid CSRF, `Origin: null` | Voter rejects; Room Pass's form accepts with matching signed-cookie proof |
+| Kubernetes rejects credentials | 401, no server-identity retry |
+| Kubernetes denies permission | 403, no server-identity retry |
+| Config patch succeeds, CommitRequest denied/expired | Saved config, `committed: false`, explicit partial-success message |
+| Room stopped/expired or Participant invalid | Room Pass rejects new identity handoff |
+| Room stopped after a Dex token was issued | Token remains valid until expiry; Room stop is not token revocation |
+| App logout | Clears app cookie; does not revoke Dex token or Room Pass enrollment |
+
+Removing a RoleBinding removes that grant from existing tokens too; other
+matching bindings may still grant access. Existing app sessions do not recheck
+Room state on each operation. If immediate room-wide shutdown is required, design
+and test an authorization mechanism for that explicitly.
+
+## Automated evidence
+
+| Test file | What it establishes |
+| --- | --- |
+| [Voter authorization](../voter/authorization_test.go) | Real handler gates, request-scoped credentials, ignored forged headers, upstream 401/403/409, partial save |
+| [Voter OIDC](../voter/oidc_test.go) | Cookie tampering/expiry/version, CSRF, return paths, callback browser binding/expiry/rejected-attempt replay |
+| [Room Pass server](../room-pass/internal/server/server_test.go) | Enrollment lifecycle, stopped/expired Room, tampered cookie, handoff replay and CSRF |
+| [Room Pass API](../room-pass/test/integration/api_test.go) | CRD API behavior using envtest |
+| [Dex network boundary](../room-pass/test/network/network_test.go) | Real Dex, allowed/denied pod matrix, Service and Pod IP, policy removal/restoration; `task test-network` runs in CI |
+| [Room Pass e2e](../room-pass/test/e2e/e2e_test.go) | Local Dex/Kubernetes fixture; separate from CI and the real app browser |
+
+Run `task voter:test`, `task room-pass:test`, and `task test-integration`.
+For concurrent credential checks run `cd voter && go test -race ./...`.
+
+The HTTP upstream in Voter tests is a controlled stand-in: it establishes that
+Voter preserves a decision, not that deployed RBAC makes the correct decision.
+The next layer is rendered platform CEL and real-token RBAC tests for all three
+connectors, followed by browser and audit-to-Git acceptance. The implementation
+plan tracks those remaining proofs.
+
+See [network suite details](../room-pass/test/network/README.md) for testing the
+actual platform policy file and the distinction between local k3s and live Cilium.

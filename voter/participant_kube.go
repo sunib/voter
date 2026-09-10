@@ -3,7 +3,7 @@ package main
 // Request-scoped Kubernetes clients built from a participant's Dex ID token.
 //
 // This is the heart of the demo. The participant's own token is the credential,
-// so the kube-apiserver authenticates them as demo:<dex-subject>, RBAC decides
+// so the kube-apiserver derives their connector-prefixed identity, RBAC decides
 // what they may do, and the audit event names THEM -- which is what lets
 // gitops-reverser author a Git commit in their name.
 //

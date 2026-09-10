@@ -196,3 +196,8 @@ tasks:
     desc: Remove build output and task fingerprints
     cmds:
       - rm -rf .task frontend/dist voter/bin room-pass/bin
+
+  test-network:
+    desc: Verify Dex pod isolation and permitted callers in a disposable cluster
+    cmds:
+      - task: room-pass:test-network

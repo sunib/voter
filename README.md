@@ -1,82 +1,49 @@
-I would like this repo to contain a web application that serves a frontend that is usable on a phone.
+# Voter and Room Pass
 
-I'm allowed to give a [Kubecon talk](https://colocatedeventseu2026.sched.com/?_gl=1*1651shg*_gcl_au*MTcwNjUwOTkzLjE3Njc5NjQyNTY.*FPAU*MTcwNjUwOTkzLjE3Njc5NjQyNTY.) in march this year. I've added the [talk outline](talk-outline.md)
+A phone-friendly coffee and quiz demo for showing Kubernetes as an application
+API, with participant identity carried into audit events and ConfigButler's Git
+workflow. The presentation narrative is in [talk-outline.md](talk-outline.md).
 
-It is to be used during presentations as a questionaire tool for the room. It's going to be a 'special' tool since it will be using a public Kubernetes API server as it's API. We won't save things in a regular database, just store it as a CRD in the Kubernetes API server.
+Login works. The coffee and quiz journeys still need application API restoration.
+See [state-of-the-repo.md](state-of-the-repo.md) for the current gaps.
 
-The only authentication that we will do is a secret code in the URL: which is provided through a QR code at thes start of the session.
+## How access works
 
-There is also no need to obtain any personal details of attendees, except for what they enter themselves.
+Room Pass admits attendees using a room code. Dex also supports GitHub and
+LinkedIn login. Voter is the OIDC client and serves the Vue frontend and Go
+backend from one image. It sends the signed-in person's Dex ID token to Kubernetes;
+Kubernetes authentication, RBAC and admission decide what that person can do.
 
-The goal is to showcase that everybody can create valid yaml files: reversing gitops will allow them to.
+Being able to log in does not imply being allowed to edit. Room attendees receive
+explicit demo group grants. Other identities need their own matching grants.
+Opening GitHub login to everyone is a proposed change, not the current configuration.
 
-To start with I would like to create an example questionaire to 'read' the temperature in the room: I would like to set the tone and to show them without telling why/how.
+## Read next
 
-Let's have a few example questions to start with:
+- [Login explained](room-pass/login-explained.md): follow a login from browser to API.
+- [Architecture](room-pass/advised_architecture.md): components and trust boundaries.
+- [Authorization and tests](docs/authorization.md): who can do what, and what is proven.
+- [Implementation plan](room-pass/implementation_plan.md): completed work and next steps.
+- [Room Pass](room-pass/README.md): enrollment component and local fixture.
+- [Frontend](FRONTEND.md): frontend design notes.
+- [Documentation index](docs/README.md): current references and historical notes.
 
-* How did you liked the lunch?
-* How many km's did you traveled to get here? (approxomately).
-* How do you self service your users?
-    * We allow them to manage their own part of some Kubernetes cluster
-    * We crafted our own self-service application
-    * A form of ticketing system
-* How do you like the presentation so far? Scale 0-10
-* Did you ever considered to craft your own CRD?
-* Do you wrestle with getting your Abstraction right?
-
----
-
-## Project direction (chosen path)
-
-This repo is a demo companion for the talk in [`talk-outline.md`](talk-outline.md:1).
-
-Main architectural choices (kept intentionally simple to match the talk narrative):
-
-- Kubernetes API server is fully exposed to the internet, protected by Traefik.
-- A small forward-auth service validates a join code and sets up a per-browser device session.
-- Real Kubernetes tokens never leave the server side (Traefik injects `Authorization` upstream).
-- Frontend is a static SPA: Vue 3 + Vite + TypeScript + shadcn-vue.
-
-Primary docs:
-
-- [`ARCHITECTURE.md`](ARCHITECTURE.md:1)
-- [`FRONTEND.md`](FRONTEND.md:1)
-
-Alternatives and trade-offs:
-
-- [`docs/alternatives/README.md`](docs/alternatives/README.md:1)
-
-## Room Pass
-
-Room Pass development lives in [`room-pass/`](room-pass/README.md): an independent
-Go service, Dockerfile, Kubernetes enrollment APIs, and a runnable local Dex/OIDC demo.
-Start with `task room-pass:test` and `task room-pass:e2e-up`.
-
-## Building and testing
-
-Everything runs through Task; `task` on its own lists the vocabulary.
+## Build and test
 
 ```bash
-task setup   # install dependencies for every component
-task lint    # golangci-lint, hadolint, actionlint, ESLint
-task test    # Go tests, frontend type-check and build
-task build   # build both container images locally
+task setup             # install dependencies
+task lint              # Go, Dockerfiles, workflows, frontend
+task test              # Go tests plus frontend type-check/build
+task test-integration  # Room Pass API tests with envtest
+task test-network      # real Dex pod isolation in a disposable cluster (CI)
+task test-e2e          # local k3d + Dex + Traefik fixture; not in CI
 ```
 
-CI runs exactly these tasks inside the container built from
-[`.devcontainer/Dockerfile`](.devcontainer/Dockerfile), so a red pipeline
-reproduces with the command in its own log. A push to `main` publishes two
-images to GitHub Container Registry:
+CI runs the same tasks in the repository's container. See [CI](docs/ci.md).
+It publishes `ghcr.io/sunib/room-pass` and `ghcr.io/sunib/voter`; Voter contains
+both `voter/` and the compiled `frontend/`.
 
-| Image | From |
-|---|---|
-| `ghcr.io/sunib/room-pass` | [`room-pass/`](room-pass/) |
-| `ghcr.io/sunib/voter` | [`frontend/`](frontend/) |
-
-See [`docs/ci.md`](docs/ci.md) for the pipeline design, the trust model, and
-which digest to pin in `platform/`.
-
-# Skills
-
-Started to get some understanding for skills: I just installed
-https://skills.sh/giuseppe-trisciuoglio/developer-kit/shadcn-ui
+Deployment currently lives in the external platform checkout under
+`external/k8s/k8s.koudijs.dev/2-gitops/voter-demo/`. The legacy root `k8s/` deployment
+and `k8s-examples/` overlay have been removed. Room Pass retains its component
+manifests and disposable local fixture under `room-pass/`.

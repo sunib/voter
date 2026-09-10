@@ -138,3 +138,12 @@ workflow it describes, so there is one list rather than two that drift.
 
 The short version: the Room Pass end-to-end suite is the significant gap — until
 it runs, a green pipeline does not mean a participant can log in.
+
+## Dex network regression gate
+
+The test job also runs `task test-network` with the Docker socket mounted. This
+creates and removes a dedicated k3d cluster and verifies allowed and denied pod
+traffic to real Dex using the platform policy snapshot. See the
+[network suite](../room-pass/test/network/README.md) for cases, controls and how
+to test a platform policy edit directly. This gate does not require private
+repository access, live cluster credentials or external-provider login secrets.

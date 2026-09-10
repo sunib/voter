@@ -87,3 +87,8 @@ tasks:
     desc: Rehearse 300 enrollments in batches of 100, then clean up test participants
     cmds:
       - ROOM_PASS_LOAD=1 ROOM_PASS_EDGE_IP="$(docker network inspect k3d-room-pass-e2e --format '{{"{{"}}(index .IPAM.Config 0).Gateway{{"}}"}}')" go test -v -count=1 -run TestSharedNATEnrollment ./test/e2e
+
+  test-network:
+    desc: Test Dex NetworkPolicy with real pods in a disposable k3d cluster
+    cmds:
+      - bash test/network/run.sh

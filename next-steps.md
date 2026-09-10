@@ -1,3 +1,7 @@
+> Historical session notes. For current status and work, see
+> [state-of-the-repo.md](state-of-the-repo.md) and the
+> [implementation plan](room-pass/implementation_plan.md).
+
 Let's call this a day: it's almost working and it's still a bit rough
 
 These flows are never easy to get right

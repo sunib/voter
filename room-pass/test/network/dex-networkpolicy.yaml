@@ -1,0 +1,60 @@
+# The boundary that makes ONE Dex safe.
+#
+# Dex now carries an `authproxy` connector (id: room) for conference
+# participants. authproxy does not authenticate anything -- it BELIEVES the
+# X-Remote-* request headers on /callback/room. Room Pass's entire security
+# value is being the only thing that can set them.
+#
+# Traefik enforces that at L7: /callback/room on dex.k8s.koudijs.dev routes to
+# Room Pass, never to Dex (see 2-gitops/voter-demo/ingress.yaml). This policy is
+# what stops anything bypassing that rule by dialing dex-dex.dex.svc:5556
+# directly -- which, before this file existed, every pod in the cluster could
+# do, including the web-preview-pr-* namespaces running pull-request code.
+#
+# Every legitimate consumer reaches Dex through Traefik by hostname:
+#   * browsers (GitHub login, the Flux Web UI, Grafana, oauth2-proxy)
+#   * kubectl oidc-login from a laptop
+#   * the kube-apiserver fetching this issuer's JWKS -- it resolves
+#     dex.k8s.koudijs.dev to Traefik's LAN address, not to the Service
+# so restricting ingress to Traefik costs none of them anything.
+#
+# Room Pass is the one exception: it forwards the verified handoff straight to
+# Dex's /callback/room with the identity headers set.
+#
+# Cilium enforces NetworkPolicy on this cluster. kubernetes.io/metadata.name is
+# set automatically by Kubernetes on every namespace, so these selectors need no
+# labelling work.
+#
+# DO NOT add a rule admitting anything else without re-reading
+# 2-gitops/voter-demo/README.md. Containment survives a mistake here -- the
+# apiserver derives the username prefix from federated_claims.connector_id, so a
+# forged header can only produce a demo: identity -- but this is the control
+# that keeps the room code a real gate rather than a formality.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dex-ingress-traefik-and-room-pass
+  namespace: dex
+spec:
+  # Every pod in this namespace, deliberately. A matchLabels selector that
+  # guessed the chart's labels wrong would select nothing and silently protect
+  # nothing -- a NetworkPolicy has no way to report that it matched no pods.
+  # The dex namespace holds only Dex, so selecting all of it is both correct and
+  # impossible to get wrong. Nothing scrapes Dex directly today; add an explicit
+  # rule here if a ServiceMonitor is ever pointed at it.
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik-system
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: voter
+          podSelector:
+            matchLabels:
+              app: room-pass
+      ports:
+        - protocol: TCP
+          port: 5556

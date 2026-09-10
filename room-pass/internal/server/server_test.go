@@ -333,3 +333,47 @@ func TestEnrolledPageShowsTheChosenName(t *testing.T) {
 		t.Error("a participant-supplied name was rendered as markup")
 	}
 }
+
+// Enrollment cookies identify an object incarnation, not just a reusable name.
+// Replacing or revoking a Participant must stop a subsequent identity handoff.
+func TestIdentityRequiresCurrentEnrollment(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*api.Participant)
+		expire bool
+	}{
+		{name: "active enrollment"},
+		{name: "revoked participant", change: func(p *api.Participant) { p.Spec.Revoked = true }},
+		{name: "replacement participant", change: func(p *api.Participant) { p.UID = "replacement-uid" }},
+		{name: "different room UID", change: func(p *api.Participant) { p.Spec.RoomRef.UID = "another-room" }},
+		{name: "different room name", change: func(p *api.Participant) { p.Spec.RoomRef.Name = "another-room" }},
+		{name: "expired enrollment cookie", expire: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, db := fixture(t, "http://dex.test")
+			ctx := context.Background()
+			ss, err := s.enrollParticipant(ctx, "BCDFGH", "Ada")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.change != nil {
+				p := &api.Participant{}
+				if err := db.Get(ctx, client.ObjectKey{Namespace: s.cfg.Room.Namespace, Name: ss.Name}, p); err != nil {
+					t.Fatal(err)
+				}
+				tc.change(p)
+				if err := db.Update(ctx, p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.expire {
+				ss.Expires = s.now().Unix()
+			}
+			_, _, err = s.identity(ctx, ss)
+			wantDenied := tc.change != nil || tc.expire
+			if (err != nil) != wantDenied {
+				t.Fatalf("identity error = %v, want denied = %v", err, wantDenied)
+			}
+		})
+	}
+}

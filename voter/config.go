@@ -35,9 +35,6 @@ type config struct {
 	// are created. Empty means "use the runtime namespace", which must also be
 	// the GitTarget's namespace.
 	ConfigButlerCommitRequestNamespace string `envconfig:"CONFIGBUTLER_COMMITREQUEST_NAMESPACE"`
-	// ConfigButlerIdentityExtrasEnabled controls whether writes carry the
-	// configbutler.ai/claims/{display-name,email} extras used for Git authoring.
-	ConfigButlerIdentityExtrasEnabled bool `envconfig:"CONFIGBUTLER_IDENTITY_EXTRAS_ENABLED" default:"true"`
 
 	// --- OIDC ---------------------------------------------------------------
 	OIDCIssuerURL    string `envconfig:"OIDC_ISSUER_URL"`
@@ -49,7 +46,7 @@ type config struct {
 
 	// OIDCConnectorID preselects a Dex connector, skipping the "how do you want
 	// to sign in" screen Dex shows when an authorization request names none and
-	// more than one is configured. For this demo it is "room": the audience
+	// more than one is configured. For this demo it is "room-pass": the audience
 	// should land on the join form, not on a choice they cannot evaluate.
 	// Empty means "let Dex ask".
 	OIDCConnectorID string `envconfig:"OIDC_CONNECTOR_ID"`
@@ -73,6 +70,9 @@ type config struct {
 	// KubernetesAPIServer fixes the destination for participant-token calls.
 	// Empty means the in-cluster address.
 	KubernetesAPIServer string `envconfig:"KUBERNETES_API_SERVER"`
+
+	// KubernetesNamespace overrides the pod namespace for application resources.
+	KubernetesNamespace string `envconfig:"KUBERNETES_NAMESPACE"`
 
 	// StaticDir is the built frontend bundle served by this process. The
 	// container image sets it to /srv/www; leaving it empty (the local Vite

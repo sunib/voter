@@ -289,6 +289,17 @@ jobs:
               task test-integration
             '
 
+      - name: Verify Dex network isolation
+        # Real pod traffic and NetworkPolicy enforcement, including a policy
+        # removal control. The task creates and destroys its own k3d cluster.
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:${CI_WORKDIR}" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -w "${CI_WORKDIR}" \
+            "${CI_CONTAINER}" \
+            bash -lc 'task test-network'
+
   images:
     name: Image (${{ matrix.name }})
     runs-on: ubuntu-latest

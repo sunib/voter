@@ -17,7 +17,6 @@ import (
 
 type handlerDeps struct {
 	cfg       config
-	kube      kubeClient
 	defaultNS string
 }
 

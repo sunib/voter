@@ -2,7 +2,7 @@
 #
 # Adapted from the gitops-reverser devcontainer: same toolchain, same commit
 # signing setup, retargeted at this repo's layout (Go service in voter/,
-# Vue + Vite frontend in frontend/, manifests and CRDs in k8s/).
+# Vue + Vite frontend in frontend/, Room Pass manifests and CRDs in room-pass/).
 #
 # Stage 1: CI base image with essential build tools
 # Pinned by digest (Scorecard "pinned dependencies"); Dependabot's docker
@@ -248,8 +248,7 @@ RUN curl -fsSL "https://download.valkey.io/releases/valkey-${VALKEY_VERSION}-jam
 
 # Install cosign (Sigstore keyless signing/verification). Lives in the ci stage
 # rather than dev-only so a release pipeline can run against this stage directly.
-# Nothing in this repo invokes it yet: `make build-push` produces provenance and
-# an SBOM via buildx, but does not sign. It is here so images pushed to
+# Nothing in this repo invokes it yet. It is available so images pushed to
 # zot.z65.nl *can* be signed, and so published artifacts can be verified by hand
 # (`cosign verify`, `cosign verify-blob`).
 RUN asset="cosign-linux-amd64" \

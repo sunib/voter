@@ -1,3 +1,7 @@
+> Historical product direction. For current status and work, see
+> [state-of-the-repo.md](state-of-the-repo.md) and the
+> [implementation plan](room-pass/implementation_plan.md).
+
 # Coffee App Minimum
 
 This document describes the minimum the existing vote app needs in order to become the TestNet coffee demo.

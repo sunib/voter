@@ -73,8 +73,8 @@ ssh-add -L
 And that the repo itself builds:
 
 ```bash
-make build-voter
-make test-voter
+task voter:build
+task voter:test
 cd frontend && npm ci && npm run build
 ```
 
@@ -245,7 +245,7 @@ Everything else is still shared on purpose: the Go and npm caches are content-ad
 
 | Port  | What                                                                          |
 | ----- | ----------------------------------------------------------------------------- |
-| 5173  | Vite dev server (`cd frontend && npm run dev`, or `make frontend-dev-remote`)  |
+| 5173  | Vite dev server (`cd frontend && npm run dev`, or `task frontend:dev`)  |
 | 8080  | `voter` (its `PORT` default, see `voter/config.go`)                            |
 | 10350 | Tilt UI                                                                       |
 | 13000 | Git server, for the local GitOps demo loop                                    |

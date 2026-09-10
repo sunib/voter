@@ -307,24 +307,8 @@ func TestRealDexAndKubernetes(t *testing.T) {
 	if !auditOK {
 		t.Fatal("missing or incorrect audit attribution")
 	}
-	// A pod without Room Pass's label cannot reach the Dex Service directly.
-	probe := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{GenerateName: "bypass-probe-", Namespace: "room-pass"}, Spec: corev1.PodSpec{RestartPolicy: corev1.RestartPolicyNever, Containers: []corev1.Container{{Name: "probe", Image: "curlimages/curl:8.12.1", Command: []string{"sh", "-c", "curl -s -o /dev/null --max-time 5 http://dex:5556/callback/room?state=forged; rc=$?; test $rc -eq 28 || test $rc -eq 7"}}}}}
-	if e = db.Create(ctx, probe); e != nil {
-		t.Fatal(e)
-	}
-	t.Cleanup(func() { _ = db.Delete(context.Background(), probe) })
-	for deadline := time.Now().Add(90 * time.Second); ; {
-		if e = db.Get(ctx, client.ObjectKeyFromObject(probe), probe); e != nil {
-			t.Fatal(e)
-		}
-		if probe.Status.Phase == corev1.PodSucceeded {
-			break
-		}
-		if probe.Status.Phase == corev1.PodFailed || time.Now().After(deadline) {
-			t.Fatal("direct Dex network isolation probe failed", probe.Status.Phase)
-		}
-		time.Sleep(time.Second)
-	}
+	// Pod-level isolation is exercised by task test-network, including positive
+	// controls and the shared-issuer platform policy.
 
 	if e = participant.List(ctx, &corev1.SecretList{}, client.InNamespace("work")); !apierrors.IsForbidden(e) {
 		t.Fatalf("work Secrets must be forbidden: %v", e)

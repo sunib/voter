@@ -54,11 +54,6 @@ func main() {
 		log.Printf("static: serving the frontend from %s", cfg.StaticDir)
 	}
 
-	kube, err := loadKubeClient(cfg)
-	if err != nil {
-		log.Fatalf("kube client required: %v", err)
-	}
-
 	// The OIDC client is built before anything serves, so a misconfigured
 	// deployment fails at boot with a clear message instead of failing every
 	// login later.
@@ -83,8 +78,7 @@ func main() {
 
 	deps := handlerDeps{
 		cfg:       cfg,
-		kube:      kube,
-		defaultNS: kube.defaultNS,
+		defaultNS: applicationNamespace(cfg),
 	}
 
 	mux := http.NewServeMux()

@@ -1,5 +1,6 @@
 voter/bin/
 voter/voter
+# Historical local registry credential; keep ignored after removing the overlay.
 k8s-examples/zot-pull.secret.example.yaml
 external-code
 external/

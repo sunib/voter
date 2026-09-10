@@ -235,28 +235,44 @@ func TestSafeReturnPath(t *testing.T) {
 	}
 }
 
-// A pending login is single-use and bound to the browser that started it.
-func TestLoginTransactionIsSingleUseAndBrowserBound(t *testing.T) {
-	p := &oidcProvider{transactions: map[string]*loginTransaction{}, now: time.Now}
-	p.transactions["state-1"] = &loginTransaction{
-		Nonce: "n", Verifier: "v", Browser: "browser-a",
-		Return: "/", Expires: time.Now().Add(time.Minute),
-	}
-
-	// Consume it the way handleCallback does.
-	p.mu.Lock()
-	first := p.transactions["state-1"]
-	delete(p.transactions, "state-1")
-	p.mu.Unlock()
-	if first == nil {
-		t.Fatal("expected the transaction to be present")
-	}
-
-	p.mu.Lock()
-	replay := p.transactions["state-1"]
-	p.mu.Unlock()
-	if replay != nil {
-		t.Fatal("a replayed callback must not find the transaction again")
+// Exercise the callback itself, including consumption of rejected attempts.
+func TestCallbackRejectsUnboundExpiredAndReplayedTransactions(t *testing.T) {
+	for _, tc := range []struct {
+		name, binding string
+		expired       bool
+	}{
+		{"missing browser cookie", "", false},
+		{"different browser", "browser-b", false},
+		{"expired transaction", "browser-a", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			expiry := now.Add(time.Minute)
+			if tc.expired {
+				expiry = now.Add(-time.Second)
+			}
+			p := &oidcProvider{transactions: map[string]*loginTransaction{
+				"state-1": {Browser: "browser-a", Expires: expiry},
+			}, now: func() time.Time { return now }}
+			for attempt := 0; attempt < 2; attempt++ {
+				req := httptest.NewRequest("GET", "/auth/callback?state=state-1&code=code", nil)
+				binding := tc.binding
+				if attempt == 1 {
+					binding = "browser-a"
+				}
+				if binding != "" {
+					req.AddCookie(&http.Cookie{Name: browserBindingCookie, Value: binding})
+				}
+				rec := httptest.NewRecorder()
+				p.handleCallback(rec, req)
+				if rec.Code != http.StatusBadRequest {
+					t.Fatalf("attempt %d: status %d", attempt, rec.Code)
+				}
+				if len(rec.Result().Cookies()) != 0 {
+					t.Fatal("rejected callback set a cookie")
+				}
+			}
+		})
 	}
 }
 
