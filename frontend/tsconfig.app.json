@@ -12,5 +12,8 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"],
+  // Tests live in their own project (tsconfig.vitest.json) so vitest's Node
+  // types stay out of the browser bundle's type environment.
+  "exclude": ["src/**/*.test.ts"]
 }

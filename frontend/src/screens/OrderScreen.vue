@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  buildStorefrontFromConfig,
   formatMoney,
   getStorefront,
   submitOrder,
-  watchCoffeeConfig,
   type ApiError,
 } from '../api/coffee'
 import { useCartStore } from '../stores/cart'
@@ -19,8 +17,6 @@ const loading = ref(false)
 const loadError = ref('')
 const submitError = ref('')
 const submitting = ref(false)
-
-let configSource: EventSource | undefined
 
 const voucherCode = computed(() => {
   const raw = route.query.voucher
@@ -136,32 +132,20 @@ async function placeOrder() {
   }
 }
 
-function openConfigWatch() {
-  configSource?.close()
-  configSource = watchCoffeeConfig('/public/storefront/watch', (event) => {
-    cart.setActiveConfig(event.object)
-    cart.setStorefront(buildStorefrontFromConfig(event.object, voucherCode.value || undefined))
-  })
-}
-
+// There used to be an SSE watch here that pushed CoffeeConfig changes straight
+// into the page. It belonged to the deleted legacy session; the
+// participant-token version does not exist yet (PLAN.md section 1). Until it
+// does, the storefront is fetched -- which is also the honest thing to show:
+// the price the participant sees is the one the server just computed.
 onMounted(() => {
   cart.ensureLoaded()
-  openConfigWatch()
-})
-
-onBeforeUnmount(() => {
-  configSource?.close()
 })
 
 watch(
   voucherCode,
   async (nextVoucherCode) => {
     cart.setVoucherCode(nextVoucherCode)
-    if (cart.activeConfig) {
-      cart.setStorefront(buildStorefrontFromConfig(cart.activeConfig, nextVoucherCode || undefined))
-    } else {
-      await refreshStorefront()
-    }
+    await refreshStorefront()
   },
   { immediate: true },
 )

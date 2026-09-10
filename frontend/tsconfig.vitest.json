@@ -1,0 +1,17 @@
+{
+  "extends": "@vue/tsconfig/tsconfig.dom.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.vitest.tsbuildinfo",
+    // Tests get vitest's globals and Node types. The app project deliberately
+    // does NOT: pulling Node types into src/ changes what setInterval returns
+    // (Timeout, not number) and breaks browser code that is correct as written.
+    "types": ["vitest/globals", "node"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+  "include": ["src/**/*.test.ts"]
+}

@@ -35,7 +35,7 @@ func registerParticipantCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 
 	mux.HandleFunc("/public/coffeeconfig", requireParticipant(cfg, func(w http.ResponseWriter, r *http.Request, s participantSession) {
 		noStore(w)
-		clients, err := newParticipantClients(cfg, s.IDToken)
+		clients, err := deps.participantClientsFor(s.IDToken)
 		if err != nil {
 			http.Error(w, "could not build a client for your session", http.StatusInternalServerError)
 			return

@@ -79,11 +79,13 @@ func main() {
 	deps := handlerDeps{
 		cfg:       cfg,
 		defaultNS: applicationNamespace(cfg),
+		vouchers:  newVoucherLedger(),
 	}
 
 	mux := http.NewServeMux()
 	registerOIDCHandlers(mux, oidcClient, cfg)
 	registerParticipantCoffeeHandlers(mux, deps)
+	registerParticipantStorefrontHandlers(mux, deps)
 	// Last: it owns "/" and therefore everything unclaimed above.
 	registerHandlers(mux, deps)
 

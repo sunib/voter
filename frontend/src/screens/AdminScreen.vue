@@ -4,10 +4,7 @@ import { formatConflictValue, humanizePath } from '../adminFormatters'
 import {
   formatMoney,
   getAdminCoffeeConfig,
-  getOrdersSnapshot,
   patchAdminCoffeeConfig,
-  watchCoffeeConfig,
-  watchOrders,
   type ApiError,
 } from '../api/coffee'
 import AdminNav from '../components/admin/AdminNav.vue'
@@ -24,6 +21,10 @@ type FieldState = 'clean' | 'dirty' | 'conflict'
 const loading = ref(true)
 const saving = ref(false)
 const loadError = ref('')
+// Set when the CoffeeConfig write succeeded but the CommitRequest did not.
+// Reporting an unqualified success there would be the one lie this demo
+// cannot afford.
+const commitNotice = ref('')
 const changeReason = ref('')
 const serverConfig = ref<CoffeeConfig | null>(null)
 const draftConfig = ref<CoffeeConfig | null>(null)
@@ -33,8 +34,6 @@ const flashedPaths = ref<Record<string, true>>({})
 const conflicts = ref<Record<string, FieldConflict>>({})
 const arrayFieldInputs = ref<Record<string, string>>({})
 
-let configSource: EventSource | undefined
-let orderSource: EventSource | undefined
 const flashTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 const currency = computed(() => draftConfig.value?.spec.currency ?? 'EUR')
@@ -77,12 +76,7 @@ async function loadAdminState() {
   loading.value = true
   loadError.value = ''
   try {
-    const [config, snapshot] = await Promise.all([
-      getAdminCoffeeConfig(),
-      getOrdersSnapshot(),
-    ])
-    resetConfigState(config)
-    voucherUsage.value = snapshot.voucherUsage
+    resetConfigState(await getAdminCoffeeConfig())
   } catch (error) {
     loadError.value = (error as ApiError).message
   } finally {
@@ -97,7 +91,7 @@ async function saveConfig() {
   saving.value = true
   loadError.value = ''
   try {
-    const updated = await patchAdminCoffeeConfig(
+    const result = await patchAdminCoffeeConfig(
       {
         spec: draftConfig.value.spec,
       },
@@ -105,7 +99,11 @@ async function saveConfig() {
         reason: changeReason.value,
       },
     )
-    resetConfigState(updated)
+    resetConfigState(result.config)
+    // The save reached Kubernetes but ConfigButler did not accept the commit
+    // request. Say so rather than reporting an unqualified success -- the
+    // whole point of the demo is that the change becomes a commit.
+    commitNotice.value = result.commitError ?? ''
   } catch (error) {
     loadError.value = (error as Error).message
   } finally {
@@ -113,26 +111,17 @@ async function saveConfig() {
   }
 }
 
-function openStreams() {
-  configSource?.close()
-  orderSource?.close()
-
-  configSource = watchCoffeeConfig(
-    '/public/admin/coffeeconfig/watch',
-    (event) => {
-      applyIncomingConfig(event.object)
-    },
-  )
-
-  orderSource = watchOrders((event) => {
-    if (event.status === 'placed' && event.voucherCode) {
-      const key = event.voucherCode.trim().toLowerCase()
-      voucherUsage.value = {
-        ...voucherUsage.value,
-        [key]: (voucherUsage.value[key] ?? 0) + 1,
-      }
-    }
-  })
+// The live config watch and the order stream are not restored yet -- they were
+// SSE endpoints on the deleted legacy session, and the participant-token
+// versions do not exist. Until they do, this screen re-reads on demand instead
+// of pretending to be live; applyIncomingConfig stays because the conflict
+// machinery it feeds is what the watch will use again. See PLAN.md section 1.
+async function refreshFromServer() {
+  try {
+    applyIncomingConfig(await getAdminCoffeeConfig())
+  } catch (error) {
+    loadError.value = (error as ApiError).message
+  }
 }
 
 function addProduct() {
@@ -620,14 +609,9 @@ function cloneValue<T>(value: T): T {
 
 onMounted(async () => {
   await loadAdminState()
-  if (!loadError.value) {
-    openStreams()
-  }
 })
 
 onBeforeUnmount(() => {
-  configSource?.close()
-  orderSource?.close()
   clearAllFlashes()
 })
 </script>
@@ -654,6 +638,11 @@ onBeforeUnmount(() => {
       <section v-if="loadError" class="panel panel--danger">
         <h2>Admin request failed</h2>
         <p>{{ loadError }}</p>
+      </section>
+
+      <section v-if="commitNotice" class="panel panel--warning">
+        <h2>Saved, but not committed</h2>
+        <p>{{ commitNotice }}</p>
       </section>
 
       <section class="admin-grid">
@@ -1583,6 +1572,13 @@ onBeforeUnmount(() => {
                   @click="saveConfig"
                 >
                   {{ saveButtonLabel }}
+                </button>
+                <button
+                  class="button button--ghost"
+                  :disabled="saving"
+                  @click="refreshFromServer"
+                >
+                  Refresh from cluster
                 </button>
               </div>
             </section>

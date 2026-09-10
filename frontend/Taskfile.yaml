@@ -29,12 +29,15 @@ tasks:
       - npm run format
 
   test:
-    desc: Type-check and build the frontend
-    # There is no unit-test suite yet. `npm run build` runs `vue-tsc -b` first, so
-    # this is a real check: a type error in a .vue or .ts file fails it. Replace
-    # this task's body when a test runner lands -- CI calls `task test`, not npm.
+    desc: Unit-test, type-check and build the frontend
+    # Three different checks, and all three matter. `vitest run` covers the API
+    # client, where the bugs are not type errors: a request to a path the
+    # backend no longer serves, or a mutation missing its CSRF header, compiles
+    # perfectly and fails at runtime. `npm run build` runs `vue-tsc -b` first,
+    # so it is also a real type check of every .vue and .ts file.
     deps: [deps]
     cmds:
+      - npm run test
       - npm run build
 
   build:

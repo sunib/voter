@@ -15,6 +15,21 @@ export interface Session {
   expiresAt: number
 }
 
+// The CSRF token the backend issued for this session.
+//
+// It is deliberately cached here rather than fetched per mutation: /auth/session
+// is the ONLY place that hands it out, and re-fetching before every write would
+// turn one save into two round trips. Every getSession() refreshes it, and the
+// router guard calls getSession() before each protected navigation, so it is
+// current for as long as the session is.
+let csrfToken = ''
+
+/** The CSRF token for the current session, or "" when signed out. Mutating
+ *  requests must send it as `x-csrf-token`; the backend rejects them otherwise. */
+export function currentCsrfToken(): string {
+  return csrfToken
+}
+
 /** Returns null when there is no session, rather than throwing: "not logged
  *  in" is an expected answer here, not an error. */
 export async function getSession(): Promise<Session | null> {
@@ -23,13 +38,19 @@ export async function getSession(): Promise<Session | null> {
     headers: { accept: 'application/json' },
   })
   if (res.status === 401) {
+    csrfToken = ''
     return null
   }
   if (!res.ok) {
     throw new Error(`session check failed: ${res.status}`)
   }
   const body = (await res.json()) as Session
-  return body.authenticated ? body : null
+  if (!body.authenticated) {
+    csrfToken = ''
+    return null
+  }
+  csrfToken = body.csrfToken
+  return body
 }
 
 /** Clears the application session. It does NOT revoke the Dex token or remove

@@ -209,23 +209,33 @@ The former root `k8s/` deployment and `k8s-examples/` overlay have been deleted.
 Login works end to end through the `room-pass` connector; this was confirmed in
 the running cluster on 2026-09-10.
 
-The application behind that login is largely not restored. Deleting the legacy
-browser-asserted session removed every endpoint that depended on it. The backend
-currently serves only:
+Deleting the legacy browser-asserted session removed every endpoint that
+depended on it. The coffee journey has since been rebuilt on participant tokens:
 
 | Route | Status |
 | --- | --- |
 | `/healthz`, `/public/build-info` | 200 |
 | `/auth/login`, `/auth/callback`, `/auth/session`, `/auth/logout` | working |
-| `/public/coffeeconfig` | ported to participant tokens; **not yet called by the frontend** |
-| everything else the SPA calls | 404 |
+| `GET /public/storefront` | the menu and voucher state, priced per request |
+| `POST /public/orders` | prices a basket and enforces `maximumUsage` |
+| `GET,PATCH /public/coffeeconfig` | the editor, wired to the SPA |
+| `/public/admin/*`, `/public/storefront/watch` | not restored — SSE watches, change history, admin orders |
+| the quiz flow | not restored; still on the retired ForwardAuth path |
 
-`participant_coffee.go` is the pattern the remaining routes should follow.
+`participant_coffee.go` is the pattern the remaining routes follow.
 [PLAN.md](PLAN.md) lists them.
 
+**Voucher redemptions are counted in this process**, not in Kubernetes
+(`coffee_vouchers.go` says why, and what it costs). The limit itself is read
+from the CoffeeConfig on every order, so raising `maximumUsage` in Git unblocks
+the next order without a restart — which is the demo's punchline. The count is
+per-replica and per-boot, so this is single-replica behaviour by construction.
+
 Note that `committed: true` from the CoffeeConfig PATCH means a `CommitRequest`
-was *created*, not that a Git commit was observed. The UI contract needs to say
-so before this is presented as Git confirmation.
+was *created*, not that a Git commit was observed. It is also worth knowing that
+ConfigButler is **not currently installed in the demo cluster** — there is no
+CommitRequest CRD — so today every save reports `committed: false`, and the
+editor says "Saved, but not committed".
 
 ## Retired
 

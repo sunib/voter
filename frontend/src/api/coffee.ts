@@ -11,6 +11,7 @@ import type {
   CoffeeVoucherSpec,
   StorefrontResponse,
 } from './coffeeTypes'
+import { currentCsrfToken } from './session'
 
 export type PublicBuildInfoResponse = {
   gitCommit: string
@@ -64,6 +65,13 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     headers.set('content-type', 'application/json')
   }
 
+  // Every cookie-authenticated mutation needs CSRF proof, or the backend
+  // answers 403. GET and HEAD are not mutations and the backend does not ask.
+  const method = (init?.method ?? 'GET').toUpperCase()
+  if (method !== 'GET' && method !== 'HEAD' && !headers.has('x-csrf-token')) {
+    headers.set('x-csrf-token', currentCsrfToken())
+  }
+
   const res = await fetch(path, {
     ...init,
     headers,
@@ -100,24 +108,38 @@ export async function submitOrder(
 }
 
 export async function getAdminCoffeeConfig(): Promise<CoffeeConfig> {
-  return await requestJson<CoffeeConfig>('/public/admin/coffeeconfig')
+  return await requestJson<CoffeeConfig>('/public/coffeeconfig')
 }
 
 export type PatchAdminCoffeeConfigOptions = {
   reason?: string
 }
 
+/** What the backend reports after a save.
+ *
+ *  `saved` and `committed` are separate on purpose: the CoffeeConfig write and
+ *  the CommitRequest are two Kubernetes operations, and the second can fail
+ *  after the first succeeded. Note that `committed: true` means the
+ *  CommitRequest was CREATED, not that a Git commit was observed. */
+export type PatchCoffeeConfigResult = {
+  config: CoffeeConfig
+  saved: boolean
+  committed?: boolean
+  commitRequest?: string
+  commitError?: string
+}
+
 export async function patchAdminCoffeeConfig(
   patch: unknown,
   options?: PatchAdminCoffeeConfigOptions,
-): Promise<CoffeeConfig> {
+): Promise<PatchCoffeeConfigResult> {
   const headers = new Headers({
     'content-type': 'application/merge-patch+json',
   })
   if (options?.reason?.trim()) {
     headers.set('x-change-reason', options.reason.trim())
   }
-  return await requestJson<CoffeeConfig>('/public/admin/coffeeconfig', {
+  return await requestJson<PatchCoffeeConfigResult>('/public/coffeeconfig', {
     method: 'PATCH',
     headers,
     body: JSON.stringify(patch),

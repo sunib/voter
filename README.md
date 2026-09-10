@@ -4,8 +4,9 @@ A phone-friendly coffee and quiz demo for showing Kubernetes as an application
 API, with participant identity carried into audit events and ConfigButler's Git
 workflow. The presentation narrative is in [talk-outline.md](talk-outline.md).
 
-Login works. The coffee and quiz journeys still need application API restoration.
-See [PLAN.md](PLAN.md) for the current gaps and the work left.
+Login works, and so does the coffee journey: browse the menu, order, hit the
+depleted voucher, edit the CoffeeConfig. The quiz journey and the editor's live
+watches are still on the retired path. See [PLAN.md](PLAN.md) for what is left.
 
 ## How access works
 

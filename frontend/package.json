@@ -9,7 +9,9 @@
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "format": "prettier -w ."
+    "format": "prettier -w .",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@primeuix/themes": "^2.0.3",
@@ -37,6 +39,7 @@
     "tailwindcss": "^4.1.18",
     "typescript": "~5.9.3",
     "vite": "^7.2.4",
+    "vitest": "^3.2.7",
     "vue-eslint-parser": "^10.2.0",
     "vue-tsc": "^3.1.4"
   }

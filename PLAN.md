@@ -35,6 +35,16 @@ Recorded so the next session does not re-derive it.
   Flux's own components.
 - 7 leftover `Participant` objects and ~71 `ContainerStatusUnknown` pod
   tombstones from the reboots.
+- **ConfigButler is not installed.** There is no `commitrequests.configbutler.ai`
+  CRD and no controller in any namespace, while Voter runs with
+  `CONFIGBUTLER_GIT_TARGET_NAME=voter-demo`. Every save therefore creates the
+  CoffeeConfig change and then fails to create the CommitRequest. See section 2.
+- The participant Role `voter-audience` matches
+  [docs/authorization.md](docs/authorization.md) exactly: `get,list,watch,patch,
+  update` on coffeeconfigs, `create` on quizsubmissions and commitrequests.
+  Confirmed with `kubectl auth can-i --as-group=demo:voter-audience`.
+- The live CoffeeConfig is `demo-coffee` with `vouchers: []` — the demo's
+  depletable TestNet voucher is not configured yet.
 
 ---
 
@@ -46,44 +56,83 @@ with almost no app behind it.
 The frontend screens are kept deliberately — they are the restoration target,
 not dead weight. What is missing is the backend behind them.
 
-- [ ] **Wire the one endpoint that already works.** `/public/coffeeconfig` is
-      ported to participant tokens but *no frontend code calls it*.
-      `frontend/src/api/coffee.ts:103,120` still calls
-      `/public/admin/coffeeconfig`. This is the cheapest possible win and it
-      makes the editor screen live.
-- [ ] **Port the storefront**, since that is the screen a participant lands on
-      after login. Today `/` calls `/public/storefront` and gets a 404.
-- [ ] **Port orders**, then editor watches/history, then quiz forwarding.
-      Inventory each route's identity, resource/verb, CSRF requirement and
-      401/403 behaviour *before* implementing it. `participant_coffee.go` is the
-      pattern.
-- [ ] **Retire the ForwardAuth remnant in `frontend/src/api/kube.ts`** as quiz
-      forwarding is restored — the `X-Join-Code` header and the
-      direct-to-apiserver path belong to the deleted model.
-- [ ] Keep credentials scoped per request; no fallback server writes.
-- [ ] Preserve conditional writes and surface 409 conflicts in the editor.
-- [ ] Decide order/voucher persistence and rollout semantics before adding
-      replicas.
+- [x] **Wire the editor to the endpoint that already worked.**
+      `/public/coffeeconfig` was ported but nothing called it; the SPA called
+      `/public/admin/coffeeconfig`, which 404s. It now calls the real path, and
+      every mutation carries the CSRF token the backend requires — it did not
+      before, so a save would have been a 403 even at the right path.
+- [x] **Port the storefront.** `GET /public/storefront?voucher=CODE` reads the
+      CoffeeConfig with the participant's own token and returns the shape the
+      order screen already expected.
+- [x] **Port orders.** `POST /public/orders` prices the basket and enforces the
+      voucher's `maximumUsage`, which is the bug the demo is built around: the
+      storefront keeps showing the discount, and the failure appears at submit.
+      The limit is read from the CoffeeConfig on every order, so raising it in
+      Git unblocks the next order with no restart. That behaviour is pinned by
+      a test.
+- [x] Keep credentials scoped per request; no fallback server writes. Tested
+      against a controlled upstream: the participant's own token is what goes on
+      the wire, `Impersonate-*`/`X-Remote-*` from the browser never do, and an
+      unusable token fails rather than falling back.
+- [ ] **Port the editor's live watch and change history**
+      (`/public/admin/coffeeconfig/{watch,changes,changes/stream}`). Both were
+      SSE on the deleted session. The screens now re-read on demand instead of
+      pretending to be live, and `applyIncomingConfig` — the conflict machinery
+      the watch fed — is deliberately kept for when it returns.
+- [ ] **Port the admin orders view** (`/public/admin/orders{,/debug,/stream}`).
+      Blocked on the persistence decision below: there is nothing to list while
+      orders exist only in memory.
+- [ ] **Port quiz forwarding**, then retire the ForwardAuth remnant in
+      `frontend/src/api/kube.ts` — the `X-Join-Code` header and the
+      direct-to-apiserver path belong to the deleted model, and `AnswerScreen`
+      still depends on them.
+- [ ] Preserve conditional writes and surface 409 conflicts in the editor. The
+      backend already passes a 409 through unchanged (there is a test), but the
+      editor sends `{spec}` with no `resourceVersion`, so nothing is actually
+      conditional yet — a concurrent edit silently wins.
+- [ ] **Decide order and voucher persistence.** Redemptions are currently
+      counted in process memory (`voter/coffee_vouchers.go`), which is honest
+      for one replica and wrong for two: each would keep its own tally and the
+      effective limit would double. A restart also forgives every redemption.
+      This must be settled before `replicas > 1`.
+- [ ] Decide whether the demo needs the quiz journey at all. Cutting it removes
+      most of what is left in this section.
 
-The dead routes, for the inventory:
+Route status after this pass:
 
 | Frontend calls | Backend |
 | --- | --- |
-| `/public/storefront`, `/public/storefront/watch` | gone |
-| `/public/orders` | gone |
-| `/public/admin/coffeeconfig{,/watch,/changes,/changes/stream}` | gone |
-| `/public/admin/orders{,/debug,/stream}` | gone |
-| `/public/coffeeconfig` | **ported, not wired** |
+| `/public/coffeeconfig` (GET, PATCH) | **wired** |
+| `/public/storefront` | **ported** |
+| `/public/orders` | **ported** |
+| `/public/storefront/watch` | removed from the screen; not ported |
+| `/public/admin/coffeeconfig{/watch,/changes,/changes/stream}` | not ported |
+| `/public/admin/orders{,/debug,/stream}` | not ported |
 
 **Acceptance:** an attendee logs in, orders, and edits; an ungranted external
 account gets an understandable denial; the expected username appears in the
 audit log and in the Git output.
 
+Where that stands: login, order and edit now exist and are covered by tests
+against a fake API server. The denial path is tested at the handler level
+(Kubernetes' 403 reaches the browser unchanged). Neither the audit-log name nor
+the Git output has been observed end to end in the cluster — the first needs a
+real login through the deployed build, the second needs section 2.
+
 ## 2. Make "saved" mean something honest
 
-- [ ] `committed: true` currently means a `CommitRequest` was *created*. Either
-      observe the resulting Git commit or change the UI contract to say
-      "submitted". Distinguish three states in the response: Kubernetes save,
+- [ ] **Install ConfigButler, or stop asking for commits.** Verified live: the
+      cluster has no `commitrequests.configbutler.ai` CRD and no controller, so
+      today *every* save fails its second step. Nothing is silently wrong — the
+      backend already reports partial success — but the demo's payoff does not
+      exist in this cluster.
+- [x] Surface the partial failure in the editor. The save result carries
+      `saved` and `committed` separately, and the screen now shows "Saved, but
+      not committed" with the reason instead of an unqualified success. Covered
+      by a frontend test.
+- [ ] `committed: true` still means a `CommitRequest` was *created*. Either
+      observe the resulting Git commit or change the wording to "submitted".
+      Three distinct states belong in the response: Kubernetes save,
       CommitRequest accepted, Git commit observed.
 
 This matters more than its size suggests — the whole talk is "your change
@@ -142,6 +191,14 @@ the `Referrer-Policy: no-referrer` outage reached production invisibly.
 - [ ] Preserve unsaved input across re-login; stop and reconnect streams cleanly.
 - [ ] Get a disposable-cluster browser smoke test into CI. `task test-e2e` is
       not a CI gate today and drives the flow with a Go client.
+- [x] Give the frontend a unit-test runner. `task test` now runs vitest before
+      the type-check. The first suite covers the API client, where the bugs are
+      not type errors: a request to a path the backend no longer serves, or a
+      mutation missing its CSRF header, compiles and builds perfectly. Both of
+      those were real, and both are now pinned.
+- [ ] Extend frontend tests past the API client to the screens themselves
+      (component tests need a DOM environment; only `vitest` and the node
+      environment are installed today).
 
 Worth a look while here: `voter/oidc.go:372` still sets `Referrer-Policy:
 no-referrer`, and Voter's CSRF check *rejects* `null` Origin — the same pairing

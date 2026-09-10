@@ -18,6 +18,28 @@ import (
 type handlerDeps struct {
 	cfg       config
 	defaultNS string
+
+	// newClients builds the request-scoped Kubernetes clients from a
+	// participant's ID token. It is a field rather than a direct call so tests
+	// can substitute a fake API server; production always uses
+	// newParticipantClients. A nil value means the real one -- a test that
+	// forgets to set it must not silently reach a cluster, and
+	// participantClientsFor makes that a failure instead.
+	newClients func(cfg config, idToken string) (participantClients, error)
+
+	// vouchers counts redemptions per voucher code for this process. See
+	// coffee_vouchers.go for why this is in memory and what that costs.
+	vouchers *voucherLedger
+}
+
+// participantClientsFor is the single place handlers obtain Kubernetes clients,
+// so the "credentials come from the request and nothing else" rule has exactly
+// one enforcement point.
+func (d handlerDeps) participantClientsFor(idToken string) (participantClients, error) {
+	if d.newClients != nil {
+		return d.newClients(d.cfg, idToken)
+	}
+	return newParticipantClients(d.cfg, idToken)
 }
 
 func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
