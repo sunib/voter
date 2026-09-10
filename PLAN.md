@@ -35,6 +35,10 @@ Recorded so the next session does not re-derive it.
   Flux's own components.
 - 7 leftover `Participant` objects and ~71 `ContainerStatusUnknown` pod
   tombstones from the reboots.
+- **Publishing an image requires CI.** A local `task image-voter PUSH=true`
+  builds fine but the push is denied: a `gh auth token` carries
+  `gist, read:org, repo, workflow` and no `write:packages`. `docker login
+  ghcr.io` still succeeds, so the failure appears only at push time.
 - **ConfigButler is not installed.** There is no `commitrequests.configbutler.ai`
   CRD and no controller in any namespace, while Voter runs with
   `CONFIGBUTLER_GIT_TARGET_NAME=voter-demo`. Every save therefore creates the
@@ -185,8 +189,16 @@ A Go client cannot reproduce how a browser sends `Origin` — which is exactly w
 the `Referrer-Policy: no-referrer` outage reached production invisibly.
 
 - [x] Chromium tests for the Room Pass + Dex fixture: enrollment, stable return
-      identity, invalid code, CSRF, cookie flags, closed enrollment. In CI with
-      retained recordings. Found and fixed the cross-origin form-redirect CSP bug.
+      identity, invalid code, CSRF, cookie flags, closed enrollment. Found and
+      fixed the cross-origin form-redirect CSP bug. They pass locally in ~2s.
+- [ ] **Get that browser check green in CI — it has never once completed there.**
+      It was added in `dd9cac4`, whose run was cancelled by the next push, and
+      its first real execution (2026-09-10, on `a938699`) hit the test job's
+      30-minute timeout. The job was cancelled and the image jobs were
+      **skipped**, so a fully green commit produced no deployable image. It now
+      has its own job and budget, but the cold-bringup cost is still unmeasured
+      and unoptimised: `task room-pass:e2e-up` creates a k3d cluster, builds the
+      room-pass image and deploys Dex and Traefik on every run.
 - [x] Operational metrics with bounded labels and scrape-time handoff gauges.
 - [ ] **Browser-driven login through the real Voter app**, not only the fixture:
       browser Origin behaviour, returning enrollment, logout, expiry.

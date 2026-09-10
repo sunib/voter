@@ -300,6 +300,43 @@ jobs:
             "${CI_CONTAINER}" \
             bash -lc 'task test-network'
 
+  # The browser check gets its own job, deliberately.
+  #
+  # It used to be the last step of `test`, and `images` needs `test`. Bringing
+  # up a cold k3d cluster, building the room-pass image and deploying Dex and
+  # Traefik then had to fit in whatever was left of that job's 30 minutes --
+  # and on 2026-09-10 it did not, so the job was cancelled at its timeout and
+  # the image jobs were SKIPPED. A slow cluster bringup silently stopped a
+  # green commit from producing any deployable artifact.
+  #
+  # Split out, it has its own budget and cannot block publishing. It is still a
+  # required check for a green run; it just is not on the path to an image.
+  # The Playwright tests themselves take about two seconds -- the whole cost is
+  # the bringup -- so the generous timeout buys cold-runner headroom rather
+  # than covering a slow test.
+  browser:
+    name: Browser login
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: ci-container
+    permissions:
+      contents: read
+      packages: read
+    env:
+      CI_CONTAINER: ${{ needs.ci-container.outputs.image }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Provide the CI container
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Verify room authentication in Chromium
         run: |
           docker run --rm \
