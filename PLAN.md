@@ -191,14 +191,26 @@ the `Referrer-Policy: no-referrer` outage reached production invisibly.
 - [x] Chromium tests for the Room Pass + Dex fixture: enrollment, stable return
       identity, invalid code, CSRF, cookie flags, closed enrollment. Found and
       fixed the cross-origin form-redirect CSP bug. They pass locally in ~2s.
-- [ ] **Get that browser check green in CI — it has never once completed there.**
-      It was added in `dd9cac4`, whose run was cancelled by the next push, and
-      its first real execution (2026-09-10, on `a938699`) hit the test job's
-      30-minute timeout. The job was cancelled and the image jobs were
-      **skipped**, so a fully green commit produced no deployable image. It now
-      has its own job and budget, but the cold-bringup cost is still unmeasured
-      and unoptimised: `task room-pass:e2e-up` creates a k3d cluster, builds the
-      room-pass image and deploys Dex and Traefik on every run.
+- [x] **Make a cold e2e bringup possible at all.** It had not been since
+      `29041e4`: the fixture authenticator was invalid YAML (unquoted `message:`
+      values containing `": "`) *and* missing the `claims.email_verified`
+      reference kube-apiserver requires before a username may be derived from
+      `claims.email`. The apiserver exited, `k3d --wait` waited forever, and it
+      read as a slow cluster — which is why the Chromium suite never completed
+      in CI. Both fixed by mirroring the platform authenticator, plus two
+      guards: the rendered config is parsed before the cluster is created, and
+      `--timeout 180s` bounds the wait. Measured from scratch: **bringup 50s,
+      browser tests 1.9s.**
+- [x] **Stop a slow check from blocking releases.** The browser step lived in
+      the `test` job and `images` needs `test`, so a bringup that ran long meant
+      *no image was published at all*. It is now its own job.
+- [ ] Confirm the browser job is green in CI (it passes locally from scratch;
+      the first CI run with the fix is the proof).
+- [ ] Consider the gitops-reverser optimisations if CI proves slower than local:
+      build the room-pass image once and deliver it as an artifact rather than
+      `docker build`-ing twice inside every bringup, free runner disk before
+      e2e, and run the bringup with `--network host`. At 50s locally none of
+      this is obviously needed — measure before adding it.
 - [x] Operational metrics with bounded labels and scrape-time handoff gauges.
 - [ ] **Browser-driven login through the real Voter app**, not only the fixture:
       browser Origin behaviour, returning enrollment, logout, expiry.
