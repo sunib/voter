@@ -99,10 +99,11 @@ tasks:
       - task: room-pass:e2e
 
   build:
-    desc: Build both published container images locally (no push)
+    desc: Build every published container image locally (no push)
     cmds:
       - task: image-room-pass
       - task: image-voter
+      - task: image-auth-service
 
   # --- Container images -------------------------------------------------------
   #
@@ -130,6 +131,17 @@ tasks:
         vars:
           NAME: voter
           CONTEXT: ./frontend
+
+  image-auth-service:
+    desc: Build the Voter backend image (ghcr.io/sunib/voter-auth-service)
+    # The backend is the OIDC client: it completes the Dex code exchange and
+    # forwards each participant's ID token to Kubernetes. The demo cannot run
+    # without it, so it is published alongside the other two.
+    cmds:
+      - task: image
+        vars:
+          NAME: voter-auth-service
+          CONTEXT: ./auth-service
 
   image:
     internal: true
