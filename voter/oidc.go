@@ -1,6 +1,6 @@
 package main
 
-// OIDC login against Dex, as decided in room-pass/advised_architecture.md.
+// OIDC login against Dex, as decided in ARCHITECTURE.md.
 //
 // The backend is a CONFIDENTIAL OAuth client. It completes the authorization
 // code exchange with PKCE server-side, verifies the resulting ID token, and

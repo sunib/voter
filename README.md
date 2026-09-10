@@ -5,7 +5,7 @@ API, with participant identity carried into audit events and ConfigButler's Git
 workflow. The presentation narrative is in [talk-outline.md](talk-outline.md).
 
 Login works. The coffee and quiz journeys still need application API restoration.
-See [state-of-the-repo.md](state-of-the-repo.md) for the current gaps.
+See [PLAN.md](PLAN.md) for the current gaps and the work left.
 
 ## How access works
 
@@ -20,13 +20,18 @@ Opening GitHub login to everyone is a proposed change, not the current configura
 
 ## Read next
 
-- [Login explained](room-pass/login-explained.md): follow a login from browser to API.
-- [Architecture](room-pass/advised_architecture.md): components and trust boundaries.
-- [Authorization and tests](docs/authorization.md): who can do what, and what is proven.
-- [Implementation plan](room-pass/implementation_plan.md): completed work and next steps.
-- [Room Pass](room-pass/README.md): enrollment component and local fixture.
-- [Frontend](FRONTEND.md): frontend design notes.
-- [Documentation index](docs/README.md): current references and historical notes.
+- [Architecture](ARCHITECTURE.md): how it works now — components, the identity
+  model, the trust boundaries, and a login walked through end to end.
+- [What is left](PLAN.md): the single remaining-work list.
+- [Authorization](docs/authorization.md): who can do what, and what is proven.
+- [Room Pass](room-pass/README.md): the enrollment component and local fixture.
+- [Frontend](FRONTEND.md): UI design notes.
+- [Talk outline](talk-outline.md): the presentation narrative.
+
+Earlier design notes — the ForwardAuth/impersonation model, the `auth-service`
+split, the alternative gateway proposals — have been removed rather than
+archived. They are in Git history; nothing in the working tree describes a
+system that no longer exists.
 
 ## Build and test
 
@@ -43,7 +48,7 @@ CI runs the same tasks in the repository's container. See [CI](docs/ci.md).
 It publishes `ghcr.io/sunib/room-pass` and `ghcr.io/sunib/voter`; Voter contains
 both `voter/` and the compiled `frontend/`.
 
-Deployment currently lives in the external platform checkout under
-`external/k8s/k8s.koudijs.dev/2-gitops/voter-demo/`. The legacy root `k8s/` deployment
-and `k8s-examples/` overlay have been removed. Room Pass retains its component
-manifests and disposable local fixture under `room-pass/`.
+The application deployment is GitOps, owned by the Flux Kustomization `voter-demo`
+in the platform checkout at `external/k8s/k8s.koudijs.dev/2-gitops/voter-demo/`.
+Do not `kubectl apply` into the `voter` namespace. Room Pass keeps its own
+component manifests and disposable local fixture under `room-pass/`.

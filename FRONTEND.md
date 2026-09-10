@@ -20,7 +20,7 @@ It assumes the chosen architecture described in [`ARCHITECTURE.md`](ARCHITECTURE
 - Pinia for state
 - Native `fetch`
 
-Related: TypeScript guidance for talking to Kubernetes endpoints from a browser is in [`docs/kubernetes-api-typescript.md`](docs/kubernetes-api-typescript.md:1).
+Related: [ARCHITECTURE.md](ARCHITECTURE.md) describes how the browser reaches Kubernetes today.
 
 ## 2.1 General setup (first implementation pass)
 
@@ -145,7 +145,7 @@ The attendee UI should feel like a **conference lanyard + signage system**: high
 
   Submission flow:
   - Build a `QuizSubmission` object with `generateName`.
-  - POST via the typed wrapper described in [`docs/kubernetes-api-typescript.md`](docs/kubernetes-api-typescript.md:1).
+  - POST via the typed wrapper in `frontend/src/api/kube.ts`.
   - On `2xx`: clear draft + navigate to [`/s/<session>/thanks`](FRONTEND.md:38).
   - On `401/403`: redirect to [`/join`](FRONTEND.md:29) (device session expired).
   - On network error: keep draft, show error summary above submit bar, and keep one action: “Try again”.
@@ -249,7 +249,7 @@ Why:
 - Avoids Node-oriented Kubernetes client dependencies in the browser.
 - Matches the security model: auth is via cookies and forwardAuth, not kubeconfig.
 
-See rationale and options in [`docs/kubernetes-api-typescript.md`](docs/kubernetes-api-typescript.md:1).
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the model that replaced this.
 
 - Read session
   - `GET` the `QuizSession` resource.

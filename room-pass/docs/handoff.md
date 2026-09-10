@@ -2,9 +2,11 @@
 
 The join host and issuer host have separate Secure, HttpOnly, SameSite=Lax, host-only
 cookies. HTTPS origins and Dex upstream are deployment configuration, never accepted
-from forwarding headers. The public issuer is mounted at `/` with connector ID `room`.
+from forwarding headers. The public issuer is mounted at `/` with the connector ID from `CONNECTOR_ID`,
+which is `room-pass` in this deployment. The connector ID is also its callback path,
+so the two below follow it.
 
-1. Dex redirects a real authorization request to `/callback/room?state=...`. Room Pass
+1. Dex redirects a real authorization request to `/callback/room-pass?state=...`. Room Pass
    bounds the state and creates a random, three-minute transaction. It saves Dex state
    separately from application OAuth state, sets `__Host-rp-browser` on the issuer
    host, and redirects to the join host's `/bind?handoff=...`.
@@ -23,14 +25,16 @@ from forwarding headers. The public issuer is mounted at `/` with connector ID `
 5. Room Pass redirects to issuer `/room-pass/complete`. The issuer cookie must match the
    transaction's browser. The transaction is consumed once, and Room/Participant are
    read again. Room Pass proxies directly to the configured Dex upstream at
-   `/callback/room?state=<original-Dex-state>` with server-derived identity headers.
+   `/callback/room-pass?state=<original-Dex-state>` with server-derived identity headers.
    It removes browser cookies and Authorization from this internal assertion.
 6. Dex validates its own transaction, completes the application's OAuth flow, and
    issues tokens. Room Pass never exchanges an application authorization code.
 
 Unknown, expired, reused, unconfirmed and mismatched handoffs fail closed. The handles
 are cryptographically random (256 bits), bounded in memory, and absent from logs.
-No-referrer and no-store headers prevent normal browser referrer/cache propagation.
+A `same-origin` referrer policy and no-store headers bound referrer and cache
+propagation. It is deliberately not `no-referrer`: under that policy a browser
+serialises the Origin of a form POST as `null`, which the CSRF check rejected.
 Concurrent unfinished logins in different tabs may invalidate the issuer binding cookie;
 restart that login. Already-enrolled identities are unaffected.
 

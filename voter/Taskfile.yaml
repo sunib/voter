@@ -3,7 +3,7 @@
 # This is the application backend: the coffee and quiz APIs, the Dex OIDC
 # client, and -- in the container image -- the server for the built frontend.
 # It was called auth-service, which described neither what it does nor what it
-# owns; see ../room-pass/login-explained.md.
+# owns; see ../ARCHITECTURE.md.
 version: '3'
 
 tasks:

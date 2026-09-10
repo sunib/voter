@@ -54,14 +54,12 @@ declares; the declarations exist so the intent is reviewable.
 | Image | Built from | Contents |
 |---|---|---|
 | `ghcr.io/sunib/room-pass` | `room-pass/` | The Room Pass gate: Room/Participant controller, join page, session and Dex header adapter |
-| `ghcr.io/sunib/voter` | `frontend/` | The Vue quiz and coffee UI, served by unprivileged NGINX |
+| `ghcr.io/sunib/voter` | `voter/` + `frontend/` | The Go backend and Dex OIDC client, serving the compiled Vue bundle from `STATIC_DIR` |
 
-The legacy backend paths are deliberately not published separately: they are on their way out. Section 7 of
-the platform implementation plan replaces its impersonation paths with participant
-ID tokens forwarded from Room Pass, and it is not to be deployed again. It stays
-in the tree, linted and tested, only so the coffee handlers can be read while
-their replacement is written -- there is no image to pin, and no matrix entry to
-add later.
+There is deliberately no third image. The frontend bundle is built into the
+Voter image and served by the Go binary, so the two can never sit at different
+revisions; the separate NGINX frontend image and the `voter-auth-service` image
+are both retired.
 
 Both are built by `task image-room-pass` and `task image-voter` — the same
 commands CI runs, with the same build args. There is no workflow-only definition
@@ -79,9 +77,9 @@ A push to `main` publishes two tags per image:
 - `main` — moves with the branch.
 
 The job summary prints the pushed digest as `ghcr.io/sunib/<image>@sha256:…`.
-**That is what belongs in `platform/`**: section 8 of the implementation plan
-asks for release images referenced by digest, not by tag. `main` is for a quick
-manual pull, not for Flux.
+**That is what belongs in the platform repository**: release images should be
+referenced by digest, not by tag (see [PLAN.md](../PLAN.md) section 5). `main` is
+for a quick manual pull, not for Flux.
 
 ### Architecture
 

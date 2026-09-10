@@ -122,12 +122,13 @@ schema; do not depend on a CLI doing validation. Provide printer columns and mea
 
 ### Rolling codes: reuse the existing behavior
 
-Follow [the original join-code design](../plans/join-code-plan.md) and
-[the current implementation](../voter/join_codes.go): generate codes periodically,
+Rolling codes are implemented by the Room controller
+([room-pass/internal/controller/room.go](internal/controller/room.go)): generate codes periodically,
 resolve a code to a Room, and let a valid enrolled browser continue without another code.
 Rotation does not end participant sessions.
 
-The existing defaults are 15-second rotation, four characters and a two-hour code TTL.
+The shipping defaults are 15-second rotation with a 30-second validity (two
+overlapping codes) and six characters, set per Room in `spec.joinCode`.
 Keep rotation at 15 seconds. Proposed Room Pass defaults are six characters and a
 60-second validity window, so someone typing the previous displayed code can still join.
 This overlap is intentional; rotation does not immediately invalidate the previous code.

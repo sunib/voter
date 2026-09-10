@@ -2,7 +2,7 @@
 
 The Go application backend and Dex OIDC client. Its image also serves the compiled
 Vue frontend. Room Pass owns room enrollment; Kubernetes owns authorization.
-See [login explained](../room-pass/login-explained.md) and
+See [architecture](../ARCHITECTURE.md) and
 [authorization and tests](../docs/authorization.md).
 
 ## Current HTTP surface

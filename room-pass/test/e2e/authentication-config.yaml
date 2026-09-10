@@ -6,7 +6,7 @@
 # federated_claims.connector_id and which nothing in the request path can forge.
 # The username prefix is derived from that claim, so a forged X-Remote-* header
 # at the room connector can only ever produce a demo: identity.
-# See ../../login-explained.md.
+# See ../../../ARCHITECTURE.md.
 apiVersion: apiserver.config.k8s.io/v1beta1
 kind: AuthenticationConfiguration
 jwt:
