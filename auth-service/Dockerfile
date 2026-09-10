@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.25-bookworm AS build
+# 1.26, not 1.25: golang.org/x/oauth2 (the OIDC client's OAuth2 implementation)
+# declares go >= 1.26.0, so a 1.25 builder fails at `go mod download`.
+FROM golang:1.26-bookworm AS build
 WORKDIR /src
 
 COPY go.mod go.sum ./

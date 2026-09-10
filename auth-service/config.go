@@ -38,6 +38,42 @@ type config struct {
 	// matching RBAC on authentication.k8s.io/userextras/...; flip off if that
 	// RBAC is not yet applied to keep the demo working.
 	ConfigButlerIdentityExtrasEnabled bool `envconfig:"CONFIGBUTLER_IDENTITY_EXTRAS_ENABLED" default:"true"`
+
+	// --- OIDC mode ----------------------------------------------------------
+	//
+	// OIDCEnabled selects between two MUTUALLY EXCLUSIVE authentication models:
+	//
+	//   false — legacy: browser-asserted identity + ServiceAccount
+	//           impersonation. Kept only so the old demo still runs during
+	//           migration. Must not be exposed publicly.
+	//   true  — Dex/Room Pass: the backend is a confidential OIDC client and
+	//           participant Kubernetes calls carry the participant's own ID
+	//           token.
+	//
+	// There is deliberately no fallback between them. In OIDC mode a failed
+	// participant request is an error, never a retry as the ServiceAccount.
+	OIDCEnabled      bool   `envconfig:"OIDC_ENABLED" default:"false"`
+	OIDCIssuerURL    string `envconfig:"OIDC_ISSUER_URL"`
+	OIDCClientID     string `envconfig:"OIDC_CLIENT_ID"`
+	OIDCClientSecret string `envconfig:"OIDC_CLIENT_SECRET"`
+	// OIDCRedirectURL must match a redirect URI registered on the Dex client
+	// exactly. It is configuration, never derived from a request header.
+	OIDCRedirectURL string `envconfig:"OIDC_REDIRECT_URL"`
+
+	// AppOrigin is this application's own origin, used for CSRF origin checks.
+	// Also never derived from X-Forwarded-* headers.
+	AppOrigin string `envconfig:"APP_ORIGIN"`
+
+	// Application cookie keys, supplied by the deployment from a pre-created
+	// Secret. Base64 of exactly 32 random bytes each, independent of the Room
+	// Pass keys and of the Dex client secret. Replacing them signs everyone
+	// out; that is an intentional operation, not seamless rotation.
+	AppCookieHashKey  string `envconfig:"APP_COOKIE_HASH_KEY"`
+	AppCookieBlockKey string `envconfig:"APP_COOKIE_BLOCK_KEY"`
+
+	// KubernetesAPIServer fixes the destination for participant-token calls.
+	// Empty means the in-cluster address.
+	KubernetesAPIServer string `envconfig:"KUBERNETES_API_SERVER"`
 }
 
 func loadConfig() (config, error) {

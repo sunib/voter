@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/gorilla/securecookie"
 )
 
 const globalDemoAccessCodeKey = "global-demo-access"
@@ -76,19 +78,57 @@ func main() {
 	if err != nil {
 		log.Fatalf("kube client required: %v", err)
 	}
+
+	// OIDC mode and legacy mode are mutually exclusive, and OIDC mode is set up
+	// first so a misconfigured deployment fails at boot rather than falling
+	// back to browser-asserted identity under load.
+	var oidcClient *oidcProvider
+	if cfg.OIDCEnabled {
+		hashKey, blockKey, keyErr := loadAppCookieKeys(cfg)
+		if keyErr != nil {
+			log.Fatalf("oidc: application cookie keys unusable: %v", keyErr)
+		}
+		sc, scErr := newSessionSecureCookie(hashKey, blockKey)
+		if scErr != nil {
+			log.Fatalf("oidc: secure cookie unavailable: %v", scErr)
+		}
+		sessionCookieCodec = sc
+
+		bootCtx, bootCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		oidcClient, err = newOIDCProvider(bootCtx, cfg)
+		bootCancel()
+		if err != nil {
+			log.Fatalf("oidc: %v", err)
+		}
+		log.Printf("oidc: enabled issuer=%s client=%s redirect=%s origin=%s",
+			cfg.OIDCIssuerURL, cfg.OIDCClientID, cfg.OIDCRedirectURL, cfg.AppOrigin)
+	} else {
+		log.Printf("WARNING: legacy authentication mode (OIDC_ENABLED=false). " +
+			"Browser-asserted identity and ServiceAccount impersonation are active; " +
+			"do not expose this deployment to public traffic.")
+	}
 	if cfg.JoinCodeLength <= 0 {
 		cfg.JoinCodeLength = 4
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	hashKey, blockKey, err := ensureSessionCookieKeys(ctx, kube)
-	if err != nil {
-		log.Fatalf("cookie: failed to ensure session cookie keys: %v", err)
-	}
-	sessionCookie, err := newSessionSecureCookie(hashKey, blockKey)
-	if err != nil {
-		log.Fatalf("cookie: failed to initialize secure cookie: %v", err)
+	// The legacy cookie keys are read from -- and if absent, CREATED in -- a
+	// Kubernetes Secret at runtime. That needs Secret get/create on the
+	// namespace, which OIDC mode must not have: its keys are supplied by the
+	// deployment from a pre-created Secret (loadAppCookieKeys, above), so the
+	// ServiceAccount needs no Secret access at all. Only take this path when
+	// legacy mode is actually in use.
+	var sessionCookie *securecookie.SecureCookie
+	if !cfg.OIDCEnabled {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		hashKey, blockKey, keyErr := ensureSessionCookieKeys(ctx, kube)
+		if keyErr != nil {
+			log.Fatalf("cookie: failed to ensure session cookie keys: %v", keyErr)
+		}
+		sessionCookie, err = newSessionSecureCookie(hashKey, blockKey)
+		if err != nil {
+			log.Fatalf("cookie: failed to initialize secure cookie: %v", err)
+		}
 	}
 
 	logQuizSessions(kube)
@@ -110,19 +150,28 @@ func main() {
 	}
 
 	const tokenTTLSeconds int64 = 600 // Not allowed to make smaller than 10 minutes?!
-	forwardSa := strings.TrimSpace(cfg.ForwardServiceAccount)
-	if forwardSa == "" {
-		log.Fatalf("config error: FORWARD_SA is required")
-	}
 
+	// The impersonator ServiceAccount belongs to legacy mode only. In OIDC mode
+	// there is nothing to impersonate with, and requiring it would invite
+	// someone to grant impersonation permissions the demo must not have.
+	forwardSa := strings.TrimSpace(cfg.ForwardServiceAccount)
 	forwardSaNamespace := strings.TrimSpace(cfg.ForwardServiceAccountNamespace)
-	if forwardSaNamespace == "" {
-		log.Fatalf("config error: FORWARD_SA_NAMESPACE is required")
+	if !cfg.OIDCEnabled {
+		if forwardSa == "" {
+			log.Fatalf("config error: FORWARD_SA is required in legacy mode")
+		}
+		if forwardSaNamespace == "" {
+			log.Fatalf("config error: FORWARD_SA_NAMESPACE is required in legacy mode")
+		}
 	}
 
 	mux := http.NewServeMux()
 
-	registerHandlers(mux, handlerDeps{
+	if oidcClient != nil {
+		registerOIDCHandlers(mux, oidcClient, cfg)
+	}
+
+	deps := handlerDeps{
 		cfg:           cfg,
 		codes:         codes,
 		kube:          kube,
@@ -134,7 +183,17 @@ func main() {
 		forwardSaName: forwardSa,
 		forwardSaNS:   forwardSaNamespace,
 		tokenTTL:      tokenTTLSeconds,
-	})
+	}
+
+	// In OIDC mode the participant-token coffee endpoints are registered
+	// FIRST, so they own their paths. The legacy handlers below keep serving
+	// the storefront and the admin views during migration; they will be
+	// deleted with the rest of the legacy path (plan phase 5).
+	if oidcClient != nil {
+		registerParticipantCoffeeHandlers(mux, deps)
+	}
+
+	registerHandlers(mux, deps)
 
 	addr := net.JoinHostPort(cfg.Host, cfg.Port)
 	srv := &http.Server{
