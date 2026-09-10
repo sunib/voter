@@ -130,6 +130,7 @@ func (s *Server) decode(r *http.Request, name string, value any) error {
 	}
 	return s.cookies.Decode(name, c.Value, value)
 }
+
 // cookieNames lists the cookie NAMES a request carried. Names only -- the
 // values are credentials. "I do have some cookies" is not a diagnosis; knowing
 // which ones arrived is.
