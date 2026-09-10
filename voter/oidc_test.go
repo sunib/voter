@@ -322,3 +322,39 @@ func TestParticipantRESTConfigRejectsEmptyToken(t *testing.T) {
 		t.Fatal("an empty participant token must be an error, not an anonymous client")
 	}
 }
+
+// The connector choice decides whether the audience sees Dex's "how do you want
+// to sign in" screen. Getting it wrong is not a security bug, but it is the
+// difference between a room full of people landing on the join form and landing
+// on a question they cannot evaluate.
+func TestConnectorFor(t *testing.T) {
+	provider := func(def string, choices ...string) *oidcProvider {
+		return &oidcProvider{cfg: config{OIDCConnectorID: def, OIDCConnectorChoices: choices}}
+	}
+	req := func(query string) *http.Request {
+		return httptest.NewRequest(http.MethodGet, "/auth/login"+query, nil)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		p     *oidcProvider
+		query string
+		want  string
+	}{
+		{"default connector when none requested", provider("room", "github"), "", "room"},
+		{"an offered choice is honoured", provider("room", "github"), "?connector=github", "github"},
+		{"an unlisted connector falls back to the default", provider("room", "github"), "?connector=evil", "room"},
+		{"no default and no choices lets Dex ask", provider(""), "", ""},
+		{"a request cannot invent a connector", provider(""), "?connector=github", ""},
+		// Trimmed, then matched against the allowlist -- so surrounding
+		// whitespace is tolerated but cannot smuggle in an unlisted value.
+		{"surrounding whitespace is trimmed", provider("room", "github"), "?connector=+github+", "github"},
+		{"a near-miss is not a match", provider("room", "github"), "?connector=github2", "room"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.p.connectorFor(req(tc.query)); got != tc.want {
+				t.Errorf("connectorFor(%q) = %q, want %q", tc.query, got, tc.want)
+			}
+		})
+	}
+}

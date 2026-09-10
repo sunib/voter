@@ -60,6 +60,22 @@ type config struct {
 	// exactly. It is configuration, never derived from a request header.
 	OIDCRedirectURL string `envconfig:"OIDC_REDIRECT_URL"`
 
+	// OIDCConnectorID preselects a Dex connector, skipping the "how do you want
+	// to sign in" screen. Dex shows that screen whenever an authorization
+	// request does not name a connector and more than one is configured -- which
+	// became the normal case once operators (github) and participants (room)
+	// started sharing one issuer.
+	//
+	// For the demo this is "room": the audience should land on the join form,
+	// not on a choice they have no way to evaluate. Empty means "let Dex ask".
+	OIDCConnectorID string `envconfig:"OIDC_CONNECTOR_ID"`
+	// OIDCConnectorChoices are the connectors a caller may request explicitly
+	// via /auth/login?connector=<id>, so an operator can still sign in with
+	// GitHub on a deployment that defaults to the room connector. An allowlist
+	// rather than free text: the value goes into a redirect to the issuer, and
+	// unlisted input is ignored rather than forwarded.
+	OIDCConnectorChoices []string `envconfig:"OIDC_CONNECTOR_CHOICES"`
+
 	// AppOrigin is this application's own origin, used for CSRF origin checks.
 	// Also never derived from X-Forwarded-* headers.
 	AppOrigin string `envconfig:"APP_ORIGIN"`

@@ -204,11 +204,37 @@ func (p *oidcProvider) handleLogin(w http.ResponseWriter, r *http.Request) {
 	sum := sha256.Sum256([]byte(verifier))
 	challenge := base64.RawURLEncoding.EncodeToString(sum[:])
 
-	http.Redirect(w, r, p.oauth.AuthCodeURL(state,
+	opts := []oauth2.AuthCodeOption{
 		oidc.Nonce(nonce),
 		oauth2.SetAuthURLParam("code_challenge", challenge),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
-	), http.StatusFound)
+	}
+	if connector := p.connectorFor(r); connector != "" {
+		opts = append(opts, oauth2.SetAuthURLParam("connector_id", connector))
+	}
+
+	http.Redirect(w, r, p.oauth.AuthCodeURL(state, opts...), http.StatusFound)
+}
+
+// connectorFor decides which Dex connector this login should use, or "" to let
+// Dex present its selection screen.
+//
+// The query parameter is checked against a configured allowlist. Dex would
+// reject an unknown connector anyway, but an unvalidated value taken from the
+// query string and placed into a redirect to the issuer is the kind of thing
+// that is fine until the day it is not.
+func (p *oidcProvider) connectorFor(r *http.Request) string {
+	requested := strings.TrimSpace(r.URL.Query().Get("connector"))
+	if requested != "" {
+		for _, allowed := range p.cfg.OIDCConnectorChoices {
+			if requested == strings.TrimSpace(allowed) {
+				return requested
+			}
+		}
+		// Not an offered choice: fall through to the default rather than
+		// forwarding it or failing the login.
+	}
+	return strings.TrimSpace(p.cfg.OIDCConnectorID)
 }
 
 // handleCallback completes the exchange. Every check here is load-bearing;
