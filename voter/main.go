@@ -83,9 +83,10 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	registerOIDCHandlers(mux, oidcClient, cfg)
+	registerOIDCHandlers(mux, oidcClient, cfg, deps.defaultNS)
 	registerParticipantCoffeeHandlers(mux, deps)
 	registerParticipantStorefrontHandlers(mux, deps)
+	registerParticipantStreamHandlers(mux, deps)
 	// Last: it owns "/" and therefore everything unclaimed above.
 	registerHandlers(mux, deps)
 

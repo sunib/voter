@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { formatConflictValue, humanizePath } from '../adminFormatters'
 import {
   formatMoney,
@@ -8,6 +8,8 @@ import {
   patchAdminCoffeeConfig,
   type ApiError,
 } from '../api/coffee'
+import { useLiveCoffeeConfig } from '../api/liveCoffeeConfig'
+import { currentSession } from '../api/session'
 import AdminNav from '../components/admin/AdminNav.vue'
 import FieldStateMarker from '../components/admin/FieldStateMarker.vue'
 import type { CoffeeConfig } from '../api/coffeeTypes'
@@ -110,7 +112,7 @@ async function saveConfig() {
     // request. Say so rather than reporting an unqualified success -- the
     // whole point of the demo is that the change becomes a commit.
     commitNotice.value = result.commitError ?? ''
-    voucherUsage.value = (await getVoucherUsage()).voucherUsage
+    await refreshVoucherUsage()
   } catch (error) {
     loadError.value = (error as Error).message
   } finally {
@@ -118,11 +120,37 @@ async function saveConfig() {
   }
 }
 
-// The live config watch and the order stream are not restored yet -- they were
-// SSE endpoints on the deleted legacy session, and the participant-token
-// versions do not exist. Until they do, this screen re-reads on demand instead
-// of pretending to be live; applyIncomingConfig stays because the conflict
-// machinery it feeds is what the watch will use again. See PLAN.md section 1.
+// The editor is live again, through krm-stream. A change another operator
+// saves arrives here while someone is typing, and applyIncomingConfig merges it
+// into the draft rather than overwriting it -- a field they actually edited
+// that the server also moved becomes a conflict they resolve, not a silent
+// loss.
+//
+// The order stream is still absent; voucher usage is re-read instead.
+const session = currentSession()
+const live = session
+  ? useLiveCoffeeConfig(session.namespace, session.coffeeConfigName)
+  : null
+
+if (live) {
+  watch(live.server, (incoming) => {
+    if (!incoming) return
+    applyIncomingConfig(incoming)
+    // A save elsewhere can change how depleted a voucher is, so the counter
+    // beside maximumUsage must not go stale while the page stays open.
+    void refreshVoucherUsage()
+  })
+}
+
+async function refreshVoucherUsage() {
+  try {
+    await refreshVoucherUsage()
+  } catch {
+    // A usage read failing must not blank the editor; the previous count is
+    // still the best thing we know.
+  }
+}
+
 async function refreshFromServer() {
   try {
     const [config, usage] = await Promise.all([

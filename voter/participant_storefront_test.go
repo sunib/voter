@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -699,4 +702,269 @@ func TestVoucherUsageRequiresASessionAndRejectsWrites(t *testing.T) {
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("POST status = %d, want 405", rec.Code)
 	}
+}
+
+// --- live stream -------------------------------------------------------------
+
+// What these cover is the WIRING this file owns: identity comes from the
+// session cookie, the scope allowlist is enforced before any watch opens, and
+// the upstream watch carries the participant's own token.
+//
+// They deliberately do not assert that a live update arrives. client-go's fake
+// dynamic client cannot see SendInitialEvents (krm-stream's own backend tests
+// say so and stub the upstream for the same reason), so a green test at this
+// layer would prove nothing about the real stream. That claim -- "a change
+// saved in one browser appears in another" -- is verified where it is actually
+// visible, in the two-context browser test.
+
+func streamFixture(t *testing.T) (*httptest.Server, config, *dynamicfake.FakeDynamicClient) {
+	t.Helper()
+	_, cfg, _, dyn := storefrontFixture(t, demoCoffeeConfig())
+	mux := http.NewServeMux()
+	registerParticipantStreamHandlers(mux, handlerDeps{
+		cfg: cfg, defaultNS: storefrontNamespace, vouchers: newVoucherLedger(),
+		newClients: func(config, string) (participantClients, error) {
+			return participantClients{dynamic: dyn}, nil
+		},
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return srv, cfg, dyn
+}
+
+func coffeeScopeQuery() string {
+	return "?version=v1alpha1&group=examples.configbutler.ai&resource=coffeeconfigs" +
+		"&namespace=" + storefrontNamespace + "&name=demo-coffee"
+}
+
+func TestStreamOpensAsSSEForAnAllowlistedScope(t *testing.T) {
+	srv, cfg, _ := streamFixture(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+
+	url := srv.URL + "/public/stream" + coffeeScopeQuery()
+	req := mustOutbound(t, signedInRequest(t, cfg, "GET", url, ""), url).WithContext(ctx)
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("open stream: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
+		t.Fatalf("content-type = %q, want text/event-stream", ct)
+	}
+
+	events := make(chan map[string]any, 16)
+	go readSSE(resp.Body, events)
+
+	// A browser that connects late must still render the truth, so the stream
+	// opens with current state rather than waiting for the next change.
+	if ev := waitForEvent(t, ctx, events, "reset"); ev == nil {
+		t.Fatal("no reset event: a newly connected browser would render nothing")
+	}
+}
+
+// The scope allowlist must refuse BEFORE a watch is opened, so the existence of
+// an object the caller may not see is never revealed. SSE cannot change the
+// status code after the headers are sent, so the refusal is a terminal event.
+func TestStreamRefusesAnUnallowlistedResource(t *testing.T) {
+	srv, cfg, _ := streamFixture(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+
+	url := srv.URL + "/public/stream?version=v1&resource=secrets&namespace=" + storefrontNamespace
+	req := mustOutbound(t, signedInRequest(t, cfg, "GET", url, ""), url).WithContext(ctx)
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	events := make(chan map[string]any, 8)
+	go readSSE(resp.Body, events)
+
+	ev := waitForEvent(t, ctx, events, "error")
+	if ev == nil {
+		t.Fatal("secrets produced no error event: the scope allowlist did not refuse")
+	}
+	if code, _ := ev["code"].(string); code != "SCOPE_INVALID" {
+		t.Fatalf("code = %q, want SCOPE_INVALID (event: %s)", code, mustJSON(t, ev))
+	}
+	if terminal, _ := ev["terminal"].(bool); !terminal {
+		t.Fatal("the refusal was not terminal; the client would keep retrying a scope it may never have")
+	}
+	// Nothing about the resource itself may leak alongside the refusal.
+	if body := mustJSON(t, ev); strings.Contains(body, "\"items\"") || strings.Contains(body, "\"object\"") {
+		t.Fatalf("the refusal carried resource content: %s", body)
+	}
+}
+
+func TestStreamRequiresASession(t *testing.T) {
+	srv, cfg, _ := streamFixture(t)
+
+	url := srv.URL + "/public/stream" + coffeeScopeQuery()
+	req := mustOutbound(t, signedInRequest(t, cfg, "GET", url, ""), url)
+	req.Header.Del("Cookie")
+	// Headers an attacker controls must not substitute for a session.
+	req.Header.Set("Authorization", "Bearer attacker-token")
+	req.Header.Set("Impersonate-User", "system:admin")
+
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestStreamRejectsWrongMethods(t *testing.T) {
+	srv, cfg, _ := streamFixture(t)
+	url := srv.URL + "/public/stream" + coffeeScopeQuery()
+	req := mustOutbound(t, signedInRequest(t, cfg, "POST", url, ""), url)
+	req.Method = http.MethodPost
+
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", resp.StatusCode)
+	}
+}
+
+// The watch must be opened with the PARTICIPANT's credential. If this ever
+// regressed to a ServiceAccount, every browser would see everything the server
+// can see -- and the demo's central claim would be false.
+func TestStreamWatchesWithTheParticipantsOwnToken(t *testing.T) {
+	old := sessionCookieCodec
+	sessionCookieCodec = testCodec(t)
+	t.Cleanup(func() { sessionCookieCodec = old })
+
+	seen := make(chan string, 4)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case seen <- r.Header.Get("Authorization"):
+		default:
+		}
+		for key := range r.Header {
+			lower := strings.ToLower(key)
+			if strings.HasPrefix(lower, "impersonate-") || strings.HasPrefix(lower, "x-remote-") {
+				t.Errorf("untrusted identity header forwarded upstream: %s", key)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"apiVersion":"examples.configbutler.ai/v1alpha1","kind":"CoffeeConfigList","metadata":{"resourceVersion":"1"},"items":[]}`))
+	}))
+	defer upstream.Close()
+
+	cfg := testConfig()
+	cfg.CoffeeConfigName = "demo-coffee"
+	cfg.KubernetesAPIServer = upstream.URL
+
+	mux := http.NewServeMux()
+	registerParticipantStreamHandlers(mux, handlerDeps{
+		cfg: cfg, defaultNS: storefrontNamespace, vouchers: newVoucherLedger(),
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	url := srv.URL + "/public/stream" + coffeeScopeQuery()
+	req := mustOutbound(t, signedInRequest(t, cfg, "GET", url, ""), url).WithContext(ctx)
+	req.Header.Set("Authorization", "Bearer attacker-token")
+	req.Header.Set("Impersonate-User", "system:admin")
+
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("open stream: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	select {
+	case got := <-seen:
+		if got != "Bearer participant-token" {
+			t.Fatalf("upstream Authorization = %q, want the participant's own token", got)
+		}
+	case <-ctx.Done():
+		t.Fatal("the gateway never reached the upstream")
+	}
+}
+
+// --- SSE test helpers --------------------------------------------------------
+
+// mustOutbound turns the httptest request built by signedInRequest into one an
+// http.Client can send: same cookies and headers, real URL.
+func mustOutbound(t *testing.T, in *http.Request, url string) *http.Request {
+	t.Helper()
+	out, err := http.NewRequest(in.Method, url, nil)
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	out.Header = in.Header.Clone()
+	for _, c := range in.Cookies() {
+		out.AddCookie(c)
+	}
+	if in.Context() != nil {
+		out = out.WithContext(in.Context())
+	}
+	return out
+}
+
+// readSSE decodes `data:` frames into events until the body ends.
+func readSSE(body io.Reader, out chan<- map[string]any) {
+	defer close(out)
+	sc := bufio.NewScanner(body)
+	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for sc.Scan() {
+		line := sc.Text()
+		// Heartbeats are SSE comments, deliberately not events.
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		var ev map[string]any
+		if err := json.Unmarshal([]byte(strings.TrimSpace(line[len("data:"):])), &ev); err != nil {
+			continue
+		}
+		out <- ev
+	}
+}
+
+// waitForEvent returns the next event, or the next of a given type when one is
+// named. Nil means the context ended first.
+func waitForEvent(t *testing.T, ctx context.Context, events <-chan map[string]any, want string) map[string]any {
+	t.Helper()
+	for {
+		select {
+		case ev, ok := <-events:
+			if !ok {
+				return nil
+			}
+			if want == "" {
+				return ev
+			}
+			if name, _ := ev["type"].(string); name == want {
+				return ev
+			}
+		case <-ctx.Done():
+			return nil
+		}
+	}
+}
+
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return string(b)
 }

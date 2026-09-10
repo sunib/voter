@@ -13,6 +13,11 @@ export interface Session {
   groups: string[]
   csrfToken: string
   expiresAt: number
+  /** Where this application's objects live. The SPA needs it to address the
+   *  live stream, and getting it from the server means the browser never has
+   *  to guess (or be told by a URL). */
+  namespace: string
+  coffeeConfigName: string
 }
 
 // The CSRF token the backend issued for this session.
@@ -23,6 +28,13 @@ export interface Session {
 // router guard calls getSession() before each protected navigation, so it is
 // current for as long as the session is.
 let csrfToken = ''
+let lastSession: Session | null = null
+
+/** The most recent session, for callers that need the namespace or object name
+ *  without re-fetching. Null when signed out. */
+export function currentSession(): Session | null {
+  return lastSession
+}
 
 /** The CSRF token for the current session, or "" when signed out. Mutating
  *  requests must send it as `x-csrf-token`; the backend rejects them otherwise. */
@@ -39,6 +51,7 @@ export async function getSession(): Promise<Session | null> {
   })
   if (res.status === 401) {
     csrfToken = ''
+    lastSession = null
     return null
   }
   if (!res.ok) {
@@ -47,9 +60,11 @@ export async function getSession(): Promise<Session | null> {
   const body = (await res.json()) as Session
   if (!body.authenticated) {
     csrfToken = ''
+    lastSession = null
     return null
   }
   csrfToken = body.csrfToken
+  lastSession = body
   return body
 }
 

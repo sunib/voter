@@ -2,11 +2,14 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  buildStorefrontFromConfig,
   formatMoney,
   getStorefront,
   submitOrder,
   type ApiError,
 } from '../api/coffee'
+import { useLiveCoffeeConfig } from '../api/liveCoffeeConfig'
+import { currentSession } from '../api/session'
 import { useCartStore } from '../stores/cart'
 
 const cart = useCartStore()
@@ -132,11 +135,29 @@ async function placeOrder() {
   }
 }
 
-// There used to be an SSE watch here that pushed CoffeeConfig changes straight
-// into the page. It belonged to the deleted legacy session; the
-// participant-token version does not exist yet (PLAN.md section 1). Until it
-// does, the storefront is fetched -- which is also the honest thing to show:
-// the price the participant sees is the one the server just computed.
+// The menu is live. This is the demo's most visible moment: someone edits the
+// CoffeeConfig on stage and every phone in the room updates without anyone
+// refreshing.
+//
+// The initial paint still comes from GET /public/storefront, because the server
+// is the authority on pricing and voucher state. The stream then keeps it
+// current -- when the object changes, the storefront is recomputed from the new
+// spec with the same pure function the backend uses.
+const session = currentSession()
+const live = session
+  ? useLiveCoffeeConfig(session.namespace, session.coffeeConfigName)
+  : null
+
+if (live) {
+  watch(live.draft, (config) => {
+    if (!config) return
+    cart.setActiveConfig(config)
+    cart.setStorefront(
+      buildStorefrontFromConfig(config, voucherCode.value || undefined),
+    )
+  })
+}
+
 onMounted(() => {
   cart.ensureLoaded()
 })

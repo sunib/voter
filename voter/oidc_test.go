@@ -395,7 +395,7 @@ func TestSessionReportsTheAPIServersUsername(t *testing.T) {
 	cfg, sc := testConfig(), testCodec(t)
 	mux := http.NewServeMux()
 	sessionCookieCodec = sc
-	registerOIDCHandlers(mux, nil, cfg)
+	registerOIDCHandlers(mux, nil, cfg, "voter")
 
 	for _, tc := range []struct{ name, kubeUser, subject string }{
 		{"a room-pass participant", "demo:CgQxMjM0Eglyb29tLXBhc3M", "CgQxMjM0Eglyb29tLXBhc3M"},

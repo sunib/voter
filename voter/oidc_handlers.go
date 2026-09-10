@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func registerOIDCHandlers(mux *http.ServeMux, p *oidcProvider, cfg config) {
+func registerOIDCHandlers(mux *http.ServeMux, p *oidcProvider, cfg config, namespace string) {
 	mux.HandleFunc("/auth/login", p.handleLogin)
 	mux.HandleFunc("/auth/callback", p.handleCallback)
 
@@ -54,6 +54,12 @@ func registerOIDCHandlers(mux *http.ServeMux, p *oidcProvider, cfg config) {
 			"groups":      s.Groups,
 			"csrfToken":   s.CSRF,
 			"expiresAt":   s.ExpiresAt,
+			// Where the application's objects live, so the SPA can address the
+			// live stream without hardcoding it or being told by the user. The
+			// stream's scope allowlist would refuse anything else anyway; this
+			// just means the browser never has to guess.
+			"namespace":        namespace,
+			"coffeeConfigName": cfg.CoffeeConfigName,
 		})
 	})
 
