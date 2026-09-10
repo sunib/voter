@@ -1,5 +1,5 @@
-auth-service/bin/
-auth-service/auth-service
+voter/bin/
+voter/voter
 k8s-examples/zot-pull.secret.example.yaml
 external-code
 external/

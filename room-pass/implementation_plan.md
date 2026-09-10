@@ -3,6 +3,12 @@
 Status: proposed implementation sequence, no runtime changes completed.
 Written 2026-09-09. Architecture: [advised_architecture.md](advised_architecture.md).
 
+Investigated alternative (2026-09-10): [delegate OIDC to oauth2-proxy](login-explained.md#investigated-alternative-delegate-oidc-to-oauth2-proxy).
+This plan still describes backend-owned login. Selecting the proxy option would
+replace its login/cookie implementation steps with proxy configuration and a
+verified token-forwarding boundary; it would retain application APIs, participant
+Kubernetes credentials, frontend lifecycle work and retirement of legacy auth.
+
 ## Outcome and scope
 
 Voter/Coffee logs in through Dex and Room Pass using its backend as the OIDC client.
@@ -11,7 +17,7 @@ operations carry the participant's Dex ID token. No oauth2-proxy or session data
 is added. Browser-selected identities, application join codes and impersonation are
 retired after their replacements pass verification.
 
-Implement in `auth-service/`, `frontend/` and the authoritative application manifests
+Implement in `voter/`, `frontend/` and the authoritative application manifests
 in `k8s/`. These documents live in `room-pass/` at the user's request; Room Pass
 runtime changes are not part of this improvement. Raise any discovered Room Pass
 defect separately. Add application integration coverage alongside the existing local
@@ -27,8 +33,8 @@ Do not access an existing remote cluster or create `platform/` or `demo-state/`.
 
 - Re-read the alignment brief and current code before editing. Record each finding
   as verified open, already fixed, or contradicted by code.
-- Inventory every route in `auth-service/http_handlers.go` and
-  `auth-service/coffee_handlers.go`, frontend Kubernetes requests, background work,
+- Inventory every route in `voter/http_handlers.go` and
+  `voter/coffee_handlers.go`, frontend Kubernetes requests, background work,
   watches, token caches and all ServiceAccount/impersonation users.
 - Record method/path, authentication, CSRF requirement, Kubernetes resource/verb,
   proposed participant or server identity, and intended denial behavior per operation.

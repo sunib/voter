@@ -4,7 +4,7 @@
 # group voter-audience, optional ConfigButler display-name / email extras).
 #
 # Authorization on the actual resource is granted via the voter-audience
-# RoleBinding in auth-service-rbac.yaml. That keeps the blast radius small:
+# RoleBinding in voter-rbac.yaml. That keeps the blast radius small:
 # if this SA token leaks, the holder can impersonate audience users but cannot
 # do anything as the SA itself.
 apiVersion: v1

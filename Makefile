@@ -8,17 +8,17 @@
 #
 #   task build REGISTRY=zot.z65.nl IMAGE_OWNER=voter TAG=coffee PUSH=true
 #
-.PHONY: build-auth-service test-auth-service debug-auth-service frontend-dev-remote frontend-dev-remote-https build-push-auth-service build-push-frontend build-push
+.PHONY: build-voter test-voter frontend-dev-remote frontend-dev-remote-https build-push
 
 login:
 	docker login zot.z65.nl -u admin
 
-build-auth-service:
-	mkdir -p auth-service/bin
-	cd auth-service && go build -o ./bin/auth-service ./...
+build-voter:
+	mkdir -p voter/bin
+	cd voter && go build -o ./bin/voter ./...
 
-test-auth-service:
-	cd auth-service && go test ./...
+test-voter:
+	cd voter && go test ./...
 
 frontend-dev-remote:
 	cd frontend && VITE_DEV_API_ORIGIN=https://demo.configbutler.ai npm run dev
@@ -26,22 +26,15 @@ frontend-dev-remote:
 frontend-dev-remote-https:
 	cd frontend && VITE_DEV_API_ORIGIN=https://demo.configbutler.ai VITE_DEV_HTTPS=1 npm run dev -- --host
 
-build-push-auth-service:
+# One image now: the frontend bundle is built into the voter image and served by
+# the Go backend, so the context is the repo root and the Dockerfile is named
+# explicitly. See voter/Dockerfile.
+build-push:
 	docker buildx build --push \
 		--build-arg GIT_COMMIT="$$(git rev-parse --short HEAD)" \
 		--build-arg GIT_DIRTY="$$(test -n "$$(git status --porcelain)" && echo 1 || echo 0)" \
 		--build-arg BUILD_DATE="$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 		--provenance=true \
 		--sbom=true \
-		-t zot.z65.nl/voter/auth-service:coffee ./auth-service
-
-build-push-frontend:
-	docker buildx build --push \
-		--build-arg GIT_COMMIT="$$(git rev-parse --short HEAD)" \
-		--build-arg GIT_DIRTY="$$(test -n "$$(git status --porcelain)" && echo 1 || echo 0)" \
-		--build-arg BUILD_DATE="$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-		--provenance=true \
-		--sbom=true \
-		-t zot.z65.nl/voter/frontend:coffee ./frontend
-
-build-push: build-push-auth-service build-push-frontend
+		-f voter/Dockerfile \
+		-t zot.z65.nl/voter/voter:coffee .

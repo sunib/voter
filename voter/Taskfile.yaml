@@ -1,8 +1,9 @@
-# auth-service (Go) tasks. Included by the root Taskfile with dir: ./auth-service.
+# voter (Go) tasks. Included by the root Taskfile with dir: ./voter.
 #
-# This service is mid-migration: section 7 of the platform implementation plan
-# replaces its impersonation paths with participant ID tokens forwarded from
-# Room Pass. The tasks below keep it building and tested meanwhile.
+# This is the application backend: the coffee and quiz APIs, the Dex OIDC
+# client, and -- in the container image -- the server for the built frontend.
+# It was called auth-service, which described neither what it does nor what it
+# owns; see ../room-pass/login-explained.md.
 version: '3'
 
 tasks:
@@ -15,10 +16,10 @@ tasks:
       - go mod download
 
   build:
-    desc: Build the auth-service binary into bin/
+    desc: Build the voter binary into bin/
     cmds:
       - mkdir -p bin
-      - go build -o ./bin/auth-service ./...
+      - go build -o ./bin/voter ./...
 
   test:
     desc: Run go vet and the unit tests

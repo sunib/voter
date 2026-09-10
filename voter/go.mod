@@ -1,4 +1,4 @@
-module github.com/sunib/voter/auth-service
+module github.com/sunib/voter/voter
 
 go 1.26.0
 

@@ -2,6 +2,13 @@
 
 Status: agreed direction, not yet implemented. Written 2026-09-09.
 
+Follow-up 2026-09-10: [oauth2-proxy as an investigated alternative](login-explained.md#investigated-alternative-delegate-oidc-to-oauth2-proxy)
+can own OIDC login/cookies and forward the participant ID token. The backend-owned
+design below remains the implementation baseline; excluding a proxy is a design
+choice, not an OIDC limitation. The alternative has not been tested or selected.
+See the [risk comparison and latest advice](login-explained.md#pros-cons-and-final-advice):
+evaluate the proxy locally while retaining a dedicated demo issuer initially.
+
 This document describes how Voter/Coffee should consume Room Pass identity through
 Dex. It belongs here as integration advice; it does not move application ownership
 into Room Pass. See the [implementation plan](implementation_plan.md), the
@@ -187,7 +194,7 @@ The token is physically stored in a browser cookie, but JavaScript cannot read i
 and only the backend has its decryption keys. This is a stateless encrypted session,
 not a cookie containing a database session identifier.
 
-- Reuse `auth-service/session_cookie.go` and its established `securecookie` library
+- Reuse `voter/session_cookie.go` and its established `securecookie` library
   where suitable. The current code already signs and encrypts; the identity source
   is what must change. Version the new payload so legacy identity cookies fail closed.
 - Store the ID token and only necessary session metadata. Use a host-only cookie

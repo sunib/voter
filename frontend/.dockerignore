@@ -1,9 +1,0 @@
-node_modules
-dist
-dist-ssr
-.vscode
-.idea
-.DS_Store
-*.log
-*.local
-

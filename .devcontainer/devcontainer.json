@@ -2,7 +2,7 @@
   "name": "Voter DevContainer",
   "build": {
     "dockerfile": "Dockerfile",
-    // Repo root, so the Dockerfile can reach auth-service/go.mod for the module
+    // Repo root, so the Dockerfile can reach voter/go.mod for the module
     // download warm-up layer.
     "context": "..",
     "target": "dev"
@@ -41,7 +41,7 @@
       "onAutoForward": "notify"
     },
     "8080": {
-      "label": "auth-service",
+      "label": "voter",
       "onAutoForward": "notify"
     },
     "10350": {
@@ -64,7 +64,7 @@
         "go.toolsManagement.checkForUpdates": "local",
         "go.useLanguageServer": true,
         "go.gopath": "/go",
-        // The Go module is auth-service/, not the workspace root; without this the
+        // The Go module is voter/, not the workspace root; without this the
         // Go extension treats the root as the module and gopls reports no packages.
         "gopls": {
           "build.directoryFilters": [

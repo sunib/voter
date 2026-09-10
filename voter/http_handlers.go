@@ -239,13 +239,7 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 		})(w, r)
 	})
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("auth-forwarder prototype\n\nEndpoints:\n- GET /healthz\n- GET /public/build-info\n- GET|POST /private/forward-auth-decision (Traefik ForwardAuth)\n- GET|POST /public/session-info (Get info on current sessions)\n"))
-			return
-		}
-		http.NotFound(w, r)
-	})
+	// Registered last and matching everything left over: the built frontend,
+	// with an SPA fallback. See static.go.
+	mux.Handle("/", rootHandler(deps.cfg.StaticDir))
 }

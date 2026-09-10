@@ -9,7 +9,7 @@ spec:
   # ones. Two classes of header are stripped:
   #
   #   - Authorization: audience members must never bring their own
-  #     Kubernetes bearer token through this ingress. The auth-service
+  #     Kubernetes bearer token through this ingress. The voter backend
   #     also rejects inbound Authorization, so this is the outer layer
   #     of defense.
   #   - Impersonate-*: without this strip, a malicious client could
@@ -18,7 +18,7 @@ spec:
   #     server would accept it.
   #
   # Every Impersonate-* header Kubernetes recognises today is listed; if
-  # you add a new Impersonate-Extra-* key in the auth-service, list it
+  # you add a new Impersonate-Extra-* key in the voter backend, list it
   # here too.
   headers:
     customRequestHeaders:
@@ -36,7 +36,7 @@ metadata:
   namespace: voter
 spec:
   forwardAuth:
-    address: http://auth-service.voter.svc.cluster.local:8080/private/forward-auth-decision
+    address: http://voter.voter.svc.cluster.local:8080/private/forward-auth-decision
     trustForwardHeader: true
     # Authorization carries the impersonator SA token. Impersonate-* headers
     # carry the audience identity derived from the session cookie; the API

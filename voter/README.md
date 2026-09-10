@@ -1,6 +1,38 @@
-# auth-service
+# voter
 
-Traefik ForwardAuth service for the voter demo. It validates join codes, manages encrypted session cookies, and injects short-lived Kubernetes tokens plus impersonation headers into browser traffic. Kubernetes bearer tokens are server-side only — clients never receive one, and any inbound `Authorization` is rejected.
+The application: the coffee and quiz APIs, the Dex OIDC client that owns the
+browser session, and — in the container image — the server for the built
+frontend. One image, one origin, one deployable.
+
+This directory was called `auth-service`, which described neither what it does
+nor what it owns. It is not an identity provider: Dex issues tokens and Room
+Pass decides who a participant is. See
+[room-pass/login-explained.md](../room-pass/login-explained.md) for how the
+three fit together.
+
+Two authentication models live here, and they are mutually exclusive:
+
+- **`OIDC_ENABLED=true`** — the intended one. The backend is a confidential OIDC
+  client; each participant's own ID token is the credential used against the
+  Kubernetes API.
+- **`OIDC_ENABLED` unset** — legacy. The browser asserts its own identity and
+  the backend impersonates with its ServiceAccount. It is on its way out and
+  must not be exposed publicly. Everything below describes this path.
+
+## Serving the frontend
+
+The image builds `frontend/` and copies the bundle to `/srv/www`, which
+`STATIC_DIR` points at. Requests under `/auth/`, `/public/`, `/private/`,
+`/apis/` and `/healthz` are API paths and 404 when unmatched; everything else
+falls back to `index.html` for vue-router. Leave `STATIC_DIR` empty in
+development — Vite serves the frontend on :5173 and proxies the API here.
+
+Because the Dockerfile builds from both `frontend/` and `voter/`, its build
+context is the repository root:
+
+```bash
+task image-voter                     # or: docker buildx build -f voter/Dockerfile .
+```
 
 ## How it works
 
@@ -8,12 +40,12 @@ Traefik ForwardAuth service for the voter demo. It validates join codes, manages
 
 1. Browser visits `/join?code=XXXX`
 2. Traefik's ForwardAuth calls `/private/forward-auth-decision` with `X-Forwarded-Uri` containing the code
-3. auth-service validates the code, resolves it to a QuizSession, and sets a signed/encrypted session cookie
+3. voter validates the code, resolves it to a QuizSession, and sets a signed/encrypted session cookie
 4. Subsequent requests use the cookie — no code needed
 
 ### QuizSession example
 
-For a live session, auth-service rotates a join code and patches it into `status.joinCode`:
+For a live session, voter rotates a join code and patches it into `status.joinCode`:
 
 ```yaml
 apiVersion: examples.configbutler.ai/v1alpha1
@@ -55,7 +87,7 @@ status:
 
 ### Session cookie keys
 
-On startup, auth-service looks for the Kubernetes Secret `auth-session-cookie-keys` in its namespace. If missing, it generates random `hashKey`/`blockKey` values, creates the Secret, and uses them for `gorilla/securecookie` signing and encryption. This means cookie keys survive pod restarts.
+On startup, voter looks for the Kubernetes Secret `auth-session-cookie-keys` in its namespace. If missing, it generates random `hashKey`/`blockKey` values, creates the Secret, and uses them for `gorilla/securecookie` signing and encryption. This means cookie keys survive pod restarts.
 
 ## Endpoints
 
@@ -69,14 +101,14 @@ All `/public/` endpoints accept either a `?code=XXXX` join code or an existing s
 
 ## Audience access
 
-Audience members reach the demo through the browser only. The Kubernetes API surface (`/api`, `/apis`, `/openapi`) is fronted by Traefik, which strips any client-supplied `Authorization` / `Impersonate-*` headers, calls auth-service to mint a short-lived impersonator-SA token, and attaches the audience member's identity as `Impersonate-User` / `Impersonate-Group`. There is no downloadable kubeconfig and no `kubectl` path.
+Audience members reach the demo through the browser only. The Kubernetes API surface (`/api`, `/apis`, `/openapi`) is fronted by Traefik, which strips any client-supplied `Authorization` / `Impersonate-*` headers, calls voter to mint a short-lived impersonator-SA token, and attaches the audience member's identity as `Impersonate-User` / `Impersonate-Group`. There is no downloadable kubeconfig and no `kubectl` path.
 
 ## Run locally
 
 Local runs need Kubernetes access via `KUBECONFIG` or `~/.kube/config` because the service falls back to kubeconfig when it is not running in-cluster.
 
 ```bash
-cd auth-service
+cd voter
 FORWARD_SA=voter-audience-impersonator FORWARD_SA_NAMESPACE=voter COOKIE_SECURE=false go run .
 ```
 

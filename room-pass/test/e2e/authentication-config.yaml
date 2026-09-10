@@ -1,5 +1,12 @@
 # Render the generated local CA before mounting into the API server.
 # Kubernetes 1.31 uses v1beta1; use apiserver.config.k8s.io/v1 on Kubernetes 1.34+.
+#
+# ONE issuer serves both populations. What separates them is not a second Dex:
+# it is the connector each token was minted through, which Dex reports in
+# federated_claims.connector_id and which nothing in the request path can forge.
+# The username prefix is derived from that claim, so a forged X-Remote-* header
+# at the room connector can only ever produce a demo: identity.
+# See ../../login-explained.md.
 apiVersion: apiserver.config.k8s.io/v1beta1
 kind: AuthenticationConfiguration
 jwt:
@@ -8,10 +15,28 @@ jwt:
       audiences: [room-pass-demo]
       certificateAuthority: |
 CA_PEM
+    claimValidationRules:
+      # Fail closed on a missing connector rather than silently choosing a
+      # branch below. Dex only emits federated_claims when the client requests
+      # the "federated:id" scope, so a client that forgets it is rejected here
+      # with a message that says what to fix -- not quietly mapped to some
+      # other identity.
+      - expression: "has(claims.federated_claims) && claims.federated_claims.connector_id in ['github', 'room']"
+        message: unknown or missing Dex connector; the client must request the federated:id scope
+      # The room connector authenticates on trusted headers, so its groups are
+      # only ever demo groups. This is the rule that keeps a forged header from
+      # reaching an operator group on a shared issuer.
+      - expression: "claims.federated_claims.connector_id != 'room' || dyn(claims.groups).all(g, g.startsWith('demo:'))"
+        message: the room connector may only assert demo groups
     claimMappings:
       username:
-        claim: sub
-        prefix: 'demo:'
+        # Derived from the connector, never from a self-asserted email. The
+        # email claim below is attribution for Git commits and carries no
+        # authorization weight.
+        expression: >-
+          claims.federated_claims.connector_id == 'github'
+            ? 'github:' + claims.email
+            : 'demo:' + claims.sub
       groups:
         claim: groups
         prefix: ''
@@ -20,6 +45,10 @@ CA_PEM
           valueExpression: claims.name
         - key: configbutler.ai/claims/email
           valueExpression: claims.email
-    claimValidationRules:
-      - expression: "dyn(claims.groups).all(g, g.startsWith('demo:'))"
-        message: Only demo groups are accepted by this issuer
+    userValidationRules:
+      - expression: "user.username.startsWith('demo:') || user.username.startsWith('github:')"
+        message: username must carry a connector prefix
+      - expression: "!user.username.startsWith('system:')"
+        message: username must not use the Kubernetes system: prefix
+      - expression: "user.groups.all(group, !group.startsWith('system:'))"
+        message: groups must not use the Kubernetes system: prefix

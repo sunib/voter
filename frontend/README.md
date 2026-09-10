@@ -17,7 +17,7 @@ To run the Vite dev server against the live API at `https://voter.z65.nl`, set:
 VITE_DEV_API_ORIGIN=https://voter.z65.nl npm run dev
 ```
 
-Important: the deployed auth-service currently sets `COOKIE_SECURE=true`, so join/admin cookies will only stick when the Vite dev server itself is served over HTTPS. The Vite config can enable HTTPS with `@vitejs/plugin-basic-ssl`:
+Important: the deployed voter backend currently sets `COOKIE_SECURE=true`, so join/admin cookies will only stick when the Vite dev server itself is served over HTTPS. The Vite config can enable HTTPS with `@vitejs/plugin-basic-ssl`:
 
 ```bash
 VITE_DEV_API_ORIGIN=https://voter.z65.nl \
@@ -36,12 +36,14 @@ And for running with docker:
 docker build -t voter-frontend ./frontend
 docker run --rm -p 8080:8080 voter-frontend
 ```
-docker build . -t zot.z65.nl/voter/auth-service:v1
-docker push zot.z65.nl/voter/auth-service:v1
+# One image now: the frontend bundle is built into the voter image.
+# The context is the repository root, not this directory.
+cd .. && docker build -f voter/Dockerfile . -t zot.z65.nl/voter/voter:v1
+docker push zot.z65.nl/voter/voter:v1
 kubectl create secret docker-registry zot-pull   --docker-server=zot.z65.nl   --docker-username=admin   --docker-password='---replace---' -n vote
 
 ## Join flow
 
-- Join with `X-Join-Code` only. The session name is resolved by auth-service.
-- auth-service sets an encrypted session cookie that is reused for subsequent requests.
+- Join with `X-Join-Code` only. The session name is resolved by the voter backend.
+- The voter backend sets an encrypted session cookie that is reused for subsequent requests.
 - The UI fetches `/session-info` after joining to display the session title/state.

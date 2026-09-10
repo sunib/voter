@@ -21,7 +21,7 @@ For now let's be happy and close it of.
 
 ---
 
-* The auth-service is now working in the cluster.
+* The voter backend is now working in the cluster.
 * You can also give a query param now: ?code=1234
 * I added more tests and there is now a middleware to handle the token.
 * I adjusted the RBAC

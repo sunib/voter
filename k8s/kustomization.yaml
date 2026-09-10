@@ -7,7 +7,7 @@ resources:
   - crds/quizsessions.yaml
   - crds/quizsubmissions.yaml
   - audience-impersonator-rbac.yaml
-  - auth-service-rbac.yaml
+  - voter-rbac.yaml
   - app.yaml
   - examples/coffeeconfig-testnet.yaml
   - examples/quizsession-kubecon-2026.yaml

@@ -115,7 +115,14 @@ func newOIDCProvider(ctx context.Context, cfg config) (*oidcProvider, error) {
 			ClientSecret: cfg.OIDCClientSecret,
 			Endpoint:     provider.Endpoint(),
 			RedirectURL:  cfg.OIDCRedirectURL,
-			Scopes:       []string{oidc.ScopeOpenID, "profile", "email", "groups"},
+			// "federated:id" is not decoration. Dex only emits the
+			// federated_claims.connector_id claim when a client asks for this
+			// scope (see tokens/issuer.go in the pinned Dex), and the
+			// kube-apiserver's authenticator derives the username prefix from
+			// exactly that claim: github: for an operator login, demo: for a
+			// Room Pass participant. Drop the scope and every token from this
+			// client is rejected as carrying no connector.
+			Scopes: []string{oidc.ScopeOpenID, "profile", "email", "groups", "federated:id"},
 		},
 		transactions: map[string]*loginTransaction{},
 		now:          time.Now,

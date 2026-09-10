@@ -35,14 +35,14 @@ One trunk. One application. Two demo journeys inside it.
 | Branches that matter | `main` |
 | CI workflows | **0** |
 | Deployable manifest sets | **2**, in two repos, disagreeing |
-| Go source (`auth-service`) | 2,812 non-test lines + 2,081 test lines |
+| Go source (`voter`) | 2,812 non-test lines + 2,081 test lines |
 | Frontend | Vue 3, Vite 7, Pinia, PrimeVue 4, Tailwind 4 |
 | Frontend tests | **0** |
 | Release process | `make build-push` from a laptop to `zot.z65.nl`, tag `:coffee` |
 
 The application is a coffee storefront (order screen, admin editor, orders view, commits
 view) plus the surviving questionnaire screens (`/answer/:session`, `/thanks`). Both are
-fronted by the same auth-service and the same identity model.
+fronted by the same voter backend and the same identity model.
 
 ### The impersonation chain — the part worth publishing
 
@@ -58,16 +58,16 @@ derived server-side from the session cookie into `demo:<stableID>` in group
 `configbutler.ai/claims/…` — which gitops-reverser then reads off the audit event to
 author the Git commit. Traefik's `strip-client-auth` middleware drops every
 client-supplied `Impersonate-*` and `Authorization` header *before* forward-auth runs,
-and the auth-service rejects inbound `Authorization` unconditionally as its first action.
+and the voter backend rejects inbound `Authorization` unconditionally as its first action.
 
 That whole chain is about 200 lines of Go and two RBAC files
 ([k8s/audience-impersonator-rbac.yaml](k8s/audience-impersonator-rbac.yaml),
-[k8s/auth-service-rbac.yaml](k8s/auth-service-rbac.yaml)). It is the thesis of the talk,
+[k8s/voter backend-rbac.yaml](k8s/voter backend-rbac.yaml)). It is the thesis of the talk,
 expressed as running code, and as far as either review could tell it is not written up
 anywhere as a reusable component. **That is the open-source story.**
 
 The design is careful in the right places: the audience Role deliberately withholds
-`patch`/`update` on `coffeeconfigs` from the auth-service SA so there is no silent
+`patch`/`update` on `coffeeconfigs` from the voter backend SA so there is no silent
 fallback-to-SA path, empty impersonation usernames are a hard error rather than a skip,
 and the middleware ordering carries an ORDER-MATTERS comment explaining why. The
 comments in those files read like someone who thought about the failure modes.
@@ -102,7 +102,7 @@ inconsistent hostnames all day. A schema validator will not catch this either.
 **In the external copy, the manifests do not match this binary.** They select `:coffee`
 images but still configure `FORWARD_SA=quiz-access` with the old direct-CRUD RBAC, copy
 only `Authorization` out of forward-auth, and never install the impersonator account or
-the audience group RoleBinding. Against the current auth-service, server-side
+the audience group RoleBinding. Against the current voter backend, server-side
 CoffeeConfig patches lack the impersonation authorization they need, and direct API
 requests through Traefik lose participant attribution entirely. Both overlays render
 successfully — again, evidence that Kustomize works, not that the contract holds.
@@ -129,10 +129,10 @@ or a boundary that needs documenting.
 
 **This is by design and is not a leak.**
 
-`requireAdminMiddleware` ([auth-service/coffee_handlers.go:254](auth-service/coffee_handlers.go#L254))
+`requireAdminMiddleware` ([voter/coffee_handlers.go:254](voter/coffee_handlers.go#L254))
 delegates straight to `requireSessionMiddleware`, and the `voter-audience` Role grants
 `patch`/`update` on `coffeeconfigs`
-([k8s/auth-service-rbac.yaml:99-101](k8s/auth-service-rbac.yaml#L99-L101)). Both layers
+([k8s/voter backend-rbac.yaml:99-101](k8s/voter backend-rbac.yaml#L99-L101)). Both layers
 agree: anyone who joins the coffee demo can edit prices, menu items and vouchers.
 
 That is the point of the demo. The audience is *supposed* to be able to change the
@@ -144,7 +144,7 @@ vulnerability.
 
 **What is genuinely wrong here is the vestigial config.** `ADMIN_PASSWORD` (committed
 default `testnetcoffee`), `ADMIN_COOKIE_NAME` and `ADMIN_SESSION_MAX_AGE_SECONDS` are
-declared in [auth-service/config.go:17-19](auth-service/config.go#L17-L19) and **no code
+declared in [voter/config.go:17-19](voter/config.go#L17-L19) and **no code
 reads any of them**. They look like a control and are not one. Delete all three fields
 and rename `requireAdminMiddleware` to something honest like `requireParticipantMiddleware`,
 or rename the routes from `/public/admin/*` to `/public/editor/*`. A password that exists
@@ -194,8 +194,8 @@ identity provider behind the same interface as a second adapter.
 
 Join codes are 4 characters from a 36-character alphabet — 1,679,616 possibilities — and
 `JOIN_CODE_TTL_SECONDS` defaults to `7200s`, so one code stays valid for two hours
-([auth-service/config.go:21-23](auth-service/config.go#L21-L23)). Code generation itself
-is correct (`crypto/rand`, [auth-service/join_codes.go:151-164](auth-service/join_codes.go#L151-L164));
+([voter/config.go:21-23](voter/config.go#L21-L23)). Code generation itself
+is correct (`crypto/rand`, [voter/join_codes.go:151-164](voter/join_codes.go#L151-L164));
 the problem is that nothing throttles guesses.
 
 Nothing in this repo rate-limits anything. The `api-ratelimit` middleware exists **only**
@@ -209,10 +209,10 @@ room out.
 ### 3.4 HIGH — Unbounded request bodies and unbounded order retention
 
 The CoffeeConfig PATCH handler reads the whole body with `io.ReadAll`
-([auth-service/coffee_handlers.go:131](auth-service/coffee_handlers.go#L131)) with no
+([voter/coffee_handlers.go:131](voter/coffee_handlers.go#L131)) with no
 `http.MaxBytesReader`. Login and order decoding have no explicit cap either. Orders
 accumulate in an unbounded slice for the process lifetime, rejected orders included
-([auth-service/coffee_runtime.go:69-70](auth-service/coffee_runtime.go#L69-L70)).
+([voter/coffee_runtime.go:69-70](voter/coffee_runtime.go#L69-L70)).
 
 These are concrete resource paths to bound before a room of users — or hostile traffic —
 reaches the app. Cap bodies, cap retained order records, and validate duration/size
@@ -229,7 +229,7 @@ It does nothing for this finding.
 precondition. The backend reads the current object to build its history entry, then
 forwards the merge patch as a separate unconditional call —
 `ResourceVersion` appears in `kube_client.go` only on the **watch**
-([auth-service/kube_client.go:475](auth-service/kube_client.go#L475)), never on a write.
+([voter/kube_client.go:475](voter/kube_client.go#L475)), never on a write.
 
 Two browsers can load the same config, edit different fields, and both save before the
 SSE updates arrive. The second full-spec save overwrites the first. Products and vouchers
@@ -242,10 +242,10 @@ conditional write and return Kubernetes conflicts as HTTP 409. Note that `writeK
 currently preserves only `NotFound` and maps everything else to 500, so both sides need
 work.
 
-### 3.6 HIGH — auth-service container runs as root on a Debian base
+### 3.6 HIGH — voter backend container runs as root on a Debian base
 
 The binary is built `CGO_ENABLED=0` and then dropped into `debian:bookworm-slim` purely
-for CA certificates ([auth-service/Dockerfile](auth-service/Dockerfile)). No `USER`, and
+for CA certificates ([voter/Dockerfile](voter/Dockerfile)). No `USER`, and
 `k8s/app.yaml` sets no `securityContext` at all — so the pod runs as root with a writable
 root filesystem, for an internet-facing component. `GOARCH=amd64` is also hardcoded.
 
@@ -254,7 +254,7 @@ OS worth of CVE surface. Add `runAsNonRoot`, drop capabilities, and set a read-o
 filesystem in the manifests.
 
 The frontend image already does this right — `nginxinc/nginx-unprivileged:stable-alpine`.
-Only auth-service is the outlier.
+Only voter backend is the outlier.
 
 ### 3.7 MEDIUM — 15 npm advisories in the frontend toolchain
 
@@ -267,9 +267,9 @@ exposure is to your build machine rather than to the audience. Still worth an
 
 `examples.configbutler.ai`, `quizsessions`, `coffeeconfigs` and the shape of the session
 route are string constants across
-[auth-service/kube_client.go](auth-service/kube_client.go) and
-[auth-service/session_ref.go:25](auth-service/session_ref.go#L25). Fine for a demo; a hard
-blocker for anyone adopting the component, and it means the auth-service's broad
+[voter/kube_client.go](voter/kube_client.go) and
+[voter/session_ref.go:25](voter/session_ref.go#L25). Fine for a demo; a hard
+blocker for anyone adopting the component, and it means the voter backend's broad
 namespace-secret permissions and cluster-wide demo reads cannot be narrowed without a
 code change.
 
@@ -286,7 +286,7 @@ impersonated writes work, that the impersonator token can be minted, or that Git
 land. Keep liveness simple and add a separate preflight command that checks dependencies
 and permissions.
 
-Related: the external APF policy (`demo-only/vote/apf.yaml`) pins `auth-service` and
+Related: the external APF policy (`demo-only/vote/apf.yaml`) pins `voter` and
 `quiz-access` in namespace **`vote`**. It gives no protection to the
 `voter-test`/`voter-production` identities the coffee demo actually runs as.
 
@@ -307,13 +307,13 @@ What went away:
 
 | Piece | Recover from |
 |---|---|
-| `GET /public/kubeconfig` (public as `/auth/kubeconfig?code=XXXX`) | `git show aaf3865^:auth-service/http_handlers.go` |
-| `auth-service/kubeconfig.tmpl` — 24-line kubeconfig template | `git show aaf3865^:auth-service/kubeconfig.tmpl` |
-| `TokenReview` bearer-passthrough branch in `/private/forward-auth-decision` | `git show aaf3865^:auth-service/http_handlers.go` |
+| `GET /public/kubeconfig` (public as `/auth/kubeconfig?code=XXXX`) | `git show aaf3865^:voter/http_handlers.go` |
+| `voter/kubeconfig.tmpl` — 24-line kubeconfig template | `git show aaf3865^:voter/kubeconfig.tmpl` |
+| `TokenReview` bearer-passthrough branch in `/private/forward-auth-decision` | `git show aaf3865^:voter/http_handlers.go` |
 | `quiz-access` ServiceAccount / Role / RoleBinding | `git show 0eb378d:k8s/quiz-rbac.yaml` |
-| `KUBECONFIG_SA`, `KUBECONFIG_SA_NAMESPACE` plumbing | `git show aaf3865^:auth-service/config.go` |
+| `KUBECONFIG_SA`, `KUBECONFIG_SA_NAMESPACE` plumbing | `git show aaf3865^:voter/config.go` |
 | `plans/audience-kubectl-access.md` — the original 332-line design | `git show 0eb378d:plans/audience-kubectl-access.md` |
-| The `/public/kubeconfig` test cases (~130 lines of `main_test.go`) | `git show aaf3865^:auth-service/main_test.go` |
+| The `/public/kubeconfig` test cases (~130 lines of `main_test.go`) | `git show aaf3865^:voter/main_test.go` |
 
 The demo moment it enabled:
 
@@ -345,8 +345,8 @@ Two ways to do it safely, in increasing order of effort:
    an established session, and keep `strip-client-auth` on the browser route untouched —
    the kubectl path gets its **own** ingress route with its own middleware chain, so the
    two trust models never share a router.
-2. **OIDC.** You already have [plans/auth-service-as-oidc-issuer.md](plans/auth-service-as-oidc-issuer.md).
-   `kubectl oidc-login` against the auth-service is the version of this that generalizes,
+2. **OIDC.** You already have [plans/voter backend-as-oidc-issuer.md](plans/voter backend-as-oidc-issuer.md).
+   `kubectl oidc-login` against the voter backend is the version of this that generalizes,
    needs no token handout at all, and makes the identity story identical for browser and
    CLI. It is also considerably more work, and becoming an OIDC *issuer* is a separate
    product commitment from merely *accepting* identity from a provider.
@@ -386,7 +386,7 @@ identities and routes this app actually uses.
 
 ### 4.5 Stale references left behind
 
-- `auth-service/Dockerfile` still does `COPY *.go *.tmpl ./`, and there is no longer any
+- `voter/Dockerfile` still does `COPY *.go *.tmpl ./`, and there is no longer any
   `.tmpl` file. Harmless (BuildKit accepts it while another pattern matches — verified),
   but misleading.
 - `k8s/ingress-auth.yaml:26` still carries the comment "*probably not the 'long' term
@@ -402,7 +402,7 @@ identities and routes this app actually uses.
 Demo blocker for the "save with my message" story, and the one finding that is a plain
 version mismatch rather than a judgment call.
 
-[auth-service/kube_client.go:413](auth-service/kube_client.go#L413) constructs
+[voter/kube_client.go:413](voter/kube_client.go#L413) constructs
 `configbutler.ai/v1alpha1` CommitRequests, and `commitRequestGVR()` at line 430 sends
 them to the same version. The pinned controller's
 `config/crd/bases/configbutler.ai_commitrequests.yaml` serves **`v1alpha3` only**.
@@ -420,7 +420,7 @@ an already-applied write — but it means a green save cannot establish that Git
 the requested message or author.
 
 The existing fake-HTTP tests explicitly assert the **old** API version
-([auth-service/kube_client_test.go:272](auth-service/kube_client_test.go#L272)), so they
+([voter/kube_client_test.go:272](voter/kube_client_test.go#L272)), so they
 will protect the wrong contract indefinitely.
 
 Align the served API, target name, namespace and commit-window behaviour with the pinned
@@ -626,7 +626,7 @@ Sequence:
    deleted, the seam is real. The generic core must not need CoffeeConfig types or quiz
    resource names to compile.
 2. **Make the coordinates configuration** (§3.8): group, version, resource, namespace,
-   session-route pattern. Narrow the auth-service's broad namespace-secret permissions and
+   session-route pattern. Narrow the voter backend's broad namespace-secret permissions and
    cluster-wide reads as part of shedding demo responsibilities.
 3. **Define the "who gets in" seam.** Anonymous join-code is one adapter; accepting
    identity from an OIDC provider is the next. Becoming an OIDC *issuer* is a separate
@@ -645,7 +645,7 @@ Sequence:
 8. **Ship the release scaffolding:** runnable example, supported version matrix,
    `CONTRIBUTING.md`, `SECURITY.md`, `CODEOWNERS`, license and module-path cleanup,
    session/key lifecycle guidance.
-9. **Name it properly.** `auth-service` will not do on a company account. Something like
+9. **Name it properly.** `voter` will not do on a company account. Something like
    `kube-impersonating-forward-auth` or `configbutler/forward-auth`, with the italic line
    above as the README's first sentence.
 

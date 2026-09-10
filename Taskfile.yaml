@@ -15,9 +15,9 @@ includes:
   room-pass:
     taskfile: ./room-pass/Taskfile.yaml
     dir: ./room-pass
-  auth-service:
-    taskfile: ./auth-service/Taskfile.yaml
-    dir: ./auth-service
+  voter:
+    taskfile: ./voter/Taskfile.yaml
+    dir: ./voter
   frontend:
     taskfile: ./frontend/Taskfile.yaml
     dir: ./frontend
@@ -41,7 +41,7 @@ tasks:
   setup:
     desc: Install dependencies for every component
     cmds:
-      - task: auth-service:deps
+      - task: voter:deps
       - task: room-pass:deps
       - task: frontend:deps
 
@@ -56,7 +56,7 @@ tasks:
   lint-golang:
     desc: Lint both Go modules with golangci-lint (config in .golangci.yml)
     cmds:
-      - task: auth-service:lint
+      - task: voter:lint
       - task: room-pass:lint
 
   lint-dockerfiles:
@@ -66,7 +66,7 @@ tasks:
       - .devcontainer/Dockerfile
       - '*/Dockerfile'
     cmds:
-      - hadolint .devcontainer/Dockerfile auth-service/Dockerfile frontend/Dockerfile room-pass/Dockerfile
+      - hadolint .devcontainer/Dockerfile voter/Dockerfile room-pass/Dockerfile
 
   lint-actions:
     desc: Lint the GitHub Actions workflows with actionlint
@@ -82,7 +82,7 @@ tasks:
   test:
     desc: Run every component's tests
     cmds:
-      - task: auth-service:test
+      - task: voter:test
       - task: room-pass:test
       - task: frontend:test
 
@@ -103,11 +103,10 @@ tasks:
     cmds:
       - task: image-room-pass
       - task: image-voter
-      - task: image-auth-service
 
   # --- Container images -------------------------------------------------------
   #
-  # These two tasks build the artifacts CI publishes to ghcr.io/sunib. CI calls
+  # These tasks build the artifacts CI publishes to ghcr.io/sunib. CI calls
   # exactly these tasks with PUSH=true, so `task image-voter` locally and the
   # published image are produced by the same command with the same build args --
   # there is no second, workflow-only definition of how an image is built.
@@ -125,23 +124,16 @@ tasks:
           CONTEXT: ./room-pass
 
   image-voter:
-    desc: Build the Voter frontend image (ghcr.io/sunib/voter)
+    desc: Build the Voter application image (ghcr.io/sunib/voter)
+    # One image for the whole application: the Vue bundle and the Go backend
+    # that serves it and is the Dex OIDC client. The context is the repository
+    # root because the Dockerfile builds from both frontend/ and voter/.
     cmds:
       - task: image
         vars:
           NAME: voter
-          CONTEXT: ./frontend
-
-  image-auth-service:
-    desc: Build the Voter backend image (ghcr.io/sunib/voter-auth-service)
-    # The backend is the OIDC client: it completes the Dex code exchange and
-    # forwards each participant's ID token to Kubernetes. The demo cannot run
-    # without it, so it is published alongside the other two.
-    cmds:
-      - task: image
-        vars:
-          NAME: voter-auth-service
-          CONTEXT: ./auth-service
+          CONTEXT: .
+          DOCKERFILE: ./voter/Dockerfile
 
   image:
     internal: true
@@ -156,6 +148,8 @@ tasks:
       # METADATA_FILE: buildx writes the pushed digest here. CI reads it to
       # report an immutable reference for platform/ to pin.
       METADATA_FILE: '{{.METADATA_FILE | default ""}}'
+      # DOCKERFILE: only needed when it is not <CONTEXT>/Dockerfile.
+      DOCKERFILE: '{{.DOCKERFILE | default ""}}'
     cmds:
       - |
         set -euo pipefail
@@ -177,6 +171,7 @@ tasks:
         )
         for extra in {{.EXTRA_TAGS}}; do args+=(--tag "${extra}"); done
         {{if .METADATA_FILE}}args+=(--metadata-file "{{.METADATA_FILE}}"){{end}}
+        {{if .DOCKERFILE}}args+=(--file "{{.DOCKERFILE}}"){{end}}
         {{if eq .PUSH "true"}}
         args+=(--push)
         {{else}}
@@ -200,4 +195,4 @@ tasks:
   clean:
     desc: Remove build output and task fingerprints
     cmds:
-      - rm -rf .task frontend/dist auth-service/bin room-pass/bin
+      - rm -rf .task frontend/dist voter/bin room-pass/bin

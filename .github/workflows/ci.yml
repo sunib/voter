@@ -9,9 +9,9 @@
 #   * changing what CI checks means editing Taskfile.yaml, not YAML here;
 #   * moving to another CI system means writing a file that calls the same tasks.
 #
-# The images published to ghcr.io are built by `task image-room-pass`,
-# `task image-voter` and `task image-auth-service` for the same reason: there is
-# no second, workflow-only definition of how a shipped artifact is built.
+# The images published to ghcr.io are built by `task image-room-pass` and
+# `task image-voter` for the same reason: there is no second, workflow-only
+# definition of how a shipped artifact is built.
 #
 # Trust model, one rule: untrusted (pull request) code is built and tested, but
 # never meets a write token. Pull requests move the CI container between jobs as
@@ -246,7 +246,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run the tests
-        # auth-service and room-pass Go tests, plus the frontend type-check and
+        # voter and room-pass Go tests, plus the frontend type-check and
         # production build. Reproduce with: task test
         run: |
           docker run --rm \
@@ -305,8 +305,6 @@ jobs:
             task: image-room-pass
           - name: voter
             task: image-voter
-          - name: voter-auth-service
-            task: image-auth-service
     env:
       CI_CONTAINER: ${{ needs.ci-container.outputs.image }}
       # Only a push to main publishes. Not `!= 'pull_request'`, which would also

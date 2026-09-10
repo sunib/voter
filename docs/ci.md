@@ -56,7 +56,7 @@ declares; the declarations exist so the intent is reviewable.
 | `ghcr.io/sunib/room-pass` | `room-pass/` | The Room Pass gate: Room/Participant controller, join page, session and Dex header adapter |
 | `ghcr.io/sunib/voter` | `frontend/` | The Vue quiz and coffee UI, served by unprivileged NGINX |
 
-`auth-service` is deliberately not published: it is on its way out. Section 7 of
+The legacy backend paths are deliberately not published separately: they are on their way out. Section 7 of
 the platform implementation plan replaces its impersonation paths with participant
 ID tokens forwarded from Room Pass, and it is not to be deployed again. It stays
 in the tree, linted and tested, only so the coffee handlers can be read while
@@ -121,7 +121,7 @@ The waivers are deliberate and each one records why, so they can be revisited:
 - [`.golangci.yml`](../.golangci.yml) — `ST1005` is off because Room Pass renders
   its errors to participants as prose; `ST1013` is off because the handlers use
   numeric HTTP statuses consistently and staticcheck flags only a subset. The
-  `unused` waiver on three `auth-service` functions is tied to the migration that
+  `unused` waiver on three `voter` functions is tied to the migration that
   will delete them.
 - [`.hadolint.yaml`](../.hadolint.yaml) — unpinned distro packages and `cd` in
   `mktemp -d` installers, both intentional in the tooling image.

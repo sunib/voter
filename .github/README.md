@@ -79,7 +79,7 @@ today starts red — that is a documentation cleanup, not a CI task, and it shou
 be its own change. `vale` additionally needs a style under `.vale.ini` before it
 does anything at all.
 
-### 4. Retire `auth-service`
+### 4. Retire the legacy backend paths
 
 It is not published and not to be deployed again; it stays linted and tested only
 while its replacement is written. When section 7 of the plan is done and the

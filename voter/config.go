@@ -71,6 +71,11 @@ type config struct {
 	AppCookieHashKey  string `envconfig:"APP_COOKIE_HASH_KEY"`
 	AppCookieBlockKey string `envconfig:"APP_COOKIE_BLOCK_KEY"`
 
+	// StaticDir is the built frontend bundle served by this process. The
+	// container image sets it to /srv/www; leaving it empty (the local Vite
+	// setup) serves a plain-text API description at / instead.
+	StaticDir string `envconfig:"STATIC_DIR"`
+
 	// KubernetesAPIServer fixes the destination for participant-token calls.
 	// Empty means the in-cluster address.
 	KubernetesAPIServer string `envconfig:"KUBERNETES_API_SERVER"`

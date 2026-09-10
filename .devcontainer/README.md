@@ -6,7 +6,7 @@ signing support.
 It is a copy of the `gitops-reverser` devcontainer, retargeted at this repo's layout. The toolchain and the signing setup are deliberately unchanged — the demo this repo
 builds lives in the same GitOps/Kubernetes world, so the same tools apply. What differs:
 
-- the Go module warm-up copies `auth-service/go.mod`, since the module is not at the repo root
+- the Go module warm-up copies `voter/go.mod`, since the module is not at the repo root
 - Node tooling and VS Code extensions for the Vue + Vite frontend in `frontend/`
 - forwarded ports match this repo's services
 - the platform toolchain (OpenTofu, talosctl, talm, SOPS, age) is added; see below
@@ -73,8 +73,8 @@ ssh-add -L
 And that the repo itself builds:
 
 ```bash
-make build-auth-service
-make test-auth-service
+make build-voter
+make test-voter
 cd frontend && npm ci && npm run build
 ```
 
@@ -246,7 +246,7 @@ Everything else is still shared on purpose: the Go and npm caches are content-ad
 | Port  | What                                                                          |
 | ----- | ----------------------------------------------------------------------------- |
 | 5173  | Vite dev server (`cd frontend && npm run dev`, or `make frontend-dev-remote`)  |
-| 8080  | `auth-service` (its `PORT` default, see `auth-service/config.go`)              |
+| 8080  | `voter` (its `PORT` default, see `voter/config.go`)                            |
 | 10350 | Tilt UI                                                                       |
 | 13000 | Git server, for the local GitOps demo loop                                    |
 | 19080 | Flux                                                                          |

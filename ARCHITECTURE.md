@@ -109,7 +109,7 @@ Critical hardening requirements:
 
 ## 5. Token strategy (chosen)
 
-Mint short-lived **BoundServiceAccountTokens** using the Kubernetes **TokenRequest** API (a dedicated API call that mints temporary service-account tokens on demand). **The forward-auth auth-service is responsible for retrieving these short-lived access tokens** via `POST /api/v1/namespaces/<ns>/serviceaccounts/<sa>/token` and caching them per device session.
+Mint short-lived **BoundServiceAccountTokens** using the Kubernetes **TokenRequest** API (a dedicated API call that mints temporary service-account tokens on demand). **The forward-auth voter backend is responsible for retrieving these short-lived access tokens** via `POST /api/v1/namespaces/<ns>/serviceaccounts/<sa>/token` and caching them per device session.
 
 Properties:
 

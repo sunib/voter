@@ -109,6 +109,17 @@ func (f *flow) login(enroll bool) (string, map[string]any) {
 	if claims["name"] != "Ada Demo" || !strings.HasSuffix(fmt.Sprint(claims["email"]), "@demo.invalid") || fmt.Sprint(claims["groups"]) != "[demo:room-pass-test]" {
 		f.t.Fatalf("wrong identity claims: %v", claims)
 	}
+	// The whole shared-issuer containment argument rests on this claim: the
+	// authenticator derives the username prefix from it, so a token that does
+	// not carry it (or carries another connector) must never reach Kubernetes
+	// as a demo participant. Dex only emits it for the "federated:id" scope.
+	fed, ok := claims["federated_claims"].(map[string]any)
+	if !ok {
+		f.t.Fatalf("no federated_claims in the ID token; is the federated:id scope requested? claims: %v", claims)
+	}
+	if fed["connector_id"] != "room" {
+		f.t.Fatalf("connector_id = %v, want room", fed["connector_id"])
+	}
 	return raw, claims
 }
 func TestRealDexAndKubernetes(t *testing.T) {
@@ -163,7 +174,7 @@ func TestRealDexAndKubernetes(t *testing.T) {
 		r.Header.Set("X-Remote-Group", "system:masters")
 		return nil
 	}}
-	f := &flow{t: t, browser: browser, ctx: ctx, db: db, oauth: oauth2.Config{ClientID: "room-pass-demo", Endpoint: provider.Endpoint(), RedirectURL: join + "/app/callback", Scopes: []string{"openid", "profile", "email", "groups"}}, verifier: provider.Verifier(&oidc.Config{ClientID: "room-pass-demo"})}
+	f := &flow{t: t, browser: browser, ctx: ctx, db: db, oauth: oauth2.Config{ClientID: "room-pass-demo", Endpoint: provider.Endpoint(), RedirectURL: join + "/app/callback", Scopes: []string{"openid", "profile", "email", "groups", "federated:id"}}, verifier: provider.Verifier(&oidc.Config{ClientID: "room-pass-demo"})}
 	token, first := f.login(true)
 	// Restart only Room Pass, preserving Kubernetes records and the cookie Secret.
 	kubeconfig, _ := filepath.Abs("../../.local/kubeconfig")

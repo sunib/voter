@@ -67,12 +67,21 @@ func main() {
 	if gitDirty == "1" {
 		dirtyFlag = " (dirty)"
 	}
-	log.Printf("auth-service starting commit=%s%s buildDate=%s", gitCommit, dirtyFlag, buildDate)
+	log.Printf("voter starting commit=%s%s buildDate=%s", gitCommit, dirtyFlag, buildDate)
 
 	cfg, err := loadConfig()
 	if err != nil {
 		log.Fatalf("config error: %v", err)
 	}
+	// Refuse to start with a broken bundle rather than serving 500s to every
+	// browser that loads the page.
+	if err := checkStaticDir(cfg.StaticDir); err != nil {
+		log.Fatalf("static: STATIC_DIR=%q is unusable: %v", cfg.StaticDir, err)
+	}
+	if cfg.StaticDir != "" {
+		log.Printf("static: serving the frontend from %s", cfg.StaticDir)
+	}
+
 	codes := newJoinCodeStore(cfg)
 	kube, err := loadKubeClient(cfg)
 	if err != nil {

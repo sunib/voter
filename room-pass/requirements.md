@@ -123,7 +123,7 @@ schema; do not depend on a CLI doing validation. Provide printer columns and mea
 ### Rolling codes: reuse the existing behavior
 
 Follow [the original join-code design](../plans/join-code-plan.md) and
-[the current implementation](../auth-service/join_codes.go): generate codes periodically,
+[the current implementation](../voter/join_codes.go): generate codes periodically,
 resolve a code to a Room, and let a valid enrolled browser continue without another code.
 Rotation does not end participant sessions.
 

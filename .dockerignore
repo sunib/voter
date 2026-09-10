@@ -1,22 +1,35 @@
 # This .dockerignore uses an "allowlist" approach for security and a minimal build context.
 # For more info: https://docs.docker.com/engine/reference/builder/#dockerignore-file
 #
-# The repo root is only ever a build context for .devcontainer/Dockerfile, which copies
-# nothing but the Go module files. Without this, every devcontainer build would ship
-# external/ (~200MB of vendored checkouts) and frontend/node_modules to the daemon.
+# The repo root is the build context for two builds:
+#   * .devcontainer/Dockerfile, which copies only the dependency manifests;
+#   * voter/Dockerfile, which builds the frontend bundle and the Go backend into
+#     one image and therefore needs both frontend/ and voter/ sources.
+# room-pass/ still builds from its own narrower context and is unaffected.
 #
-# The application images build from narrower contexts -- `docker buildx build ./auth-service`
-# and `./frontend` in the Makefile -- so they are unaffected by this file. If a root-context
-# build is ever added, re-include what it needs below.
+# Without this file every build would ship external/ (~200MB of vendored
+# checkouts) and frontend/node_modules to the daemon.
 
 # 1. Ignore everything by default.
 **
 
-# 2. Explicitly re-include only what the build COPYs: the dependency manifests
-#    for the two Go modules and the frontend, used for cache warm-up layers.
-!auth-service/go.mod
-!auth-service/go.sum
+# 2. Dependency manifests, used for cache warm-up layers.
+!voter/go.mod
+!voter/go.sum
 !room-pass/go.mod
 !room-pass/go.sum
 !frontend/package.json
 !frontend/package-lock.json
+
+# 3. Sources the voter image actually builds from.
+!voter/*.go
+!voter/Dockerfile
+!frontend/
+
+# 4. Re-exclude what must never enter the frontend build: installed modules and
+#    a previous local build. `npm ci` and `npm run build` recreate both, and a
+#    host-built dist/ silently shadowing the container build is a nasty way to
+#    ship stale assets.
+frontend/node_modules
+frontend/dist
+frontend/dist-ssr

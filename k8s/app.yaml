@@ -1,74 +1,27 @@
+# One Deployment for the whole application. The Vue bundle is built into the
+# same image and served by the Go backend from STATIC_DIR, so there is no
+# separate frontend Deployment, Service or image any more.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: voter-frontend
+  name: voter
   namespace: voter
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: voter-frontend
+      app.kubernetes.io/name: voter
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: voter-frontend
+        app.kubernetes.io/name: voter
     spec:
+      serviceAccountName: voter
       imagePullSecrets:
         - name: zot-pull
       containers:
-        - name: voter-frontend
-          image: zot.z65.nl/voter/frontend:coffee
-          imagePullPolicy: Always
-          #env:
-            #- name: KUBE_NAMESPACE   # This does not work since it's a SPA
-            #  value: voter
-          ports:
-            - name: http
-              containerPort: 8080
-          resources:
-            requests:
-              memory: "64Mi"
-              cpu: "250m"
-            limits:
-              memory: "128Mi"
-              cpu: "500m"
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: voter-frontend
-  namespace: voter
-spec:
-  selector:
-    app.kubernetes.io/name: voter-frontend
-  ports:
-    - name: http
-      port: 8080
-      targetPort: http
-
----
-# Ok this is working now, let's go to the next phase
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: voter-auth-service
-  namespace: voter
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app.kubernetes.io/name: voter-auth-service
-  template:
-    metadata:
-      labels:
-        app.kubernetes.io/name: voter-auth-service
-    spec:
-      serviceAccountName: auth-service
-      imagePullSecrets:
-        - name: zot-pull
-      containers:
-        - name: auth-service
-          image: zot.z65.nl/voter/auth-service:coffee
+        - name: voter
+          image: zot.z65.nl/voter/voter:coffee
           imagePullPolicy: Always
           env:
             # The token minted for this SA is what Traefik attaches to browser
@@ -76,6 +29,9 @@ spec:
             # actual write authorization is via Impersonate-* headers that
             # forwardAuth derives from the session cookie. See plans/
             # quiz-submission-impersonation-plan.md.
+            #
+            # This is the LEGACY authentication mode (OIDC_ENABLED unset). It
+            # must not be exposed publicly; see ../room-pass/login-explained.md.
             - name: FORWARD_SA
               value: voter-audience-impersonator
             - name: FORWARD_SA_NAMESPACE
@@ -102,17 +58,17 @@ spec:
               memory: "64Mi"
               cpu: "250m"
             limits:
-              memory: "128Mi"
+              memory: "192Mi"
               cpu: "500m"
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: auth-service
+  name: voter
   namespace: voter
 spec:
   selector:
-    app.kubernetes.io/name: voter-auth-service
+    app.kubernetes.io/name: voter
   ports:
     - name: http
       port: 8080

@@ -1,5 +1,5 @@
 # golangci-lint configuration for both Go modules in this repository
-# (auth-service/ and room-pass/). `task lint-golang` runs it, and CI runs the
+# (voter/ and room-pass/). `task lint-golang` runs it, and CI runs the
 # same task inside the CI container — so a failure here is reproducible with
 # one command locally.
 #
@@ -59,7 +59,7 @@ linters:
       - path: test/e2e/demo-client/
         linters: [errcheck]
 
-      # auth-service is mid-migration: section 7 of the platform implementation
+      # voter is mid-migration: section 7 of the platform implementation
       # plan replaces its impersonation paths with participant ID tokens, and
       # these three leftovers (normalizeJoinCodeHeader, patchQuizSessionJoinCode,
       # parseSessionKey) belong to the design being replaced. Deleting them as a

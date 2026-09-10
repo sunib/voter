@@ -1,7 +1,7 @@
 # Multi-stage Dockerfile for Voter
 #
 # Adapted from the gitops-reverser devcontainer: same toolchain, same commit
-# signing setup, retargeted at this repo's layout (Go service in auth-service/,
+# signing setup, retargeted at this repo's layout (Go service in voter/,
 # Vue + Vite frontend in frontend/, manifests and CRDs in k8s/).
 #
 # Stage 1: CI base image with essential build tools
@@ -391,17 +391,17 @@ RUN printf '%s\n' \
     && chmod 0644 /etc/profile.d/workspace-dotenv.sh
 
 # Dependency warm-up. There is no module or package at the repo root: the two Go
-# modules live in auth-service/ and room-pass/, and the frontend in frontend/.
+# modules live in voter/ and room-pass/, and the frontend in frontend/.
 # The build context is the repo root (see the `build` block in devcontainer.json
 # and the allowlist in .dockerignore), which is what makes these paths resolvable.
 #
 # Warming into a scratch directory rather than WORKDIR: the previous version
-# copied auth-service's go.mod to /workspaces, where the workspace bind mount
+# copied voter's go.mod to /workspaces, where the workspace bind mount
 # then hid it in dev and left a stray root-level go.mod in CI. What the download
 # actually populates is /go/pkg/mod, which survives the rm.
-COPY auth-service/go.mod auth-service/go.sum /tmp/warm/auth-service/
+COPY voter/go.mod voter/go.sum /tmp/warm/voter/
 COPY room-pass/go.mod room-pass/go.sum /tmp/warm/room-pass/
-RUN cd /tmp/warm/auth-service && go mod download \
+RUN cd /tmp/warm/voter && go mod download \
     && cd /tmp/warm/room-pass && go mod download \
     && rm -rf /tmp/warm
 

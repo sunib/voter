@@ -1,7 +1,7 @@
 # hadolint configuration - https://github.com/hadolint/hadolint#configure
 #
 # Adapted from gitops-reverser's, for this repo's four Dockerfiles:
-# .devcontainer/Dockerfile (tooling), auth-service/, frontend/ and room-pass/
+# .devcontainer/Dockerfile (tooling), voter/ and room-pass/
 # (application images). `task lint-dockerfiles` runs it; CI runs the same task.
 ignored:
   # Distro package versions are intentionally unpinned in the tooling image; the
