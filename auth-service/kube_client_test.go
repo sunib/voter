@@ -435,3 +435,31 @@ func TestCreateCommitRequestOverridesNamespace(t *testing.T) {
 		t.Fatalf("expected path under /namespaces/configbutler/, got %q", req.path)
 	}
 }
+
+// The backend's ServiceAccount holds a namespaced Role, so this list must be
+// scoped to the configured namespace. A cluster-scoped list is refused with a
+// forbidden error at startup, and widening the Role instead would let the
+// backend read quiz sessions from rooms its participants are not part of.
+func TestListQuizSessionsIsNamespaced(t *testing.T) {
+	api := newHeaderCapturingAPIServer(t)
+	api.handler = func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"apiVersion": "examples.configbutler.ai/v1alpha1",
+			"kind":       "QuizSessionList",
+			"metadata":   map[string]any{},
+			"items":      []any{},
+		})
+	}
+	kc := newTestKubeClient(t, api.server.URL)
+
+	if _, err := kc.listQuizSessions(context.Background()); err != nil {
+		t.Fatalf("listQuizSessions: %v", err)
+	}
+
+	req := api.lastRequest(t)
+	want := "/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/quizsessions"
+	if req.path != want {
+		t.Fatalf("path: got %q want %q (a cluster-scoped list omits /namespaces/voter)", req.path, want)
+	}
+}

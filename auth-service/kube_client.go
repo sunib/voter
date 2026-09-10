@@ -305,7 +305,11 @@ func (c kubeClient) listQuizSessions(ctx context.Context) ([]quizSessionSummary,
 		Resource: "quizsessions",
 	}
 
-	list, err := c.dynamic.Resource(gvr).List(ctx, metav1.ListOptions{})
+	// Namespaced, not cluster-scoped. The ServiceAccount holds a namespaced
+	// Role, so a cluster-wide list is refused outright -- and widening the Role
+	// to fix that would let the backend read quiz sessions belonging to rooms
+	// its participants have nothing to do with.
+	list, err := c.dynamic.Resource(gvr).Namespace(c.defaultNS).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list quiz sessions: %w", err)
 	}
