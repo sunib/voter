@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -304,5 +305,31 @@ func TestCSRFOriginHandling(t *testing.T) {
 				t.Errorf("csrfReason = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// A returning participant is shown the name they chose. It is the only place
+// they can see which identity they are about to continue as, and that name ends
+// up on a Git commit -- so it must be both present and escaped, since the
+// participant typed it.
+func TestEnrolledPageShowsTheChosenName(t *testing.T) {
+	if !strings.Contains(pageSource, "{{.EnrolledName}}") {
+		t.Fatal("the join page no longer shows the enrolled participant's name")
+	}
+	tmpl := template.Must(template.New("t").Parse(pageSource))
+	var out strings.Builder
+	if err := tmpl.Execute(&out, map[string]any{
+		"Title": "Demo", "Message": "m", "Form": true, "CSRF": "c",
+		"Handoff": "", "Return": "https://demo.test/app/",
+		"Enrolled": true, "EnrolledName": `Ada <script>alert(1)</script>`,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "Ada &lt;script&gt;") {
+		t.Errorf("the display name must be escaped; got: %s", got)
+	}
+	if strings.Contains(got, "<script>alert(1)</script>") {
+		t.Error("a participant-supplied name was rendered as markup")
 	}
 }
