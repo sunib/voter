@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/securecookie"
+
 	api "github.com/sunib/voter/room-pass/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -261,5 +263,46 @@ func TestHandoffCapacityAndExpiry(t *testing.T) {
 	s.now = func() time.Time { return time.Now().Add(4 * time.Minute) }
 	if w := b.request(s, "GET", "https://login.test/callback/room?state=three", nil); w.Code != 303 {
 		t.Fatal("expired slot not pruned", w.Code)
+	}
+}
+
+// A browser sends "Origin: null" on a form POST whenever the referrer policy
+// strips the origin -- which this server itself used to cause by sending
+// Referrer-Policy: no-referrer. Every real browser was rejected while curl,
+// which implements no referrer policy, passed. Guard the shape of the check so
+// that cannot come back.
+func TestCSRFOriginHandling(t *testing.T) {
+	s := &Server{
+		cfg:     Config{JoinOrigin: "https://voter.example"},
+		cookies: securecookie.New([]byte("0123456789abcdef0123456789abcdef"), []byte("0123456789abcdef")),
+	}
+	token := "tok"
+	encoded, err := s.cookies.Encode("__Host-rp-csrf", token)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name, origin, field string
+		want                string
+	}{
+		{"matching origin passes", "https://voter.example", token, ""},
+		{"null origin passes on a valid token", "null", token, ""},
+		{"absent origin passes on a valid token", "", token, ""},
+		{"a different origin is still refused", "https://evil.example", token, "origin-mismatch"},
+		{"a wrong token is refused whatever the origin", "https://voter.example", "nope", "csrf-mismatch"},
+		{"a wrong token is refused on a null origin too", "null", "nope", "csrf-mismatch"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest("POST", "/join", strings.NewReader("csrf="+tc.field))
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			if tc.origin != "" {
+				r.Header.Set("Origin", tc.origin)
+			}
+			r.AddCookie(&http.Cookie{Name: "__Host-rp-csrf", Value: encoded})
+			if got := s.csrfReason(r); got != tc.want {
+				t.Errorf("csrfReason = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

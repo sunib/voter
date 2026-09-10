@@ -207,7 +207,13 @@ func validName(raw string) (string, error) {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Referrer-Policy", "no-referrer")
+	// same-origin, NOT no-referrer. Under no-referrer a browser serialises the
+	// Origin header of a form POST as "null", which made the CSRF check below
+	// reject every real browser while curl (which implements no referrer
+	// policy) sailed through. same-origin still strips the referrer on
+	// cross-origin requests, so the handoff token in the URL never leaks to a
+	// third party -- which is what no-referrer was here to protect.
+	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self'; form-action 'self'; frame-ancestors 'none'")
 	// Never trust client identity or forwarded routing information, even on Dex aliases.
@@ -294,10 +300,20 @@ func (s *Server) csrf(r *http.Request) bool {
 //
 // Never log the token values themselves: the cookie value IS the credential.
 func (s *Server) csrfReason(r *http.Request) string {
-	if got := r.Header.Get("Origin"); got != s.cfg.JoinOrigin {
-		if got == "" {
-			return "origin-absent"
-		}
+	// The double-submit token below is the actual CSRF defence: the cookie is
+	// HttpOnly and __Host-scoped, so a cross-site attacker cannot read it and
+	// therefore cannot populate the matching form field. The Origin check is
+	// belt and braces on top of that.
+	//
+	// So: reject an Origin that is present and wrong, but tolerate one that is
+	// absent or "null". A browser sends "null" for reasons that have nothing to
+	// do with the request being forged -- a referrer policy that strips the
+	// origin, a sandboxed frame -- and treating that as an attack locks out
+	// legitimate participants while stopping no one, because an attacker who
+	// could forge the token would not need to spoof the origin anyway.
+	switch got := r.Header.Get("Origin"); got {
+	case s.cfg.JoinOrigin, "", "null":
+	default:
 		return "origin-mismatch"
 	}
 	var v string
