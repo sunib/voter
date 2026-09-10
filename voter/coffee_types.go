@@ -112,58 +112,7 @@ type coffeeOrderLine struct {
 	VoucherApplied bool   `json:"voucherApplied"`
 }
 
-type coffeeOrderRecord struct {
-	OrderID         string            `json:"orderId"`
-	SubmittedAt     string            `json:"submittedAt"`
-	VoucherCode     string            `json:"voucherCode,omitempty"`
-	Items           []coffeeOrderLine `json:"items"`
-	Source          map[string]string `json:"source,omitempty"`
-	Currency        string            `json:"currency"`
-	TotalPriceCents int               `json:"totalPriceCents"`
-	Status          string            `json:"status"`
-	FailureCode     string            `json:"failureCode,omitempty"`
-	FailureMessage  string            `json:"failureMessage,omitempty"`
-}
-
-type coffeeOrdersSnapshot struct {
-	Orders       []coffeeOrderRecord `json:"orders"`
-	VoucherUsage map[string]int      `json:"voucherUsage"`
-}
-
-type coffeeConfigWatchEvent struct {
-	Type   string       `json:"type"`
-	Object coffeeConfig `json:"object"`
-}
-
-type coffeeConfigFieldChange struct {
-	Path          string `json:"path"`
-	PreviousValue any    `json:"previousValue,omitempty"`
-	NewValue      any    `json:"newValue,omitempty"`
-}
-
-type coffeeConfigChangeRecord struct {
-	ID         string                    `json:"id"`
-	CreatedAt  string                    `json:"createdAt"`
-	Actor      string                    `json:"actor"`
-	Reason     string                    `json:"reason,omitempty"`
-	Summary    string                    `json:"summary"`
-	Generation int64                     `json:"generation,omitempty"`
-	Changes    []coffeeConfigFieldChange `json:"changes"`
-}
-
-type coffeeConfigChangesSnapshot struct {
-	Changes []coffeeConfigChangeRecord `json:"changes"`
-}
-
 type coffeeOrderFailure struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
-}
-
-type coffeeOrderResponse struct {
-	OrderID         string              `json:"orderId"`
-	Status          string              `json:"status"`
-	Currency        string              `json:"currency"`
-	TotalPriceCents int                 `json:"totalPriceCents"`
-	Failure         *coffeeOrderFailure `json:"failure,omitempty"`
 }

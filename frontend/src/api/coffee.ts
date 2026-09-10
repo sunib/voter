@@ -1,5 +1,3 @@
-import { clearStableID } from '../lib/demoIdentity'
-import { setKubeNamespace } from './kube'
 import type {
   CoffeeConfig,
   CoffeeConfigChangeRecord,
@@ -99,39 +97,6 @@ export async function submitOrder(
     method: 'POST',
     body: JSON.stringify(input),
   })
-}
-
-export async function loginPublic(input: LoginRequest): Promise<void> {
-  const res = await fetch('/public/login', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    credentials: 'include',
-    body: JSON.stringify(input),
-  })
-
-  if (!res.ok) {
-    throw createApiError(res.status, await readJsonOrText(res))
-  }
-}
-
-export async function getPublicSession(): Promise<PublicSessionResponse> {
-  const res = await requestJson<PublicSessionResponse>('/public/session')
-  setKubeNamespace(res.namespace)
-  return res
-}
-
-export async function logoutPublic(): Promise<void> {
-  const res = await fetch('/public/logout', {
-    method: 'POST',
-    credentials: 'include',
-  })
-
-  if (!res.ok) {
-    throw createApiError(res.status, await readJsonOrText(res))
-  }
-  clearStableID()
 }
 
 export async function getAdminCoffeeConfig(): Promise<CoffeeConfig> {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { getPublicSession, type ApiError } from '../../api/coffee'
+import { getSession } from '../../api/session'
 
 const route = useRoute()
 
@@ -17,14 +17,10 @@ async function loadSession() {
     return
   }
 
-  try {
-    const session = await getPublicSession()
-    displayName.value = session.displayName.trim()
-  } catch (error) {
-    if ((error as ApiError).status === 401) {
-      displayName.value = ''
-    }
-  }
+  // getSession returns null when signed out rather than throwing: "not logged
+  // in" is an expected answer for a badge, not an error.
+  const session = await getSession()
+  displayName.value = session === null ? '' : session.displayName.trim()
 }
 
 watch(

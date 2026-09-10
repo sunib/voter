@@ -19,7 +19,6 @@ func testConfig() config {
 	return config{
 		ParticipantCookieName:   "__Host-voter-session",
 		SessionCookieMaxAgeSecs: 7200,
-		SessionCookieName:       "demo_session",
 		AppOrigin:               "https://voter.koudijs.dev",
 	}
 }
@@ -110,7 +109,18 @@ func TestSessionCappedAtTokenExpiry(t *testing.T) {
 // must decode to nothing rather than granting a made-up identity.
 func TestLegacyIdentityCookieRejected(t *testing.T) {
 	cfg, sc := testConfig(), testCodec(t)
-	legacy := sessionCookiePayload{
+	// The legacy cookie shape, declared here rather than imported: the type it
+	// came from was deleted with the rest of the browser-asserted identity
+	// model. Someone who still has one of these in their browser must not be
+	// authenticated by it, so the shape outlives the code that wrote it.
+	legacy := struct {
+		StableID    string `json:"stableId"`
+		DisplayName string `json:"displayName"`
+		Email       string `json:"email"`
+		IssuedAt    int64  `json:"iat"`
+		ExpiresAt   int64  `json:"exp"`
+		Version     int    `json:"v"`
+	}{
 		StableID: "521541", DisplayName: "Mallory", Email: "m@example.com",
 		IssuedAt: time.Now().Unix(), ExpiresAt: time.Now().Add(time.Hour).Unix(),
 		Version: 2,

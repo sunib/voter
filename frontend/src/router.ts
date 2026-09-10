@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-import { getPublicSession, type ApiError } from './api/coffee'
+import { getSession } from './api/session'
 import OrderScreen from './screens/OrderScreen.vue'
 import AdminScreen from './screens/AdminScreen.vue'
 import AdminCommitsScreen from './screens/AdminCommitsScreen.vue'
@@ -18,14 +18,9 @@ export const router = createRouter({
       component: LoginScreen,
       meta: { public: true },
     },
-    {
-      path: '/join',
-      redirect: (to) => ({
-        name: 'login',
-        query: to.query,
-      }),
-      meta: { public: true },
-    },
+    // NOTE: there is deliberately no '/join' route. That path belongs to Room
+    // Pass, which Traefik routes to a different Service on this same host.
+    // Claiming it here made client-side navigation shadow the real join form.
     {
       path: '/',
       name: 'order',
@@ -66,17 +61,12 @@ router.beforeEach(async (to) => {
     return true
   }
 
-  try {
-    await getPublicSession()
+  // /auth/session, not /public/session. The legacy endpoint reported on a
+  // browser-asserted identity and returned 401 for a real OIDC session, so a
+  // successful login still bounced back to the login screen.
+  const session = await getSession()
+  if (session !== null) {
     return true
-  } catch (error) {
-    const apiError = error as ApiError
-    if (apiError.status === 401) {
-      return {
-        name: 'login',
-        query: { next: to.fullPath },
-      }
-    }
-    throw error
   }
+  return { name: 'login', query: { next: to.fullPath } }
 })

@@ -11,11 +11,11 @@ import SubmitBar from '../components/submission/SubmitBar.vue'
 import { useSessionStore } from '../stores/session'
 import { useDraftSubmissionStore } from '../stores/draftSubmission'
 import { createQuizSubmission } from '../api/kube'
-import { getPublicSession } from '../api/coffee'
+import { getSession } from '../api/session'
 
 async function isSignedOut(): Promise<boolean> {
   try {
-    await getPublicSession()
+    await getSession()
     return false
   } catch (e: any) {
     return e?.status === 401

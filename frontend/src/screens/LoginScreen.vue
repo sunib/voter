@@ -1,202 +1,83 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { getPublicSession, loginPublic, type ApiError } from '../api/coffee'
-import {
-  defaultDisplayName,
-  defaultEmail,
-  getOrGenerateStableID,
-} from '../lib/demoIdentity'
+// There is no login form here any more.
+//
+// Identity comes from Dex, and who a participant is gets decided by Room Pass
+// (room code + chosen name) or by GitHub — never by this browser. The old
+// screen collected a display name, an email and a generated "stable ID" and
+// posted them to the backend, which trusted them. That is the exact thing the
+// OIDC flow exists to remove, so this screen's only job is to hand the browser
+// to /auth/login and get out of the way.
+//
+// A full page navigation, not a fetch: /auth/login answers with a 302 to the
+// issuer, and a redirect chain to a different origin cannot be followed from
+// inside XHR.
+import { onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 
 const route = useRoute()
-const router = useRouter()
+const failed = ref(false)
 
-const stableId = ref('')
-const displayName = ref('')
-const email = ref('')
-const code = ref('')
-const checkingSession = ref(true)
-const busy = ref(false)
-const error = ref('')
-
-const queryCode = computed(() => {
-  const raw = route.query.code
-  return typeof raw === 'string' ? raw.trim() : ''
-})
-
-const nextPath = computed(() => normalizeNextPath(route.query.next))
-const codeFromQr = computed(() => queryCode.value !== '')
-const canSubmit = computed(
-  () =>
-    displayName.value.trim() !== '' &&
-    email.value.trim() !== '' &&
-    code.value.trim() !== '',
-)
-
-watch(
-  queryCode,
-  (nextCode) => {
-    if (nextCode !== '') {
-      code.value = nextCode
-    }
-  },
-  { immediate: true },
-)
-
-onMounted(async () => {
-  stableId.value = getOrGenerateStableID()
-  displayName.value = defaultDisplayName(stableId.value)
-  email.value = defaultEmail(stableId.value)
-
-  try {
-    await getPublicSession()
-    await router.replace(nextPath.value)
-  } catch (caught) {
-    const apiError = caught as ApiError
-    if (apiError.status !== 401) {
-      error.value = apiError.message
-    }
-  } finally {
-    checkingSession.value = false
+function loginUrl(): string {
+  const params = new URLSearchParams()
+  const next = typeof route.query.next === 'string' ? route.query.next : ''
+  // Only same-site paths: a full URL here would turn login into an open
+  // redirect. The backend validates this again.
+  if (next.startsWith('/') && !next.startsWith('//')) {
+    params.set('return', next)
   }
-})
+  const connector = typeof route.query.connector === 'string' ? route.query.connector : ''
+  if (connector !== '') {
+    params.set('connector', connector)
+  }
+  const query = params.toString()
+  return query === '' ? '/auth/login' : `/auth/login?${query}`
+}
 
-async function submit() {
-  if (!canSubmit.value || busy.value) {
+function go() {
+  window.location.assign(loginUrl())
+}
+
+onMounted(() => {
+  // Guard against a redirect loop: if we are back here immediately after being
+  // sent to login, show the button instead of bouncing forever.
+  const key = 'voter:login-redirected-at'
+  const last = Number(sessionStorage.getItem(key) ?? '0')
+  const now = Date.now()
+  if (now - last < 5000) {
+    failed.value = true
     return
   }
-
-  busy.value = true
-  error.value = ''
-  try {
-    await loginPublic({
-      code: code.value.trim(),
-      stableId: stableId.value,
-      displayName: displayName.value.trim(),
-      email: email.value.trim(),
-    })
-    await router.replace(nextPath.value)
-  } catch (caught) {
-    error.value = (caught as Error).message
-  } finally {
-    busy.value = false
-  }
-}
-
-function normalizeNextPath(raw: unknown): string {
-  if (typeof raw !== 'string') {
-    return '/'
-  }
-
-  const trimmed = raw.trim()
-  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) {
-    return '/'
-  }
-
-  try {
-    const url = new URL(trimmed, window.location.origin)
-    if (url.origin !== window.location.origin) {
-      return '/'
-    }
-    return `${url.pathname}${url.search}${url.hash}`
-  } catch {
-    return '/'
-  }
-}
+  sessionStorage.setItem(key, String(now))
+  go()
+})
 </script>
 
 <template>
-  <main class="page-shell page-shell--centered">
-    <section class="hero-card hero-card--compact">
-      <p class="eyebrow">Demo Access</p>
-      <h1>Enter</h1>
-      <p class="hero-copy">
-        Press <strong>Join the demo</strong> to enter with the pre-filled
-        defaults, or personalize your display name and email to see them in the
-        commit history.
-      </p>
-    </section>
-
-    <section class="panel">
-      <div class="section-heading">
-        <div>
-          <h2>Sign in</h2>
-          <p class="metadata-copy">
-            {{
-              codeFromQr
-                ? 'The code was included from the QR.'
-                : 'If you opened this page directly, also fill in the demo code.'
-            }}
-          </p>
-        </div>
-      </div>
-
-      <p v-if="error" class="error-copy">{{ error }}</p>
-      <p v-else-if="checkingSession" class="metadata-copy">Checking session…</p>
-
-      <label v-if="!codeFromQr" class="field">
-        <span>Access code</span>
-        <input
-          v-model="code"
-          type="text"
-          inputmode="text"
-          autocapitalize="none"
-          spellcheck="false"
-          placeholder="1234"
-          :disabled="busy || checkingSession"
-          @keyup.enter="submit"
-        />
-      </label>
-
-      <div v-else class="embedded-card">
-        <strong>QR code attached</strong>
-        <p class="metadata-copy">
-          This login uses the code from the link. You can now press
-          <strong>Join the demo</strong> directly.
-        </p>
-      </div>
-
-      <label class="field">
-        <span>Display name</span>
-        <input
-          v-model="displayName"
-          type="text"
-          maxlength="64"
-          :disabled="busy || checkingSession"
-          @keyup.enter="submit"
-        />
-        <small class="metadata-copy"
-          >Shown as the commit author on your changes.</small
-        >
-      </label>
-
-      <label class="field">
-        <span>Email</span>
-        <input
-          v-model="email"
-          type="email"
-          inputmode="email"
-          autocapitalize="none"
-          spellcheck="false"
-          :disabled="busy || checkingSession"
-          @keyup.enter="submit"
-        />
-        <small class="metadata-copy"
-          >Used as the commit author email. Replace it with your own to see
-          your real address in Git.</small
-        >
-      </label>
-
-      <div class="hero-actions">
-        <button
-          class="button"
-          :disabled="!canSubmit || busy || checkingSession"
-          @click="submit"
-        >
-          {{ busy ? 'Entering…' : 'Join the demo' }}
-        </button>
-        <span class="metadata-copy">After login you'll go to {{ nextPath }}</span>
-      </div>
-    </section>
+  <main class="login">
+    <template v-if="failed">
+      <h1>Sign in</h1>
+      <p>The demo could not start your session automatically.</p>
+      <button type="button" @click="go">Try again</button>
+    </template>
+    <p v-else>Taking you to the sign-in page…</p>
   </main>
 </template>
+
+<style scoped>
+.login {
+  margin: 3rem auto;
+  padding: 0 1rem;
+  max-width: 30rem;
+  font:
+    18px system-ui,
+    sans-serif;
+}
+button {
+  padding: 0.8rem 1.2rem;
+  font: inherit;
+  border: 0;
+  border-radius: 0.4rem;
+  background: #1749a5;
+  color: white;
+}
+</style>

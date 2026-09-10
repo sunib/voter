@@ -3,9 +3,6 @@ package main
 import "strings"
 
 const (
-	coffeeOrderStatusPlaced   = "placed"
-	coffeeOrderStatusRejected = "rejected"
-
 	coffeeFailureVoucherDepleted      = "VoucherDepleted"
 	coffeeFailureVoucherInvalid       = "VoucherInvalid"
 	coffeeFailureVoucherNotApplicable = "VoucherNotApplicable"

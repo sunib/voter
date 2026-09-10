@@ -79,39 +79,3 @@ func TestPrepareCoffeeOrderRejectsInapplicableVoucher(t *testing.T) {
 		t.Fatalf("unexpected failure code: %q", failure.Code)
 	}
 }
-
-func TestCoffeeRuntimeRejectsVoucherAfterUsageLimit(t *testing.T) {
-	runtime := newCoffeeRuntime()
-	voucher := &coffeeVoucherSpec{
-		Code:         "testnet2026",
-		Enabled:      true,
-		MaximumUsage: 1,
-	}
-
-	first := runtime.submit(preparedCoffeeOrder{
-		VoucherCode: "testnet2026",
-		Voucher:     voucher,
-		Currency:    "EUR",
-		Items: []coffeeOrderLine{
-			{SKU: "flat-white", Quantity: 1, UnitPriceCents: 0, LineTotalCents: 0, VoucherApplied: true},
-		},
-	}, nil)
-	if first.Status != coffeeOrderStatusPlaced {
-		t.Fatalf("expected first order to be placed, got %s", first.Status)
-	}
-
-	second := runtime.submit(preparedCoffeeOrder{
-		VoucherCode: "testnet2026",
-		Voucher:     voucher,
-		Currency:    "EUR",
-		Items: []coffeeOrderLine{
-			{SKU: "flat-white", Quantity: 1, UnitPriceCents: 0, LineTotalCents: 0, VoucherApplied: true},
-		},
-	}, nil)
-	if second.Status != coffeeOrderStatusRejected {
-		t.Fatalf("expected second order to be rejected, got %s", second.Status)
-	}
-	if second.FailureCode != coffeeFailureVoucherDepleted {
-		t.Fatalf("unexpected rejection code: %q", second.FailureCode)
-	}
-}
