@@ -115,8 +115,8 @@
     "source=gobuildcache,target=/home/vscode/.cache/go-build,type=volume",
     // Keeps `npm ci` for the frontend off the network on every rebuild.
     "source=npmcache,target=/home/vscode/.npm,type=volume",
-    "source=codexconfig,target=/home/vscode/.codex,type=volume",
-    "source=claudeconfig,target=/home/vscode/.claude,type=volume",
+    "source=voter-codexconfig,target=/home/vscode/.codex,type=volume",
+    "source=voter-claudeconfig,target=/home/vscode/.claude,type=volume",
     // Deliberately NOT the `dotkube` volume the sibling repos use: that one carries
     // whatever kubeconfig and current-context they were last pointed at, including
     // work-cluster credentials. Section 8 of the platform implementation plan
@@ -128,7 +128,7 @@
     // Keeps the gh CLI logged in across rebuilds. Without it every rebuild drops
     // ~/.config/gh and gh asks for `gh auth login` again.
     "source=ghconfig,target=/home/vscode/.config/gh,type=volume",
-    "source=persisted-home,target=/home/vscode/persisted-home,type=volume"
+    "source=voter-persisted-home,target=/home/vscode/persisted-home,type=volume"
   ],
   "containerEnv": {
     "HOST_PROJECT_PATH": "${localWorkspaceFolder}",
