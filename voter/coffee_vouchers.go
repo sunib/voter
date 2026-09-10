@@ -79,6 +79,20 @@ func (l *voucherLedger) used(code string) int {
 	return l.count[key]
 }
 
+// snapshot copies the current counts. The admin screen shows these next to
+// each voucher's maximumUsage: without them an operator watching orders fail
+// would read "Used 0 / 1" and conclude the voucher was fine, which is exactly
+// the wrong diagnosis at exactly the wrong moment.
+func (l *voucherLedger) snapshot() map[string]int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make(map[string]int, len(l.count))
+	for code, n := range l.count {
+		out[code] = n
+	}
+	return out
+}
+
 // release gives a redemption back. It exists for one case: the order was
 // counted, and then a later step of the same request failed, so the
 // participant never got the coffee. Without it a failed write would silently

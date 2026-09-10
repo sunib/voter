@@ -4,6 +4,7 @@ import { formatConflictValue, humanizePath } from '../adminFormatters'
 import {
   formatMoney,
   getAdminCoffeeConfig,
+  getVoucherUsage,
   patchAdminCoffeeConfig,
   type ApiError,
 } from '../api/coffee'
@@ -76,7 +77,12 @@ async function loadAdminState() {
   loading.value = true
   loadError.value = ''
   try {
-    resetConfigState(await getAdminCoffeeConfig())
+    const [config, usage] = await Promise.all([
+      getAdminCoffeeConfig(),
+      getVoucherUsage(),
+    ])
+    resetConfigState(config)
+    voucherUsage.value = usage.voucherUsage
   } catch (error) {
     loadError.value = (error as ApiError).message
   } finally {
@@ -104,6 +110,7 @@ async function saveConfig() {
     // request. Say so rather than reporting an unqualified success -- the
     // whole point of the demo is that the change becomes a commit.
     commitNotice.value = result.commitError ?? ''
+    voucherUsage.value = (await getVoucherUsage()).voucherUsage
   } catch (error) {
     loadError.value = (error as Error).message
   } finally {
@@ -118,7 +125,12 @@ async function saveConfig() {
 // machinery it feeds is what the watch will use again. See PLAN.md section 1.
 async function refreshFromServer() {
   try {
-    applyIncomingConfig(await getAdminCoffeeConfig())
+    const [config, usage] = await Promise.all([
+      getAdminCoffeeConfig(),
+      getVoucherUsage(),
+    ])
+    applyIncomingConfig(config)
+    voucherUsage.value = usage.voucherUsage
   } catch (error) {
     loadError.value = (error as ApiError).message
   }

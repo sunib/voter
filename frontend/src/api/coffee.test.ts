@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   getAdminCoffeeConfig,
   getStorefront,
+  getVoucherUsage,
   patchAdminCoffeeConfig,
   submitOrder,
 } from './coffee'
@@ -203,5 +204,20 @@ describe('the save result', () => {
     await expect(
       submitOrder({ items: [{ sku: 'coffee-espresso', quantity: 1 }] }),
     ).rejects.toMatchObject({ status: 403 })
+  })
+})
+
+describe('voucher usage', () => {
+  it('reads the redemption counts from the participant endpoint', async () => {
+    await signIn()
+    stubFetch({ voucherUsage: { testnet: 3 }, scope: 'process' })
+
+    const usage = await getVoucherUsage()
+
+    expect(only().url).toBe('/public/vouchers')
+    // Keyed by the lower-cased code, which is how the admin screen looks it up
+    // next to each voucher's maximumUsage.
+    expect(usage.voucherUsage.testnet).toBe(3)
+    expect(usage.scope).toBe('process')
   })
 })

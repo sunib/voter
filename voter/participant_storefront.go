@@ -75,6 +75,27 @@ func registerParticipantStorefrontHandlers(mux *http.ServeMux, deps handlerDeps)
 		writeJSON(w, http.StatusOK, buildStorefront(cc, r.URL.Query().Get("voucher")))
 	}))
 
+	// GET /public/vouchers
+	//
+	// How many times each voucher has been redeemed by THIS process. Paired
+	// with maximumUsage from the CoffeeConfig, it is what turns "orders are
+	// failing" into "the limit is 1". It reports no configuration and no
+	// identity, so it needs a session but nothing more.
+	mux.HandleFunc("/public/vouchers", requireParticipant(cfg, func(w http.ResponseWriter, r *http.Request, _ participantSession) {
+		noStore(w)
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		usage := map[string]int{}
+		if deps.vouchers != nil {
+			usage = deps.vouchers.snapshot()
+		}
+		// "scope" is not decoration: these counts are this replica's, since
+		// this boot. A reader who assumes otherwise will misread them.
+		writeJSON(w, http.StatusOK, map[string]any{"voucherUsage": usage, "scope": "process"})
+	}))
+
 	// POST /public/orders
 	mux.HandleFunc("/public/orders", requireParticipant(cfg, func(w http.ResponseWriter, r *http.Request, s participantSession) {
 		noStore(w)

@@ -79,6 +79,11 @@ not dead weight. What is missing is the backend behind them.
       SSE on the deleted session. The screens now re-read on demand instead of
       pretending to be live, and `applyIncomingConfig` — the conflict machinery
       the watch fed — is deliberately kept for when it returns.
+- [x] **Show real voucher usage in the editor.** `GET /public/vouchers` reports
+      this process's redemption counts, and the admin screen shows them beside
+      each `maximumUsage`. Without it the screen read "Used 0 / 1" while orders
+      were failing — the wrong diagnosis at the worst moment. The response
+      carries `scope: "process"` because the number is one replica's, since boot.
 - [ ] **Port the admin orders view** (`/public/admin/orders{,/debug,/stream}`).
       Blocked on the persistence decision below: there is nothing to list while
       orders exist only in memory.
@@ -105,6 +110,7 @@ Route status after this pass:
 | `/public/coffeeconfig` (GET, PATCH) | **wired** |
 | `/public/storefront` | **ported** |
 | `/public/orders` | **ported** |
+| `/public/vouchers` | **new** — redemption counts for the editor |
 | `/public/storefront/watch` | removed from the screen; not ported |
 | `/public/admin/coffeeconfig{/watch,/changes,/changes/stream}` | not ported |
 | `/public/admin/orders{,/debug,/stream}` | not ported |

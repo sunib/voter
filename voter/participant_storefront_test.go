@@ -647,3 +647,56 @@ func TestStorefrontDoesNotFallBackWhenTheTokenIsUnusable(t *testing.T) {
 		t.Fatalf("status = 200: the request succeeded without usable participant credentials")
 	}
 }
+
+// --- voucher usage ----------------------------------------------------------
+
+func TestVoucherUsageReflectsPlacedOrders(t *testing.T) {
+	mux, cfg, _, _ := storefrontFixture(t, demoCoffeeConfig(testnetVoucher(5)))
+
+	type usageResponse struct {
+		VoucherUsage map[string]int `json:"voucherUsage"`
+		Scope        string         `json:"scope"`
+	}
+
+	before := doJSON[usageResponse](t, mux, signedInRequest(t, cfg, "GET", "/public/vouchers", ""), 200)
+	if len(before.VoucherUsage) != 0 {
+		t.Fatalf("usage = %v before any order, want empty", before.VoucherUsage)
+	}
+
+	for range 2 {
+		got := doJSON[coffeeOrderResponse](t, mux,
+			signedInRequest(t, cfg, "POST", "/public/orders", orderBody("TESTNET", "coffee-espresso")), 200)
+		if got.Status != coffeeOrderPlaced {
+			t.Fatalf("order = %+v, want placed", got)
+		}
+	}
+
+	after := doJSON[usageResponse](t, mux, signedInRequest(t, cfg, "GET", "/public/vouchers", ""), 200)
+	// Keyed by the normalized code, which is what the admin screen looks up.
+	if after.VoucherUsage["testnet"] != 2 {
+		t.Fatalf("usage = %v, want testnet:2", after.VoucherUsage)
+	}
+	// The scope is part of the contract: these counts are one replica's, since
+	// boot. A reader who assumes cluster-wide totals will misread them.
+	if after.Scope != "process" {
+		t.Fatalf("scope = %q, want process", after.Scope)
+	}
+}
+
+func TestVoucherUsageRequiresASessionAndRejectsWrites(t *testing.T) {
+	mux, cfg, _, _ := storefrontFixture(t, demoCoffeeConfig(testnetVoucher(5)))
+
+	anon := signedInRequest(t, cfg, "GET", "/public/vouchers", "")
+	anon.Header.Del("Cookie")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, anon)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous status = %d, want 401", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, signedInRequest(t, cfg, "POST", "/public/vouchers", "{}"))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST status = %d, want 405", rec.Code)
+	}
+}

@@ -146,6 +146,18 @@ export async function patchAdminCoffeeConfig(
   })
 }
 
+/** How many times each voucher has been redeemed, keyed by the lower-cased
+ *  code. `scope: "process"` is a warning, not decoration: the count is one
+ *  replica's, since its last restart. */
+export type VoucherUsageSnapshot = {
+  voucherUsage: Record<string, number>
+  scope: string
+}
+
+export async function getVoucherUsage(): Promise<VoucherUsageSnapshot> {
+  return await requestJson<VoucherUsageSnapshot>('/public/vouchers')
+}
+
 export async function getCoffeeConfigChangesSnapshot(): Promise<CoffeeConfigChangesSnapshot> {
   return await requestJson<CoffeeConfigChangesSnapshot>(
     '/public/admin/coffeeconfig/changes',
