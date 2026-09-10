@@ -410,7 +410,7 @@ func (c kubeClient) createCommitRequest(ctx context.Context, params createCommit
 
 	obj := &unstructured.Unstructured{
 		Object: map[string]interface{}{
-			"apiVersion": "configbutler.ai/v1alpha1",
+			"apiVersion": commitRequestAPIVersion,
 			"kind":       "CommitRequest",
 			"metadata": map[string]interface{}{
 				"generateName": "coffee-save-",
@@ -427,10 +427,17 @@ func (c kubeClient) createCommitRequest(ctx context.Context, params createCommit
 	return created.GetName(), nil
 }
 
+// gitops-reverser serves CommitRequest at v1alpha3 and no longer offers
+// v1alpha1 -- api/v1alpha3 is the only API package in the operator. Pinning the
+// old version here made every "save now" fail with a no-matches error against a
+// current install. Both the typed apiVersion string and the GVR must agree, so
+// they share one constant.
+const commitRequestAPIVersion = "configbutler.ai/v1alpha3"
+
 func commitRequestGVR() schema.GroupVersionResource {
 	return schema.GroupVersionResource{
 		Group:    "configbutler.ai",
-		Version:  "v1alpha1",
+		Version:  "v1alpha3",
 		Resource: "commitrequests",
 	}
 }

@@ -269,7 +269,8 @@ func TestCreateCommitRequestSendsExpectedShape(t *testing.T) {
 	if req.method != http.MethodPost {
 		t.Fatalf("method: got %q want POST", req.method)
 	}
-	if !strings.Contains(req.path, "/apis/configbutler.ai/v1alpha1/namespaces/voter/commitrequests") {
+	// v1alpha3 is what a current gitops-reverser serves; v1alpha1 is gone.
+	if !strings.Contains(req.path, "/apis/configbutler.ai/v1alpha3/namespaces/voter/commitrequests") {
 		t.Fatalf("path: got %q, expected to hit the commitrequests endpoint", req.path)
 	}
 
@@ -278,8 +279,8 @@ func TestCreateCommitRequestSendsExpectedShape(t *testing.T) {
 	if got := body["kind"]; got != "CommitRequest" {
 		t.Fatalf("kind: got %v want CommitRequest", got)
 	}
-	if got := body["apiVersion"]; got != "configbutler.ai/v1alpha1" {
-		t.Fatalf("apiVersion: got %v want configbutler.ai/v1alpha1", got)
+	if got := body["apiVersion"]; got != commitRequestAPIVersion {
+		t.Fatalf("apiVersion: got %v want %s", got, commitRequestAPIVersion)
 	}
 
 	meta, _ := body["metadata"].(map[string]any)
