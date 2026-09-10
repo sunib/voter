@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gorilla/securecookie"
+	"github.com/prometheus/client_golang/prometheus"
 
 	api "github.com/sunib/voter/room-pass/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
@@ -143,6 +144,10 @@ func TestHandoffHeadersReplayAndCSRF(t *testing.T) {
 	}))
 	defer dex.Close()
 	s, _ := fixture(t, dex.URL)
+	reg := prometheus.NewRegistry()
+	if _, err := s.Instrument(reg); err != nil {
+		t.Fatal(err)
+	}
 	b := newBrowser()
 	w := b.request(s, "GET", "https://login.test/callback/room-pass?state=dex-transaction", nil)
 	for i := 0; i < 3; i++ {
@@ -188,6 +193,7 @@ func TestHandoffHeadersReplayAndCSRF(t *testing.T) {
 	if w = b.request(s, "GET", complete, nil); w.Code != 403 {
 		t.Fatal("replay accepted")
 	}
+	assertCounter(t, reg, "room_pass_identity_handoffs_total", 1)
 	for _, path := range []string{"/callback", "/callback/other", "/callback/room", "/callback/room-pass/", "/%63allback", "/unknown"} {
 		if w = b.request(s, "GET", "https://login.test"+path, nil); w.Code < 400 {
 			t.Fatalf("alias reached Dex: %s", path)

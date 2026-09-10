@@ -83,6 +83,7 @@ and test an authorization mechanism for that explicitly.
 | [Room Pass server](../room-pass/internal/server/server_test.go) | Enrollment lifecycle, stopped/expired Room, tampered cookie, handoff replay and CSRF |
 | [Room Pass API](../room-pass/test/integration/api_test.go) | CRD API behavior using envtest |
 | [Dex network boundary](../room-pass/test/network/network_test.go) | Real Dex, allowed/denied pod matrix, Service and Pod IP, policy removal/restoration; `task test-network` runs in CI |
+| [Browser login](../room-pass/test/browser/room-auth.spec.js) | Chromium enrollment/return flow, invalid code, CSRF, closed enrollment and cookie flags; CI retains video |
 | [Room Pass e2e](../room-pass/test/e2e/e2e_test.go) | Local Dex/Kubernetes fixture; separate from CI and the real app browser |
 
 Run `task voter:test`, `task room-pass:test`, and `task test-integration`.

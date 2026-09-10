@@ -1,0 +1,16 @@
+# Optional: requires Prometheus Operator. Adapt namespace and discovery labels
+# to the platform; intentionally not included in the component base.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: room-pass
+  namespace: room-pass
+spec:
+  selector:
+    matchLabels:
+      app: room-pass
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s

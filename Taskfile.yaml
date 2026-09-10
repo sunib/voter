@@ -201,3 +201,8 @@ tasks:
     desc: Verify Dex pod isolation and permitted callers in a disposable cluster
     cmds:
       - task: room-pass:test-network
+
+  test-browser:
+    desc: Run Playwright room login tests (requires task room-pass:e2e-up)
+    cmds:
+      - task: room-pass:browser

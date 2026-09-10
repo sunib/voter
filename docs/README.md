@@ -8,6 +8,8 @@
 - [Login explanation](../room-pass/login-explained.md)
 - [Authorization and tests](authorization.md)
 - [Implementation plan](../room-pass/implementation_plan.md)
+- [Room Pass metrics](../room-pass/docs/metrics.md)
+- [Browser login tests](../room-pass/test/browser/README.md)
 - [CI](ci.md)
 - [Room Pass component](../room-pass/README.md)
 

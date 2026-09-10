@@ -92,3 +92,11 @@ tasks:
     desc: Test Dex NetworkPolicy with real pods in a disposable k3d cluster
     cmds:
       - bash test/network/run.sh
+
+  browser:
+    desc: Run Chromium room-login tests against the local e2e fixture
+    dir: test/browser
+    cmds:
+      - npm ci
+      - npx playwright install --with-deps chromium
+      - npm test

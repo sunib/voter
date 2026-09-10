@@ -21,6 +21,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
@@ -66,14 +67,18 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	mgr, e := ctrl.NewManager(cfg, ctrl.Options{Scheme: scheme, Cache: cache.Options{DefaultNamespaces: map[string]cache.Config{ns: {}}}, Metrics: metricsserver.Options{BindAddress: "0"}, HealthProbeBindAddress: "0", LeaderElection: false})
+	mgr, e := ctrl.NewManager(cfg, ctrl.Options{Scheme: scheme, Cache: cache.Options{DefaultNamespaces: map[string]cache.Config{ns: {}}}, Metrics: metricsserver.Options{BindAddress: env("METRICS_ADDR", ":9090")}, HealthProbeBindAddress: "0", LeaderElection: false})
 	if e != nil {
 		return e
 	}
 	if e = ctrl.NewControllerManagedBy(mgr).For(&api.Room{}).Complete(&controller.Reconciler{Client: db, Room: key}); e != nil {
 		return e
 	}
-	httpServer := &http.Server{Addr: env("LISTEN_ADDR", ":8080"), Handler: app, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
+	handler, e := app.Instrument(metrics.Registry)
+	if e != nil {
+		return fmt.Errorf("metrics: %w", e)
+	}
+	httpServer := &http.Server{Addr: env("LISTEN_ADDR", ":8080"), Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 	errs := make(chan error, 2)
 	go func() { errs <- mgr.Start(ctx) }()
 	go func() { errs <- httpServer.ListenAndServe() }()

@@ -224,3 +224,12 @@ files` can mean `fs.inotify.max_user_instances` is exhausted. Check the node's c
 log; increase that host runtime limit before retrying. Setup does not silently tune host
 sysctls or stop unrelated clusters. Local TLS certificates expire after seven days;
 recreate the fixture to generate a new CA and trust it in the test browser.
+
+## Observability and browser verification
+
+Room Pass now serves a separate Prometheus endpoint on port 9090. See
+[metrics](docs/metrics.md) for meanings, privacy guarantees and troubleshooting queries.
+
+Run `task room-pass:e2e-up` from the root, then `task test-browser` to watch the
+room authentication contract exercised in Chromium. The
+[browser suite](test/browser/README.md) retains videos and a successful-login screenshot.

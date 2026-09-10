@@ -53,6 +53,7 @@ type transaction struct {
 	Session                     *session
 }
 type Server struct {
+	metrics       *metrics
 	cfg           Config
 	db            client.Client
 	cookies       *securecookie.SecureCookie
@@ -110,6 +111,9 @@ func New(cfg Config, db client.Client) (*Server, error) {
 	}
 	s := &Server{cfg: cfg, db: db, cookies: securecookie.New(cfg.HashKey, cfg.BlockKey).MaxAge(int(cfg.CookieLifetime.Seconds())), proxy: httputil.NewSingleHostReverseProxy(upstream), transactions: map[string]*transaction{}, joins: rate.NewLimiter(cfg.JoinRate, cfg.JoinBurst), starts: rate.NewLimiter(cfg.HandoffRate, cfg.HandoffBurst), now: time.Now}
 	s.proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, e error) {
+		if s.metrics != nil {
+			s.metrics.upstreamErrors.Inc()
+		}
 		http.Error(w, "Identity provider unavailable", 503)
 	}
 	return s, nil
@@ -221,7 +225,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// third party -- which is what no-referrer was here to protect.
 	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self'; form-action 'self'; frame-ancestors 'none'")
+	// Chromium applies form-action to redirect destinations as well. The join
+	// POST must be allowed to continue to the configured issuer origin.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self'; form-action 'self' "+s.cfg.IssuerOrigin+"; frame-ancestors 'none'")
 	// Never trust client identity or forwarded routing information, even on Dex aliases.
 	for k := range r.Header {
 		low := strings.ToLower(k)
@@ -354,6 +360,9 @@ func (s *Server) csrfReason(r *http.Request) string {
 // ways to fail and every one of them used to be silent, which made a browser
 // that "just says Invalid form" impossible to debug from the outside.
 func (s *Server) logReject(r *http.Request, reason string, extra ...any) {
+	if s.metrics != nil {
+		s.metrics.rejections.WithLabelValues(reason).Inc()
+	}
 	args := []any{"reason", reason, "path", r.URL.Path, "method", r.Method, "host", r.Host}
 	slog.Warn("room-pass rejected a request", append(args, extra...)...)
 }
@@ -369,7 +378,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 
 var page = template.Must(template.New("join").Parse(pageSource))
 
-const pageSource = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Join the room</title><style>body{font:18px system-ui;margin:3rem auto;padding:0 1rem;max-width:30rem;background:#f8fafc;color:#172033}input,button{box-sizing:border-box;width:100%;padding:.8rem;margin:.4rem 0 1rem;font:inherit}button{background:#1749a5;color:white;border:0;border-radius:.4rem}label{display:block}small{line-height:1.5}</style><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .Form}}<form method="post" action="/join"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="handoff" value="{{.Handoff}}"><input type="hidden" name="return" value="{{.Return}}">{{if .Enrolled}}<p>You’re already enrolled as <strong>{{.EnrolledName}}</strong>. Continue with the same demo identity.</p>{{else}}<label>Room code<input name="code" required maxlength="24" autocomplete="off" autocapitalize="characters" placeholder="BCD-FGH"></label><label>Display name<input name="name" required maxlength="64" autocomplete="nickname"></label>{{end}}<button>Continue</button></form>{{end}}{{if .Enrolled}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out of this browser</button></form>{{end}}<small>Your name is a demo label, not a verified identity. Demo changes may appear in Git with this name and a generated email address.</small></html>`
+const pageSource = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Join the room</title><style>body{font:18px system-ui;margin:3rem auto;padding:0 1rem;max-width:30rem;background:#f8fafc;color:#172033}input,button{box-sizing:border-box;width:100%;padding:.8rem;margin:.4rem 0 1rem;font:inherit}button{background:#1749a5;color:white;border:0;border-radius:.4rem}label{display:block}small{line-height:1.5}</style><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .Form}}<form method="post" action="/join"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="handoff" value="{{.Handoff}}"><input type="hidden" name="return" value="{{.Return}}">{{if .Enrolled}}<p>You’re already enrolled as <strong>{{.EnrolledName}}</strong>. Continue with the same demo identity.</p>{{else}}<label>Room code<input name="code" required maxlength="24" autocomplete="off" autocapitalize="characters" placeholder="BCDFGH"></label><label>Display name<input name="name" required maxlength="64" autocomplete="nickname"></label>{{end}}<button>Continue</button></form>{{end}}{{if .Enrolled}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out of this browser</button></form>{{end}}<small>Your name is a demo label, not a verified identity. Demo changes may appear in Git with this name and a generated email address.</small></html>`
 
 func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" && r.Method != "POST" {
@@ -508,6 +517,12 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, dest, 303)
 }
 func (s *Server) enrollParticipant(ctx context.Context, code, name string) (session, error) {
+	result := "storage_error"
+	defer func() {
+		if s.metrics != nil {
+			s.metrics.enrollments.WithLabelValues(result).Inc()
+		}
+	}()
 	s.enroll.Lock()
 	defer s.enroll.Unlock()
 	room, e := s.room(ctx)
@@ -515,6 +530,7 @@ func (s *Server) enrollParticipant(ctx context.Context, code, name string) (sess
 		return session{}, errors.New("Room temporarily unavailable")
 	}
 	if !controller.Accepts(room, code, s.now()) {
+		result = "code_or_room_rejected"
 		return session{}, errors.New("That code is invalid or joining has closed. Check the presenter’s current code.")
 	}
 	ps := &api.ParticipantList{}
@@ -528,6 +544,7 @@ func (s *Server) enrollParticipant(ctx context.Context, code, name string) (sess
 		}
 	}
 	if count >= room.Spec.MaxParticipants {
+		result = "full"
 		return session{}, errors.New("This room is full. Please ask the presenter.")
 	}
 	id, e := randomID()
@@ -543,6 +560,7 @@ func (s *Server) enrollParticipant(ctx context.Context, code, name string) (sess
 		}
 		p = found
 	}
+	result = "enrolled"
 	return session{RoomUID: string(room.UID), Name: p.Name, UID: string(p.UID), Expires: s.now().Add(s.cfg.CookieLifetime).Unix()}, nil
 }
 func (s *Server) start(w http.ResponseWriter, r *http.Request) {
@@ -620,6 +638,9 @@ func (s *Server) complete(w http.ResponseWriter, r *http.Request) {
 	r.URL.Path = s.callbackPath()
 	r.URL.RawPath = ""
 	r.URL.RawQuery = url.Values{"state": {tx.State}}.Encode()
+	if s.metrics != nil {
+		s.metrics.handoffs.Inc()
+	}
 	s.proxy.ServeHTTP(w, r)
 }
 

@@ -35,8 +35,9 @@ duplicate Makefile are also removed. Maintained commands use Task.
    restoration. A complete demo journey is not established.
 2. **Access needs deeper proof.** New HTTP tests cover local gates and upstream
    denials; rendered authenticator and real RBAC tests across three connectors
-   remain to be built. Browser testing is absent; the local e2e client cannot catch
-   browser-only Origin behavior.
+   remain to be built. Chromium now tests the local Room Pass/Dex login fixture
+   in CI, including the cross-origin form redirect that exposed a CSP bug. The real
+   Voter journey still needs separate browser coverage.
 3. **Deployment has one owner.** The legacy root `k8s/` and `k8s-examples/`
    manifests have been removed. The OIDC application deployment and demo CRDs
    live in the external platform checkout; rendered deployment verification remains
@@ -62,3 +63,15 @@ Start with [authorization and tests](docs/authorization.md), then follow the
 [architecture](room-pass/advised_architecture.md) and
 [login explanation](room-pass/login-explained.md) describe the current model.
 The [documentation index](docs/README.md) separates current guidance from history.
+
+## Room Pass observability and browser checks
+
+Prometheus metrics are available on the separate `:9090/metrics` listener, covering
+HTTP outcomes/latency, enrollments, detailed rejections, Dex transport failures and
+handoff pressure. The component manifests expose a metrics Service port; platform
+monitoring adoption remains separate. See [metrics](room-pass/docs/metrics.md).
+
+Chromium tests record the real room-authentication flow through the local fixture,
+including returning enrollment and denial cases. They found and verified a fix for
+CSP blocking a form redirect from the join origin to the configured issuer. See
+[browser tests](room-pass/test/browser/README.md).

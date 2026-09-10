@@ -2,3 +2,7 @@
 bin
 .git
 requirements.md
+
+**/node_modules
+**/test-results
+**/playwright-report

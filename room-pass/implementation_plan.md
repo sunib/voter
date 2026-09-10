@@ -59,6 +59,11 @@ gets understandable denials; the expected user appears in audit and Git output.
 
 ## 3. Exercise the browser and lifecycle
 
+- [x] Add Chromium tests for the Room Pass + Dex fixture: enrollment and stable
+  return identity, invalid code, CSRF, cookie flags and closed enrollment. Run in
+  CI with retained recordings. Fix the cross-origin form redirect CSP found by it.
+- [x] Expose operational metrics with bounded labels and scrape-time handoff gauges.
+
 - [ ] Add browser-driven login through the real Voter app and Room Pass form,
   including browser Origin behavior, returning enrollment, logout and expiry.
 - [ ] Test state/nonce mismatch, wrong issuer/audience/signature and successful

@@ -300,6 +300,31 @@ jobs:
             "${CI_CONTAINER}" \
             bash -lc 'task test-network'
 
+      - name: Verify room authentication in Chromium
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:${CI_WORKDIR}" \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -w "${CI_WORKDIR}" \
+            "${CI_CONTAINER}" \
+            bash -lc '
+              set -e
+              trap "task room-pass:e2e-down" EXIT
+              task room-pass:e2e-up
+              task test-browser
+            '
+
+      - name: Keep browser recordings and failure traces
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: room-auth-browser-results
+          path: |
+            room-pass/test/browser/test-results/
+            room-pass/test/browser/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
   images:
     name: Image (${{ matrix.name }})
     runs-on: ubuntu-latest

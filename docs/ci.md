@@ -147,3 +147,7 @@ traffic to real Dex using the platform policy snapshot. See the
 [network suite](../room-pass/test/network/README.md) for cases, controls and how
 to test a platform policy edit directly. This gate does not require private
 repository access, live cluster credentials or external-provider login secrets.
+
+The test job also builds the Room Pass local fixture and runs `task test-browser`
+in Chromium, then tears the fixture down. Browser videos, failure traces and the
+HTML report are retained as `room-auth-browser-results` for seven days.

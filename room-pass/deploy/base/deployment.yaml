@@ -28,6 +28,8 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            - name: metrics
+              containerPort: 9090
           env:
             - name: ROOM_NAME
               value: demo
