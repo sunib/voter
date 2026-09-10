@@ -368,15 +368,15 @@ func TestConnectorFor(t *testing.T) {
 		query string
 		want  string
 	}{
-		{"default connector when none requested", provider("room", "github"), "", "room"},
-		{"an offered choice is honoured", provider("room", "github"), "?connector=github", "github"},
-		{"an unlisted connector falls back to the default", provider("room", "github"), "?connector=evil", "room"},
+		{"default connector when none requested", provider("room-pass", "github"), "", "room-pass"},
+		{"an offered choice is honoured", provider("room-pass", "github"), "?connector=github", "github"},
+		{"an unlisted connector falls back to the default", provider("room-pass", "github"), "?connector=evil", "room-pass"},
 		{"no default and no choices lets Dex ask", provider(""), "", ""},
 		{"a request cannot invent a connector", provider(""), "?connector=github", ""},
 		// Trimmed, then matched against the allowlist -- so surrounding
 		// whitespace is tolerated but cannot smuggle in an unlisted value.
-		{"surrounding whitespace is trimmed", provider("room", "github"), "?connector=+github+", "github"},
-		{"a near-miss is not a match", provider("room", "github"), "?connector=github2", "room"},
+		{"surrounding whitespace is trimmed", provider("room-pass", "github"), "?connector=+github+", "github"},
+		{"a near-miss is not a match", provider("room-pass", "github"), "?connector=github2", "room-pass"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.p.connectorFor(req(tc.query)); got != tc.want {

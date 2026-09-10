@@ -1,11 +1,11 @@
 # The boundary that makes ONE Dex safe.
 #
-# Dex now carries an `authproxy` connector (id: room) for conference
+# Dex now carries an `authproxy` connector (id: room-pass) for conference
 # participants. authproxy does not authenticate anything -- it BELIEVES the
-# X-Remote-* request headers on /callback/room. Room Pass's entire security
+# X-Remote-* request headers on /callback/room-pass. Room Pass's entire security
 # value is being the only thing that can set them.
 #
-# Traefik enforces that at L7: /callback/room on dex.k8s.koudijs.dev routes to
+# Traefik enforces that at L7: /callback/room-pass on dex.k8s.koudijs.dev routes to
 # Room Pass, never to Dex (see 2-gitops/voter-demo/ingress.yaml). This policy is
 # what stops anything bypassing that rule by dialing dex-dex.dex.svc:5556
 # directly -- which, before this file existed, every pod in the cluster could
@@ -19,7 +19,7 @@
 # so restricting ingress to Traefik costs none of them anything.
 #
 # Room Pass is the one exception: it forwards the verified handoff straight to
-# Dex's /callback/room with the identity headers set.
+# Dex's /callback/room-pass with the identity headers set.
 #
 # Cilium enforces NetworkPolicy on this cluster. kubernetes.io/metadata.name is
 # set automatically by Kubernetes on every namespace, so these selectors need no

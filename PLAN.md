@@ -170,9 +170,27 @@ Items in the private `ConfigButler/k8s` checkout, not this repository.
       reboot could not lock anyone out. Confirm an OIDC `kubectl auth whoami`
       reports `github:simonkoudijs@gmail.com` first — a `kubectl` run with the
       admin client cert reports `admin` and proves nothing here.
-- [ ] **Drop `legacyConnectorIds: ["room"]`** at `1-talos/values.yaml:111`.
-      Needs another rolling reboot, so batch it with the next authenticator
-      change. Roll one node at a time and re-check the md5 across all three.
+- [ ] **Finish the `room` → `room-pass` rename.** Every *functional* place is
+      already `room-pass` (verified live: Dex connector `id: room-pass` with no
+      `room` connector remaining, Traefik matching
+      `Path(/callback/room-pass) || PathPrefix(/room-pass)`, and both
+      `OIDC_CONNECTOR_ID` and `CONNECTOR_ID` set to `room-pass`). What is left:
+      - `legacyConnectorIds: ["room"]` at `1-talos/values.yaml:112`. The
+        rendered authenticator on the nodes still accepts `'room'` in both the
+        validation and the containment rule, for an id nothing can issue any
+        more. Removing it needs a rolling reboot, so batch it with the next
+        authenticator change; roll one node at a time and re-check the md5
+        across all three.
+      - `2-gitops/auth/authentication-config.reference.yaml:39,44,51` still
+        reads `['github', 'room']` and has no `linkedin` branch at all. It is a
+        hand-maintained approximation of a privilege boundary that no longer
+        matches the rendered one — delete it, or generate it from the template.
+      - Comments naming the old path: `2-gitops/auth/dex/networkpolicy.yaml:5,8,22`,
+        `2-gitops/voter-demo/README.md:19,25`, and
+        `2-gitops/voter-demo/room-pass.yaml:94,97`. One actively misdirects —
+        `2-gitops/auth/dex/ingressroute.yaml:14` warns "do not add a rule
+        matching `/callback/room`", which is no longer the path that needs
+        protecting.
 - [ ] Verify the platform-owned manifests against this code: rendered routes,
       identities, permissions, and the new metrics Service port.
 - [ ] Record source revision, image digest, deployment revision and rollback
