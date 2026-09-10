@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"html/template"
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -129,6 +130,18 @@ func (s *Server) decode(r *http.Request, name string, value any) error {
 	}
 	return s.cookies.Decode(name, c.Value, value)
 }
+// cookieNames lists the cookie NAMES a request carried. Names only -- the
+// values are credentials. "I do have some cookies" is not a diagnosis; knowing
+// which ones arrived is.
+func cookieNames(r *http.Request) []string {
+	cs := r.Cookies()
+	out := make([]string, 0, len(cs))
+	for _, c := range cs {
+		out = append(out, c.Name)
+	}
+	return out
+}
+
 func (s *Server) room(ctx context.Context) (*api.Room, error) {
 	r := &api.Room{}
 	if e := s.db.Get(ctx, s.cfg.Room, r); e != nil {
@@ -270,8 +283,48 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (s *Server) csrf(r *http.Request) bool {
+	return s.csrfReason(r) == ""
+}
+
+// csrfReason returns "" when the request passes, else a short reason for the
+// log. All four conditions collapse into one user-facing message on purpose --
+// telling a caller which half of the check failed helps an attacker more than
+// it helps a participant -- so the detail lives here instead.
+//
+// Never log the token values themselves: the cookie value IS the credential.
+func (s *Server) csrfReason(r *http.Request) string {
+	if got := r.Header.Get("Origin"); got != s.cfg.JoinOrigin {
+		if got == "" {
+			return "origin-absent"
+		}
+		return "origin-mismatch"
+	}
 	var v string
-	return r.Header.Get("Origin") == s.cfg.JoinOrigin && s.decode(r, "__Host-rp-csrf", &v) == nil && v != "" && r.FormValue("csrf") == v
+	if _, e := r.Cookie("__Host-rp-csrf"); e != nil {
+		return "csrf-cookie-absent"
+	}
+	if e := s.decode(r, "__Host-rp-csrf", &v); e != nil {
+		// Wrong signing key (redeployed with new keys) or an expired cookie.
+		return "csrf-cookie-undecodable"
+	}
+	if v == "" {
+		return "csrf-cookie-empty"
+	}
+	if r.FormValue("csrf") == "" {
+		return "csrf-field-absent"
+	}
+	if r.FormValue("csrf") != v {
+		return "csrf-mismatch"
+	}
+	return ""
+}
+
+// logReject records why a request was turned away. The join flow has a dozen
+// ways to fail and every one of them used to be silent, which made a browser
+// that "just says Invalid form" impossible to debug from the outside.
+func (s *Server) logReject(r *http.Request, reason string, extra ...any) {
+	args := []any{"reason", reason, "path", r.URL.Path, "method", r.Method, "host", r.Host}
+	slog.Warn("room-pass rejected a request", append(args, extra...)...)
 }
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
@@ -311,6 +364,8 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !contains(room.Spec.AllowedReturnURLs, dest) || !contains(s.cfg.AllowedReturns, dest) {
+		s.logReject(r, "return-not-allowed", "dest", dest,
+			"room_allows", room.Spec.AllowedReturnURLs, "deployment_allows", s.cfg.AllowedReturns)
 		http.Error(w, "Unapproved return destination", 400)
 		return
 	}
@@ -322,6 +377,8 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		valid := tx != nil && tx.Confirmed && cookieOK && tx.JoinBrowser == jb && s.now().Before(tx.Expires) && tx.Session == nil
 		s.mu.Unlock()
 		if !valid {
+			s.logReject(r, "handoff-invalid", "tx_found", tx != nil, "join_browser_cookie", cookieOK,
+				"confirmed", tx != nil && tx.Confirmed, "already_used", tx != nil && tx.Session != nil)
 			http.Error(w, "Login expired. Start again from the demo.", 400)
 			return
 		}
@@ -355,11 +412,15 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		_ = page.Execute(w, map[string]any{"Title": room.Spec.Title, "Message": message, "Form": form, "CSRF": csrf, "Handoff": handoff, "Return": dest, "Enrolled": enrolled})
 		return
 	}
-	if !s.csrf(r) {
+	if reason := s.csrfReason(r); reason != "" {
+		s.logReject(r, reason,
+			"origin", r.Header.Get("Origin"), "expected_origin", s.cfg.JoinOrigin,
+			"cookie_names", cookieNames(r), "has_handoff", handoff != "", "enrolled", enrolled)
 		http.Error(w, "Invalid form. Reload and try again.", 403)
 		return
 	}
 	if !form {
+		s.logReject(r, "enrollment-closed", "message", message)
 		http.Error(w, message, 403)
 		return
 	}
@@ -488,6 +549,7 @@ func (s *Server) complete(w http.ResponseWriter, r *http.Request) {
 	}
 	var browser string
 	if s.decode(r, "__Host-rp-browser", &browser) != nil {
+		s.logReject(r, "issuer-browser-cookie-bad", "cookie_names", cookieNames(r))
 		http.Error(w, "Wrong login browser", 403)
 		return
 	}
@@ -566,6 +628,7 @@ func (s *Server) confirm(w http.ResponseWriter, r *http.Request) {
 	}
 	var browser string
 	if s.decode(r, "__Host-rp-browser", &browser) != nil {
+		s.logReject(r, "issuer-browser-cookie-bad", "cookie_names", cookieNames(r))
 		http.Error(w, "Wrong login browser", 403)
 		return
 	}
