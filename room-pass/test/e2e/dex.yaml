@@ -23,7 +23,7 @@ data:
           - /device/callback
     connectors:
       - type: authproxy
-        id: room
+        id: room-pass
         name: Join the room
         config:
           userIDHeader: X-Remote-User-Id

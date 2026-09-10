@@ -26,7 +26,13 @@ import (
 )
 
 type Config struct {
-	Room                                  client.ObjectKey
+	Room client.ObjectKey
+	// ConnectorID is the Dex authproxy connector this gateway serves. Dex
+	// derives the connector's callback path from its id, so this value decides
+	// which path we accept and forward to: id "room-pass" means
+	// /callback/room-pass. Getting it wrong fails closed -- the callback is
+	// refused rather than served for the wrong connector.
+	ConnectorID                           string
 	JoinOrigin, IssuerOrigin, DexUpstream string
 	AllowedReturns                        []string
 	HashKey, BlockKey                     []byte
@@ -262,7 +268,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if strings.HasPrefix(r.URL.Path, "/callback") {
-			if r.URL.Path != "/callback/room" || r.Method != "GET" {
+			if r.URL.Path != s.callbackPath() || r.Method != "GET" {
 				http.Error(w, "Unsupported callback", 403)
 				return
 			}
@@ -289,6 +295,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unknown host", 400)
 	}
 }
+
+// callbackPath is the only /callback path this gateway serves. Dex appends the
+// connector id to the callback URL for an authproxy connector, so the two must
+// agree: connector id "room-pass" produces "/callback/room-pass".
+func (s *Server) callbackPath() string {
+	return "/callback/" + s.cfg.ConnectorID
+}
+
 func (s *Server) csrf(r *http.Request) bool {
 	return s.csrfReason(r) == ""
 }
@@ -593,7 +607,7 @@ func (s *Server) complete(w http.ResponseWriter, r *http.Request) {
 	r.Header.Set("X-Remote-Group", room.Spec.AudienceGroup)
 	r.Header.Del("Cookie")
 	r.Header.Del("Authorization")
-	r.URL.Path = "/callback/room"
+	r.URL.Path = s.callbackPath()
 	r.URL.RawPath = ""
 	r.URL.RawQuery = url.Values{"state": {tx.State}}.Encode()
 	s.proxy.ServeHTTP(w, r)

@@ -21,13 +21,13 @@ CA_PEM
       # the "federated:id" scope, so a client that forgets it is rejected here
       # with a message that says what to fix -- not quietly mapped to some
       # other identity.
-      - expression: "has(claims.federated_claims) && claims.federated_claims.connector_id in ['github', 'room']"
+      - expression: "has(claims.federated_claims) && claims.federated_claims.connector_id in ['github', 'room-pass', 'linkedin']"
         message: unknown or missing Dex connector; the client must request the federated:id scope
       # The room connector authenticates on trusted headers, so its groups are
       # only ever demo groups. This is the rule that keeps a forged header from
       # reaching an operator group on a shared issuer.
-      - expression: "claims.federated_claims.connector_id != 'room' || dyn(claims.groups).all(g, g.startsWith('demo:'))"
-        message: the room connector may only assert demo groups
+      - expression: "claims.federated_claims.connector_id != 'room-pass' || dyn(claims.groups).all(g, g.startsWith('demo:'))"
+        message: the room-pass connector may only assert demo groups
     claimMappings:
       username:
         # Derived from the connector, never from a self-asserted email. The
@@ -36,7 +36,9 @@ CA_PEM
         expression: >-
           claims.federated_claims.connector_id == 'github'
             ? 'github:' + claims.email
-            : 'demo:' + claims.sub
+            : claims.federated_claims.connector_id == 'linkedin'
+              ? 'linkedin:' + claims.email
+              : 'demo:' + claims.sub
       groups:
         claim: groups
         prefix: ''
@@ -46,7 +48,7 @@ CA_PEM
         - key: configbutler.ai/claims/email
           valueExpression: claims.email
     userValidationRules:
-      - expression: "user.username.startsWith('demo:') || user.username.startsWith('github:')"
+      - expression: "user.username.startsWith('demo:') || user.username.startsWith('github:') || user.username.startsWith('linkedin:')"
         message: username must carry a connector prefix
       - expression: "!user.username.startsWith('system:')"
         message: username must not use the Kubernetes system: prefix

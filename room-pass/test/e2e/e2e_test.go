@@ -49,7 +49,7 @@ func (f *flow) login(enroll bool) (string, map[string]any) {
 	f.t.Helper()
 	state := oauth2.GenerateVerifier()
 	verifier := oauth2.GenerateVerifier()
-	u := f.oauth.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier), oauth2.SetAuthURLParam("connector_id", "room"))
+	u := f.oauth.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier), oauth2.SetAuthURLParam("connector_id", "room-pass"))
 	resp, e := f.browser.Get(u)
 	if e != nil {
 		f.t.Fatal(e)
@@ -117,8 +117,8 @@ func (f *flow) login(enroll bool) (string, map[string]any) {
 	if !ok {
 		f.t.Fatalf("no federated_claims in the ID token; is the federated:id scope requested? claims: %v", claims)
 	}
-	if fed["connector_id"] != "room" {
-		f.t.Fatalf("connector_id = %v, want room", fed["connector_id"])
+	if fed["connector_id"] != "room-pass" {
+		f.t.Fatalf("connector_id = %v, want room-pass", fed["connector_id"])
 	}
 	return raw, claims
 }

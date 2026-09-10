@@ -38,7 +38,7 @@ func fixture(t *testing.T, upstream string) (*Server, client.Client) {
 	_ = corev1.AddToScheme(scheme)
 	room := &api.Room{ObjectMeta: metav1.ObjectMeta{Name: "demo", Namespace: "room-pass", UID: "room-uid"}, Spec: api.RoomSpec{Title: "Demo", EndsAt: metav1.NewTime(now.Add(time.Hour)), Enrollment: "Open", MaxParticipants: 100, AudienceGroup: "demo:test", AllowedReturnURLs: []string{"https://demo.test/app/"}}, Status: api.RoomStatus{ValidJoinCodes: []api.Code{{Code: "BCDFGH", IssuedAt: metav1.NewTime(now.Add(-time.Second)), ExpiresAt: metav1.NewTime(now.Add(time.Hour))}}}}
 	db := uidClient{fake.NewClientBuilder().WithScheme(scheme).WithObjects(room).Build()}
-	s, e := New(Config{Room: client.ObjectKeyFromObject(room), JoinOrigin: "https://demo.test", IssuerOrigin: "https://login.test", DexUpstream: upstream, AllowedReturns: []string{"https://demo.test/app/"}, HashKey: []byte(strings.Repeat("h", 32)), BlockKey: []byte(strings.Repeat("b", 32))}, db)
+	s, e := New(Config{Room: client.ObjectKeyFromObject(room), ConnectorID: "room-pass", JoinOrigin: "https://demo.test", IssuerOrigin: "https://login.test", DexUpstream: upstream, AllowedReturns: []string{"https://demo.test/app/"}, HashKey: []byte(strings.Repeat("h", 32)), BlockKey: []byte(strings.Repeat("b", 32))}, db)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -143,7 +143,7 @@ func TestHandoffHeadersReplayAndCSRF(t *testing.T) {
 	defer dex.Close()
 	s, _ := fixture(t, dex.URL)
 	b := newBrowser()
-	w := b.request(s, "GET", "https://login.test/callback/room?state=dex-transaction", nil)
+	w := b.request(s, "GET", "https://login.test/callback/room-pass?state=dex-transaction", nil)
 	for i := 0; i < 3; i++ {
 		if w.Code != 303 {
 			t.Fatalf("binding step %d: %d %s", i, w.Code, w.Body.String())
@@ -187,7 +187,7 @@ func TestHandoffHeadersReplayAndCSRF(t *testing.T) {
 	if w = b.request(s, "GET", complete, nil); w.Code != 403 {
 		t.Fatal("replay accepted")
 	}
-	for _, path := range []string{"/callback", "/callback/other", "/callback/room/", "/%63allback", "/unknown"} {
+	for _, path := range []string{"/callback", "/callback/other", "/callback/room", "/callback/room-pass/", "/%63allback", "/unknown"} {
 		if w = b.request(s, "GET", "https://login.test"+path, nil); w.Code < 400 {
 			t.Fatalf("alias reached Dex: %s", path)
 		}
@@ -197,7 +197,7 @@ func TestStolenCrossHostLinkCannotEnroll(t *testing.T) {
 	s, _ := fixture(t, "http://dex.test")
 	attacker := newBrowser()
 	victim := newBrowser()
-	w := attacker.request(s, "GET", "https://login.test/callback/room?state=attack", nil)
+	w := attacker.request(s, "GET", "https://login.test/callback/room-pass?state=attack", nil)
 	stolen := w.Header().Get("Location")
 	w = victim.request(s, "GET", stolen, nil)
 	confirm := w.Header().Get("Location")
@@ -254,14 +254,14 @@ func TestHandoffCapacityAndExpiry(t *testing.T) {
 	s, _ := fixture(t, "http://dex.test")
 	s.cfg.MaxHandoffs = 1
 	b := newBrowser()
-	if w := b.request(s, "GET", "https://login.test/callback/room?state=one", nil); w.Code != 303 {
+	if w := b.request(s, "GET", "https://login.test/callback/room-pass?state=one", nil); w.Code != 303 {
 		t.Fatal(w.Code)
 	}
-	if w := b.request(s, "GET", "https://login.test/callback/room?state=two", nil); w.Code != 429 {
+	if w := b.request(s, "GET", "https://login.test/callback/room-pass?state=two", nil); w.Code != 429 {
 		t.Fatal("capacity not enforced")
 	}
 	s.now = func() time.Time { return time.Now().Add(4 * time.Minute) }
-	if w := b.request(s, "GET", "https://login.test/callback/room?state=three", nil); w.Code != 303 {
+	if w := b.request(s, "GET", "https://login.test/callback/room-pass?state=three", nil); w.Code != 303 {
 		t.Fatal("expired slot not pruned", w.Code)
 	}
 }

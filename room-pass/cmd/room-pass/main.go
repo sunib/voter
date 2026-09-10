@@ -62,7 +62,7 @@ func run() error {
 	if e = db.Get(ctx, client.ObjectKey{Namespace: ns, Name: env("COOKIE_SECRET", "room-pass-cookie")}, secret); e != nil {
 		return fmt.Errorf("cookie secret: %w", e)
 	}
-	app, e := server.New(server.Config{Room: key, JoinOrigin: os.Getenv("JOIN_ORIGIN"), IssuerOrigin: os.Getenv("ISSUER_ORIGIN"), DexUpstream: os.Getenv("DEX_UPSTREAM"), AllowedReturns: strings.Split(os.Getenv("ALLOWED_RETURN_URLS"), ","), HashKey: secret.Data["hash-key"], BlockKey: secret.Data["block-key"], CookieLifetime: time.Duration(number("COOKIE_LIFETIME_SECONDS", 86400)) * time.Second, JoinRate: rate.Limit(number("JOIN_RATE", 20)), JoinBurst: number("JOIN_BURST", 150), HandoffRate: rate.Limit(number("HANDOFF_RATE", 20)), HandoffBurst: number("HANDOFF_BURST", 150), MaxHandoffs: number("MAX_HANDOFFS", 1000)}, db)
+	app, e := server.New(server.Config{Room: key, ConnectorID: env("CONNECTOR_ID", "room-pass"), JoinOrigin: os.Getenv("JOIN_ORIGIN"), IssuerOrigin: os.Getenv("ISSUER_ORIGIN"), DexUpstream: os.Getenv("DEX_UPSTREAM"), AllowedReturns: strings.Split(os.Getenv("ALLOWED_RETURN_URLS"), ","), HashKey: secret.Data["hash-key"], BlockKey: secret.Data["block-key"], CookieLifetime: time.Duration(number("COOKIE_LIFETIME_SECONDS", 86400)) * time.Second, JoinRate: rate.Limit(number("JOIN_RATE", 20)), JoinBurst: number("JOIN_BURST", 150), HandoffRate: rate.Limit(number("HANDOFF_RATE", 20)), HandoffBurst: number("HANDOFF_BURST", 150), MaxHandoffs: number("MAX_HANDOFFS", 1000)}, db)
 	if e != nil {
 		return e
 	}
