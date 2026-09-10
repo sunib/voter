@@ -326,13 +326,24 @@ func (p *oidcProvider) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Ask Kubernetes who it thinks this token is, rather than guessing at its
+	// claimMappings. A failure here is not fatal: the participant is logged in
+	// either way, and the UI simply has no Kubernetes name to show.
+	reviewCtx, reviewCancel := context.WithTimeout(r.Context(), 10*time.Second)
+	kubeUser, _, reviewErr := kubernetesUsername(reviewCtx, p.cfg, rawIDToken)
+	reviewCancel()
+	if reviewErr != nil {
+		log.Printf("oidc: could not resolve the Kubernetes username for sub=%s: %v", idToken.Subject, reviewErr)
+	}
+
 	if err := setParticipantSession(w, p.cfg, sessionCookieCodec, participantSession{
-		IDToken:     rawIDToken,
-		Subject:     idToken.Subject,
-		DisplayName: claims.Name,
-		Email:       claims.Email,
-		Groups:      claims.Groups,
-		TokenExpiry: idToken.Expiry.Unix(),
+		IDToken:      rawIDToken,
+		Subject:      idToken.Subject,
+		DisplayName:  claims.Name,
+		Email:        claims.Email,
+		Groups:       claims.Groups,
+		KubeUsername: kubeUser,
+		TokenExpiry:  idToken.Expiry.Unix(),
 	}, p.now()); err != nil {
 		// The most likely cause is an oversized cookie. Fail loudly rather
 		// than silently truncating a credential.

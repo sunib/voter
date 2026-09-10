@@ -43,6 +43,11 @@ type participantSession struct {
 	DisplayName string   `json:"name"`
 	Email       string   `json:"email"`
 	Groups      []string `json:"groups"`
+	// KubeUsername is what the API SERVER derived for this token, not what we
+	// think it derived. Empty when the review failed -- the login still stands,
+	// because being able to name your Kubernetes identity is not a precondition
+	// for having one.
+	KubeUsername string `json:"kubeUser,omitempty"`
 	// TokenExpiry is the ID token's own exp. The session is never allowed to
 	// outlive it, whatever the cookie's MaxAge says.
 	TokenExpiry int64 `json:"tokenExp"`

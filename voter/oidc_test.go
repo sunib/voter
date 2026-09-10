@@ -6,6 +6,7 @@ package main
 // or a cross-site POST succeeding without a CSRF token.
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -364,6 +365,52 @@ func TestConnectorFor(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.p.connectorFor(req(tc.query)); got != tc.want {
 				t.Errorf("connectorFor(%q) = %q, want %q", tc.query, got, tc.want)
+			}
+		})
+	}
+}
+
+// The Kubernetes username reported to the SPA must be the one the API SERVER
+// derived, never one this process assembled. It used to be "demo:" + subject,
+// which was a guess at the apiserver's claimMappings and silently became wrong
+// the moment a second Dex connector existed: a LinkedIn login was shown as
+// demo:<sub> while Kubernetes saw linkedin:<email>.
+func TestSessionReportsTheAPIServersUsername(t *testing.T) {
+	cfg, sc := testConfig(), testCodec(t)
+	mux := http.NewServeMux()
+	sessionCookieCodec = sc
+	registerOIDCHandlers(mux, nil, cfg)
+
+	for _, tc := range []struct{ name, kubeUser, subject string }{
+		{"a room-pass participant", "demo:CgQxMjM0Eglyb29tLXBhc3M", "CgQxMjM0Eglyb29tLXBhc3M"},
+		{"a linkedin login is not demo:", "linkedin:someone@example.com", "CgpLNl9QNl82YlpxEghsaW5rZWRpbg"},
+		{"a github login is not demo:", "github:someone@example.com", "CgVhZG1pbhIGZ2l0aHVi"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			s := participantSession{
+				Version: participantCookieVersion,
+				IDToken: "an.opaque.token", Subject: tc.subject,
+				KubeUsername: tc.kubeUser, DisplayName: "Someone", CSRF: "c",
+				TokenExpiry: now.Add(time.Hour).Unix(),
+				IssuedAt:    now.Unix(),
+				ExpiresAt:   now.Add(time.Hour).Unix(),
+			}
+			encoded, err := sc.Encode(cfg.ParticipantCookieName, s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodGet, "/auth/session", nil)
+			req.AddCookie(&http.Cookie{Name: cfg.ParticipantCookieName, Value: encoded})
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+
+			var body map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("not JSON (%d): %s", rec.Code, rec.Body.String())
+			}
+			if got := body["username"]; got != tc.kubeUser {
+				t.Errorf("username = %v, want %q", got, tc.kubeUser)
 			}
 		})
 	}

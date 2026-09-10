@@ -42,9 +42,13 @@ func registerOIDCHandlers(mux *http.ServeMux, p *oidcProvider, cfg config) {
 
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"authenticated": true,
-			// The Kubernetes username this participant acts as. Shown so the
-			// audience can match it against the audit log on screen.
-			"username":    "demo:" + s.Subject,
+			// The Kubernetes username this participant acts as, as reported by
+			// the API server itself (SelfSubjectReview at login) -- so what the
+			// audience sees on screen is what appears in the audit log. This
+			// used to be "demo:" + subject, which was a guess at the apiserver's
+			// claimMappings and became wrong as soon as a second connector
+			// existed. Empty if the review failed.
+			"username":    s.KubeUsername,
 			"displayName": s.DisplayName,
 			"email":       s.Email,
 			"groups":      s.Groups,

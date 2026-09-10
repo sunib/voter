@@ -19,11 +19,15 @@ package main
 //     never be reused for another's request.
 
 import (
+	"context"
 	"crypto/subtle"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
+
+	authenticationv1 "k8s.io/api/authentication/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -94,4 +98,28 @@ func newParticipantClients(cfg config, idToken string) (participantClients, erro
 // the check does not leak the expected value through timing.
 func subtleCompare(a, b string) int {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b))
+}
+
+// kubernetesUsername asks the API server who it thinks this token belongs to.
+//
+// The app used to build this string itself -- "demo:" + the Dex subject -- which
+// was a guess at the apiserver's claimMappings, and it silently became wrong the
+// moment a second connector existed: a LinkedIn login was reported as
+// demo:<sub> when Kubernetes actually saw linkedin:<email>.
+//
+// SelfSubjectReview returns the identity the apiserver ACTUALLY derived, so the
+// name shown to the audience is the one that appears in the audit log. Every
+// authenticated user may call it (system:basic-user), including a participant
+// whose only other permission is to patch one CoffeeConfig.
+func kubernetesUsername(ctx context.Context, cfg config, idToken string) (string, []string, error) {
+	clients, err := newParticipantClients(cfg, idToken)
+	if err != nil {
+		return "", nil, err
+	}
+	review, err := clients.typed.AuthenticationV1().SelfSubjectReviews().Create(
+		ctx, &authenticationv1.SelfSubjectReview{}, metav1.CreateOptions{})
+	if err != nil {
+		return "", nil, fmt.Errorf("self subject review: %w", err)
+	}
+	return review.Status.UserInfo.Username, review.Status.UserInfo.Groups, nil
 }
