@@ -11,10 +11,23 @@ if ! k3d cluster list -o json | python3 -c 'import json,sys;sys.exit(not any(c["
   docker run --rm -i -v room-pass-e2e-config:/config alpine:3.21 sh -c 'cat > /config/ca.crt' < .local/tls.crt
   docker run --rm -i -v room-pass-e2e-config:/config alpine:3.21 sh -c 'cat > /config/audit-policy.yaml' < test/e2e/audit-policy.yaml
   python3 -c 'from pathlib import Path; p=Path("test/e2e/authentication-config.yaml").read_text(); ca=Path(".local/tls.crt").read_text(); Path(".local/authentication-config.yaml").write_text(p.replace("CA_PEM", "\n".join("        "+line for line in ca.splitlines())))'
+  # Parse the RENDERED config before handing it to the apiserver. A malformed
+  # authenticator does not fail loudly: k3s exits, k3d keeps waiting for an API
+  # that will never answer, and the whole thing looks like a slow cluster. That
+  # cost a 30-minute CI timeout on 2026-09-10 -- an unquoted `message:` value
+  # containing ": " parsed as a nested mapping. Two seconds here, instead.
+  python3 -c 'import sys,yaml; yaml.safe_load(open(".local/authentication-config.yaml"))' || {
+    echo "ERROR: .local/authentication-config.yaml is not valid YAML." >&2
+    echo "       The apiserver would fail to start and the bringup would hang." >&2
+    exit 1
+  }
   docker run --rm -i -v room-pass-e2e-config:/config alpine:3.21 sh -c 'cat > /config/authentication-config.yaml' < .local/authentication-config.yaml
   docker network inspect k3d-room-pass-e2e >/dev/null 2>&1 || docker network create k3d-room-pass-e2e >/dev/null
   gateway=$(docker network inspect k3d-room-pass-e2e --format '{{(index .IPAM.Config 0).Gateway}}')
-  k3d cluster create room-pass-e2e --image rancher/k3s:v1.31.5-k3s1 --servers 1 --agents 0 --wait --network k3d-room-pass-e2e --host-alias "$gateway:login.roompass.test" \
+  # --timeout bounds the --wait. Without it a server that never becomes ready
+  # blocks until the CI job's own timeout kills it, which reports as "tests
+  # were cancelled" rather than "the cluster did not come up".
+  k3d cluster create room-pass-e2e --image rancher/k3s:v1.31.5-k3s1 --servers 1 --agents 0 --wait --timeout 180s --network k3d-room-pass-e2e --host-alias "$gateway:login.roompass.test" \
     --kubeconfig-update-default=false --kubeconfig-switch-context=false \
     --port '18443:443@server:0' \
     --volume 'room-pass-e2e-config:/etc/room-pass@server:0' \

@@ -22,12 +22,12 @@ CA_PEM
       # with a message that says what to fix -- not quietly mapped to some
       # other identity.
       - expression: "has(claims.federated_claims) && claims.federated_claims.connector_id in ['github', 'room-pass', 'linkedin']"
-        message: unknown or missing Dex connector; the client must request the federated:id scope
+        message: "unknown or missing Dex connector; the client must request the federated:id scope"
       # The room connector authenticates on trusted headers, so its groups are
       # only ever demo groups. This is the rule that keeps a forged header from
       # reaching an operator group on a shared issuer.
       - expression: "claims.federated_claims.connector_id != 'room-pass' || dyn(claims.groups).all(g, g.startsWith('demo:'))"
-        message: the room-pass connector may only assert demo groups
+        message: "the room-pass connector may only assert demo groups"
     claimMappings:
       username:
         # Derived from the connector, never from a self-asserted email. The
@@ -42,15 +42,27 @@ CA_PEM
       groups:
         claim: groups
         prefix: ''
+      # Mirrors the platform authenticator's extra mappings
+      # (1-talos/templates/_authentication-config.tpl). The email-verified entry
+      # is NOT decoration: kube-apiserver refuses to start an authenticator that
+      # derives a username from claims.email unless claims.email_verified is
+      # referenced somewhere, so that an unverified address can never silently
+      # become an identity. Omitting it here made every cold e2e bringup fail
+      # with the apiserver exiting and k3d waiting for an API that never came.
+      #
+      # The .?/orValue form matches the platform too: a claim that is absent
+      # must yield an empty value, not abort the mapping.
       extra:
         - key: configbutler.ai/claims/display-name
-          valueExpression: claims.name
+          valueExpression: "claims.?name.orValue('')"
         - key: configbutler.ai/claims/email
-          valueExpression: claims.email
+          valueExpression: "claims.?email.orValue('')"
+        - key: configbutler.ai/claims/email-verified
+          valueExpression: "claims.?email_verified.orValue(false) ? 'true' : ''"
     userValidationRules:
       - expression: "user.username.startsWith('demo:') || user.username.startsWith('github:') || user.username.startsWith('linkedin:')"
-        message: username must carry a connector prefix
+        message: "username must carry a connector prefix"
       - expression: "!user.username.startsWith('system:')"
-        message: username must not use the Kubernetes system: prefix
+        message: "username must not use the Kubernetes system: prefix"
       - expression: "user.groups.all(group, !group.startsWith('system:'))"
-        message: groups must not use the Kubernetes system: prefix
+        message: "groups must not use the Kubernetes system: prefix"
