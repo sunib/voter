@@ -7,7 +7,7 @@ updates:
   - package-ecosystem: "gomod"
     # Two independent modules; a directory left off this list silently drifts.
     directories:
-      - "/auth-service"
+      - "/voter"
       - "/room-pass"
     schedule:
       interval: "weekly"
@@ -35,12 +35,13 @@ updates:
           - "*"
 
   - package-ecosystem: "docker"
-    # The devcontainer/CI base image plus the three application Dockerfiles, so
-    # their FROM lines keep moving with upstream.
+    # The devcontainer/CI base image plus the two application Dockerfiles, so
+    # their FROM lines keep moving with upstream. /frontend has no Dockerfile
+    # any more: the Vue bundle is built by voter/Dockerfile, whose node and
+    # golang FROM lines are covered by the /voter entry.
     directories:
       - "/.devcontainer"
-      - "/auth-service"
-      - "/frontend"
+      - "/voter"
       - "/room-pass"
     schedule:
       interval: "weekly"
