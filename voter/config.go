@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/kelseyhightower/envconfig"
+	"k8s.io/client-go/rest"
 )
 
 // Configuration for the application.
@@ -13,6 +14,13 @@ import (
 // join codes, admin password and forward-auth ServiceAccount -- are gone along
 // with the code behind them.
 type config struct {
+	// Metrics has its own listener and is never routed by the application ingress.
+	MetricsAddress string `envconfig:"METRICS_ADDRESS" default:"127.0.0.1:9090"`
+	// An explicit local development credential; never discover the user's default kubeconfig.
+	StreamKubeconfig string `envconfig:"STREAM_KUBECONFIG"`
+	// Public cluster TLS trust copied at startup, without shared-client credentials.
+	participantTLS *rest.TLSClientConfig
+
 	Host string `envconfig:"HOST" default:"0.0.0.0"`
 	Port string `envconfig:"PORT" default:"8080"`
 

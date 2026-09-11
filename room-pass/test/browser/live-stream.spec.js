@@ -341,3 +341,38 @@ test("overlapping edits require an explicit conflict choice", async ({ browser }
     expect(coffeeConfig().spec.shopName).toBe("My chosen name");
   } finally { await editor.context.close(); }
 });
+
+test("shared watches isolate RBAC withdrawal and deny access to a warm cache", async ({ browser }) => {
+  test.setTimeout(75000);
+  const retained = await signIn(browser, "retained-access");
+  const withdrawn = await signIn(browser, "withdrawn-access");
+  const binding = JSON.parse(kube("-n", "room-pass", "get", "rolebinding", "voter-audience", "-o", "json"));
+  const pod = JSON.parse(kube("-n", "room-pass", "get", "pods", "-l", "app=voter", "-o", "json")).items[0].metadata.name;
+  const metrics = () => kube("get", "--raw", `/api/v1/namespaces/room-pass/pods/${pod}:9090/proxy/metrics`);
+  try {
+    expect(await retained.page.evaluate(async () => (await fetch("/metrics")).status)).toBe(404);
+    await expect.poll(metrics).toContain("voter_stream_subscribers 2\n");
+    await expect.poll(metrics).toContain("voter_stream_upstream_watches 1\n");
+    await shopName(withdrawn.page).fill("Keep this unsaved draft");
+    const identity = await retained.page.evaluate(async () => (await fetch("/auth/session")).json());
+    expect(identity.username).toBeTruthy();
+    const started = Date.now();
+    kube("-n", "room-pass", "patch", "rolebinding", "voter-audience", "--type=merge", "-p", JSON.stringify({
+      subjects: [{ kind: "User", name: identity.username, apiGroup: "rbac.authorization.k8s.io" }],
+    }));
+    await expect(withdrawn.page.getByRole("status").getByText(/^FORBIDDEN: Kubernetes refused/)).toBeVisible({ timeout: 60000 });
+    expect(Date.now() - started).toBeLessThan(60000);
+    await expect(shopName(withdrawn.page)).toHaveValue("Keep this unsaved draft");
+    await expect.poll(metrics).toContain("voter_stream_subscribers 1\n");
+    await expect.poll(metrics).toContain("voter_stream_upstream_watches 1\n");
+    const frames = await withdrawn.page.evaluate(async () => (await fetch("/public/stream?group=examples.configbutler.ai&version=v1alpha1&resource=coffeeconfigs&namespace=room-pass&name=demo-coffee")).text());
+    expect(frames).toContain('"terminal":true');
+    expect(frames).not.toContain('"object"');
+    kube("-n", "room-pass", "patch", "coffeeconfig", "demo-coffee", "--type=merge", "-p", JSON.stringify({ spec: { shopName: "Still live after withdrawal" } }));
+    await expect(shopName(retained.page)).toHaveValue("Still live after withdrawal");
+  } finally {
+    kube("-n", "room-pass", "patch", "rolebinding", "voter-audience", "--type=merge", "-p", JSON.stringify({ subjects: binding.subjects }));
+    await withdrawn.context.close();
+    await retained.context.close();
+  }
+});

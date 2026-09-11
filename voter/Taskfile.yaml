@@ -36,3 +36,10 @@ tasks:
     desc: Apply golangci-lint's automatic fixes
     cmds:
       - golangci-lint run --fix ./...
+
+  test-stream-rehearsal:
+    desc: Rehearse 200 independent stream identities in the disposable Room Pass fixture
+    env:
+      VOTER_STREAM_REHEARSAL: '1'
+    cmds:
+      - go test -run '^TestFixtureSharedStreamRehearsal$' -v -count=1 -timeout=4m

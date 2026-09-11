@@ -26,6 +26,50 @@ Dex. Voter keeps coffee and voting behavior, its application session, narrow aut
 and presentation. Reducing code means deleting duplicate responsibilities, not moving
 an entire demo into a general-purpose package.
 
+## Current working-tree increment: shared streams
+
+Implemented locally on **2026-09-11**, awaiting CI publication and GitOps promotion.
+Production versions in the historical verification below have not changed.
+
+- One process-wide library `SharedBackend`; participant SelfSubjectReview identity
+  and list/watch SARs before cache disclosure, with 30-second rechecks.
+- Independent session deadlines, five-second authorization/write deadlines and
+  aggregate stream metrics. Direct REST reads/writes retain participant tokens.
+- Narrow grants applied in the disposable fixture and prepared in the separate
+  platform checkout; its production image pin remains unchanged.
+- Local 200-identity rehearsal proved **one actual upstream watch**, update convergence,
+  50-client reconnect reuse, grant withdrawal in 30.00s and last-disconnect cleanup
+  under 1 CPU / 256 MiB limits. Uses real Kubernetes service-account identities in
+  fixture-signed sessions; attendee OIDC/browser load remains unproven.
+
+Validation: Go tests with race detection, vet/lint, all **21 frontend tests**,
+frontend type-check/build/lint, container build and platform Kustomize rendering
+passed. All **13 browser tests passed in 41.5s**, including real RBAC withdrawal
+while another viewer continues. The simultaneous 200-identity rehearsal passed in
+45.0s. These are local checks; CI and production promotion remain outstanding.
+
+See [shared-stream verification and release handoff](docs/shared-streams.md) for
+measurements, commands and limitations. **Next: CI publication/GitOps promotion and
+production-equivalent capacity evidence**, then ConfigButler commit observation and
+actor attribution. k8s-front remains a separate proposal.
+
+### Review fixes and upstream boundary
+
+Metrics now use a separate listener excluded from the application Service/ingress.
+Explicit `STREAM_KUBECONFIG` supports local development while keeping shared credentials
+out of participant clients. Subject initialization is synchronized, wiring failures
+are detected at registration, and flush errors cancel their subscription immediately.
+RBAC rechecks and IdP/token-claim revocation have separate documented bounds.
+
+Keep these host fixes in the shared-stream change. Keep navigation redirects,
+orphaned screen/API removal and stale README cleanup in a separate housekeeping
+commit when preparing the release. No new krm-stream APIs have been adopted; transport/lifecycle wrapper replacement
+is deferred until the upcoming release and its public APIs are verified.
+
+Production gates still include named list/watch authorization on the production API
+version and a complete single-replica Recreate rollout/reconnect rehearsal. Both current
+fixture and platform manifests have 1 CPU / 256 MiB limits.
+
 ## First implementation increment
 
 Implemented and deployed as `d7d38ba` on 2026-09-11 while the upstream krm-stream
@@ -165,9 +209,10 @@ or a general save framework to remove Voter's duplicate editor state.
       contain references (name/key), not Secret values; do not resolve or mask them
       merely because their names mention secrets. Current built-in Secret redaction
       does not automatically redact arbitrary fields in a CoffeeConfig.
-- [ ] Reuse `LiveResourceStore`, segment-array `Path`, `regionPolicy`,
-      `readOnlyPolicy`, `withOpenAPIKeyedLists`, stream URL/transport helpers and
-      `gateway.ValidateMergePatch`. Configure Voter's editable region as `spec`.
+- [x] Reuse `LiveResourceStore`, segment-array `Path`, `regionPolicy`,
+      `readOnlyPolicy`, stream URL/transport helpers and
+      `gateway.ValidateMergePatch`. Voter's editable region is `spec`.
+      Schema-driven `withOpenAPIKeyedLists` adoption remains a separate enhancement below.
 - [x] Replace `connectWithEventSource` with `connectManagedResourceStream`. Use its
       connecting/syncing/live/retrying/closed/terminal/exhausted states and `onError`
       classification. Keep login navigation in Voter; same-origin fetch carries the
@@ -197,8 +242,9 @@ without implementing reconciliation, retry scheduling or shared-watch machinery.
       duplicated deep equality/path mutation helpers and the unusable-merge guard.
       Retain only presentation state such as text being entered into a comma-separated
       field, reason text and highlight timing where the adapter does not own it.
-- [ ] Start with atomic products/vouchers arrays. Never merge by numeric index after
-      structure changes. Enable keyed merging only from an authoritative CRD schema
+- [x] Start with atomic products/vouchers arrays. Never merge by numeric index after
+      structure changes. Existing SKU/code fields are read-only; adding/deleting rows is explicit.
+- [ ] Enable keyed merging only from an authoritative CRD schema
       with validated unique stable keys (`sku`/`code`); define key edits as identity
       changes. Keep existing SKU/code fields read-only in the first refactor; adding
       and deleting rows remains explicit. A later rename action must explain that it
@@ -266,25 +312,25 @@ Adopt the existing documented [SharedBackend pattern](https://github.com/ConfigB
 This is required for the demo, not deferred optimization. Keep the integration in a
 separate reviewable change; reuse library fan-out, cache, queues and cleanup.
 
-- [ ] Construct one long-lived `gateway.SharedBackend` per configured cluster/backend
+- [x] Construct one long-lived `gateway.SharedBackend` per configured cluster/backend
       in the Voter process, wrapping a service-account `kube.Backend`. Return that same
       instance from `Clients`; constructing it per request would defeat sharing.
       Scope is fixed to the demo CoffeeConfig. Same-scope subscribers share one watch;
       different scopes and separate replicas do not share it.
-- [ ] Use `kube.SubjectAccessReviewAuthorizer` before any cached snapshot is disclosed.
+- [x] Use `kube.SubjectAccessReviewAuthorizer` before any cached snapshot is disclosed.
       It creates SubjectAccessReviews for both list and watch. Map the session
       to Kubernetes user/groups/UID/extras from trusted SelfSubjectReview identity,
       never browser headers or guessed OIDC username prefixes. Denial or review failure
       refuses the subscription. Replace the current token-presence-only authorizer.
-- [ ] Add only the service-account reads needed for the configured resource and scope,
-      plus permission to create SubjectAccessReviews, through platform GitOps and the
-      explicit local fixture. No impersonation or CoffeeConfig write grants. Keep
+- [ ] Promote the prepared narrow service-account grants through platform GitOps.
+      The explicit local fixture already has named CoffeeConfig reads and permission
+      to create SubjectAccessReviews; the platform manifest is prepared locally. No impersonation or CoffeeConfig write grants. Keep
       direct REST reads, PATCH and CommitRequest creation on the participant's token.
       Audit documentation must distinguish service-account watches from personal writes.
-- [ ] Enforce each subscriber's session deadline server-side and release its subscription
+- [x] Enforce each subscriber's session deadline server-side and release its subscription
       on expiry/disconnect. One attendee leaving must not cancel other attendees' watch;
       the last subscriber leaving must cancel it. Keep browser drafts independent.
-- [ ] Set `ReauthorizationInterval = 30s` and `ReauthorizationTimeout = 5s`.
+- [x] Set `ReauthorizationInterval = 30s` and `ReauthorizationTimeout = 5s`.
       Checks pause only that subscriber's object delivery and fail closed on denial,
       timeout or projection-policy change. Session expiry remains an earlier host
       deadline; the captured principal does not refresh itself. Target termination
@@ -292,7 +338,7 @@ separate reviewable change; reuse library fan-out, cache, queues and cleanup.
       Host callbacks must honor context cancellation and sinks must have bounded writes.
       Budget roughly 13.3 SAR requests/second for 200 subscribers, plus opening/cycle
       bursts. No custom timer or second watch loop in Voter.
-- [ ] Expose subscriber count, upstream watch count, resync/overflow and access-review
+- [x] Expose subscriber count, upstream watch count, resync/overflow and access-review
       failures with bounded metric labels. Use library queue bounds and slow-consumer
       recovery; do not create another Voter cache or per-user event queue.
 
@@ -324,7 +370,7 @@ Extend the existing disposable browser fixture rather than introducing another s
       the server reorders products; lose a stream while typing; reconnect and resnapshot;
       session expiry/re-login; resource deletion; save rejection without losing the form.
       Delay a watch event deliberately to prove the save race is closed.
-- [ ] Keep the seven existing browser cases, and fail relevant tests on unexpected
+- [ ] Retain the existing browser cases (12 before sharing; 13 with RBAC withdrawal), and fail relevant tests on unexpected
       page errors. Include observable voucher refresh and protected-field patch tests,
       since caught failures need not surface as browser exceptions. Confirm current CI.
 - [ ] Run a 200-session SSE load rehearsal through the real gateway/ingress and
@@ -420,7 +466,7 @@ an unrelated OIDC application through Dex, and upgrade without changing identiti
 - [x] Published `14dffd4` after validation and provisioned the sample round through
       GitOps `ef45717`. Full CI passed; verified Flux, ready pod digest, public build
       revision, live round and login path. Room Pass image remains unchanged.
-- [ ] Remove unsupported admin-order/history affordances from active navigation;
+- [x] Remove unsupported admin-order/history affordances from active navigation;
       restoring voting does not imply implementing unrelated legacy screens.
 - [x] Deploy the first tested increment (`d7d38ba`) through GitOps (`5d3d176`);
       verify Flux revision, ready pods, pinned digests and the public login path.

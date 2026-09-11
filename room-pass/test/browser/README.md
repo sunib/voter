@@ -33,3 +33,12 @@ a voting round with two enrolled identities. It checks required-answer rejection
 text serialization, refreshed results, duplicate prevention and closure. It does not
 claim production capacity or GitHub/LinkedIn login works. CI builds the local fixture, runs these tests and retains recordings/reports for
 seven days. Metrics unit tests and the independent Dex network suite are also gates.
+
+The shared-stream regression withdraws the fixture audience grant while retaining
+one named viewer, then restores the original subjects in `finally`. It proves warm
+cache refusal, draft preservation and continued delivery to the authorized viewer.
+Do not run other fixture clients during this test. The separate [200-identity load
+rehearsal](../../../docs/shared-streams.md) also requires exclusive fixture use.
+
+Metrics assertions use the authenticated Kubernetes pod proxy to port 9090. The
+browser also verifies that the application origin returns 404 for `/metrics`.

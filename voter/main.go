@@ -67,6 +67,11 @@ func main() {
 	}
 	sessionCookieCodec = sc
 
+	streams, err := newStreamRuntime(&cfg)
+	if err != nil {
+		log.Fatalf("streams: %v", err)
+	}
+
 	bootCtx, bootCancel := context.WithTimeout(context.Background(), 60*time.Second)
 	oidcClient, err := newOIDCProvider(bootCtx, cfg)
 	bootCancel()
@@ -77,12 +82,19 @@ func main() {
 		cfg.OIDCIssuerURL, cfg.OIDCClientID, cfg.OIDCRedirectURL, cfg.AppOrigin, cfg.OIDCConnectorID)
 
 	deps := handlerDeps{
+		streams:   streams,
 		cfg:       cfg,
 		defaultNS: applicationNamespace(cfg),
 		vouchers:  newVoucherLedger(),
 	}
 
 	mux := http.NewServeMux()
+	metricsServer := &http.Server{Addr: cfg.MetricsAddress, Handler: metricsHandler(streams.metrics), ReadHeaderTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second}
+	metricsListener, err := net.Listen("tcp", cfg.MetricsAddress)
+	if err != nil {
+		log.Fatalf("metrics listener: %v", err)
+	}
+	go func() { log.Fatal(metricsServer.Serve(metricsListener)) }()
 	registerOIDCHandlers(mux, oidcClient, cfg, deps.defaultNS)
 	registerParticipantCoffeeHandlers(mux, deps)
 	registerParticipantStorefrontHandlers(mux, deps)

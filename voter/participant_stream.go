@@ -1,18 +1,20 @@
 package main
 
-// krm-stream owns watch translation and recovery. This increment still opens
-// watches with participant credentials; shared service-account watches are a
-// separate integration requiring platform RBAC and subscriber identity mapping.
+// krm-stream owns watch sharing, queues and recovery. Each subscriber is
+// independently authorized against its Kubernetes-resolved identity.
 
 import (
 	"context"
 	"errors"
-	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/ConfigButler/krm-stream/gateway"
 	"github.com/ConfigButler/krm-stream/gateway/kube"
+	authenticationv1 "k8s.io/api/authentication/v1"
+	authorizationv1 "k8s.io/api/authorization/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // streamPrincipal is what the gateway carries around as "who is calling".
@@ -21,11 +23,17 @@ import (
 // drift out of sync with the identity it belongs to: whoever the principal
 // says this is, the client below is built from that same session's token.
 type streamPrincipal struct {
-	session participantSession
+	session   participantSession
+	subject   *kube.Subject
+	subjectMu sync.Mutex
 }
 
 func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 	cfg := deps.cfg
+	streams := deps.streams
+	if streams == nil {
+		panic("participant stream handlers require a stream runtime")
+	}
 
 	handler := gateway.Handler(gateway.Options{
 		// Identity comes from the signed session cookie and nowhere else. The
@@ -38,24 +46,33 @@ func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 			return &streamPrincipal{session: s}, nil
 		},
 
-		// Participant-token watches rely on Kubernetes RBAC. SharedBackend will
-		// require SubjectAccessReviewAuthorizer and service-account grants.
-		Authorizer: participantWatchAuthorizer{namespace: deps.defaultNS, name: cfg.CoffeeConfigName},
-
-		// One client per caller, built from that caller's token. Nothing is
-		// cached across principals, so one participant's credential can never
-		// serve another's stream.
-		Clients: func(_ context.Context, _ string, p gateway.Principal) (gateway.Backend, error) {
+		Authorizer: gateway.AuthorizerFunc(func(ctx context.Context, p gateway.Principal, scope gateway.Scope) error {
+			if err := (participantWatchAuthorizer{namespace: deps.defaultNS, name: cfg.CoffeeConfigName}).Authorize(ctx, p, scope); err != nil {
+				return err
+			}
+			// Bound initial checks as well as the library's timed rechecks.
+			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
 			principal, ok := p.(*streamPrincipal)
 			if !ok {
-				return nil, errors.New("unexpected principal type")
+				return gateway.Forbidden("not authenticated")
 			}
-			clients, err := deps.participantClientsFor(principal.session.IDToken)
+			if err := principal.resolveSubject(ctx, deps); err != nil {
+				streams.metrics.reviewFailures.Add(1)
+				return err
+			}
+			err := streams.authorizer.Authorize(ctx, p, scope)
 			if err != nil {
-				return nil, err
+				streams.metrics.reviewFailures.Add(1)
 			}
-			return kube.NewBackend(clients.dynamic), nil
+			return err
+		}),
+		Clients: func(_ context.Context, _ string, _ gateway.Principal) (gateway.Backend, error) {
+			return streams.backend, nil
 		},
+		ReauthorizationInterval: streams.reauthorizationInterval,
+		ReauthorizationTimeout:  5 * time.Second,
+		Observer:                streams.metrics,
 
 		// Deny by default, and narrow on purpose. The audience's RBAC already
 		// stops them reading Secrets, but a scope allowlist means a mistake in
@@ -89,12 +106,19 @@ func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 		}
 		ctx, cancel := context.WithDeadline(r.Context(), deadline)
 		defer cancel()
-		handler.ServeHTTP(w, r.WithContext(ctx))
+		streams.metrics.subscribers.Add(1)
+		defer streams.metrics.subscribers.Add(-1)
+		// Refuse transports that cannot bound blocked writes.
+		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			http.Error(w, "stream transport requires write deadlines", http.StatusInternalServerError)
+			return
+		}
+		defer func() { _ = http.NewResponseController(w).SetWriteDeadline(time.Time{}) }()
+		handler.ServeHTTP(streamResponseWriter{ResponseWriter: w, cancel: cancel}, r.WithContext(ctx))
 	}))
 }
 
-// Scope restriction precedes any data disclosure; Kubernetes authorizes the
-// participant-backed watch itself. This is not a shared-cache authorizer.
+// Scope restriction precedes identity resolution and access review.
 type participantWatchAuthorizer struct{ namespace, name string }
 
 func (a participantWatchAuthorizer) Authorize(_ context.Context, p gateway.Principal, scope gateway.Scope) error {
@@ -108,7 +132,42 @@ func (a participantWatchAuthorizer) Authorize(_ context.Context, p gateway.Princ
 	if scope.Namespace != a.namespace || scope.Name != a.name || scope.Version != "v1alpha1" {
 		return gateway.Forbidden("stream is restricted to the configured CoffeeConfig")
 	}
-	log.Printf("stream: open sub=%s resource=%s ns=%s name=%s",
-		principal.session.Subject, scope.Resource, scope.Namespace, scope.Name)
 	return nil
+}
+
+// Serialize identity initialization ourselves instead of relying on gateway call
+// ordering. Once resolved, this subscription's identity remains fixed.
+func (p *streamPrincipal) resolveSubject(ctx context.Context, deps handlerDeps) error {
+	p.subjectMu.Lock()
+	defer p.subjectMu.Unlock()
+	if p.subject == nil {
+		clients, err := deps.participantClientsFor(p.session.IDToken)
+		if err != nil {
+			return err
+		}
+		review, err := clients.typed.AuthenticationV1().SelfSubjectReviews().Create(ctx, &authenticationv1.SelfSubjectReview{}, metav1.CreateOptions{})
+		if err != nil {
+			return err
+		}
+		info := review.Status.UserInfo
+		if info.Username == "" {
+			return gateway.Forbidden("missing Kubernetes identity")
+		}
+		subject := &kube.Subject{User: info.Username, Groups: info.Groups, UID: info.UID, Extra: map[string]authorizationv1.ExtraValue{}}
+		for key, values := range info.Extra {
+			subject.Extra[key] = authorizationv1.ExtraValue(values)
+		}
+		p.subject = subject
+	}
+
+	return nil
+}
+
+func (p *streamPrincipal) kubernetesSubject() (kube.Subject, error) {
+	p.subjectMu.Lock()
+	defer p.subjectMu.Unlock()
+	if p.subject == nil {
+		return kube.Subject{}, errors.New("missing Kubernetes identity")
+	}
+	return *p.subject, nil
 }

@@ -16,6 +16,7 @@ import (
 )
 
 type handlerDeps struct {
+	streams   *streamRuntime
 	cfg       config
 	defaultNS string
 
@@ -42,7 +43,15 @@ func (d handlerDeps) participantClientsFor(idToken string) (participantClients, 
 	return newParticipantClients(d.cfg, idToken)
 }
 
+func metricsHandler(metrics *streamMetrics) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", metrics)
+	return mux
+}
+
 func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
+	// Explicitly exclude metrics from the public application's SPA fallback.
+	mux.Handle("/metrics", http.NotFoundHandler())
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

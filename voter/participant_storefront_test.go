@@ -706,39 +706,21 @@ func TestVoucherUsageRequiresASessionAndRejectsWrites(t *testing.T) {
 
 // --- live stream -------------------------------------------------------------
 
-// What these cover is the WIRING this file owns: identity comes from the
-// session cookie, the scope allowlist is enforced before any watch opens, and
-// the upstream watch carries the participant's own token.
-//
-// They deliberately do not assert that a live update arrives. client-go's fake
-// dynamic client cannot see SendInitialEvents (krm-stream's own backend tests
-// say so and stub the upstream for the same reason), so a green test at this
-// layer would prove nothing about the real stream. That claim -- "a change
-// saved in one browser appears in another" -- is verified where it is actually
-// visible, in the two-context browser test.
-
-func streamFixture(t *testing.T) (*httptest.Server, config, *dynamicfake.FakeDynamicClient) {
+// Shared backend identity, authorization and lifecycle coverage lives in
+// participant_stream_test.go. These cases retain the HTTP transport contract.
+func streamFixture(t *testing.T) (*httptest.Server, config) {
 	t.Helper()
-	_, cfg, _, dyn := storefrontFixture(t, demoCoffeeConfig())
-	mux := http.NewServeMux()
-	registerParticipantStreamHandlers(mux, handlerDeps{
-		cfg: cfg, defaultNS: storefrontNamespace, vouchers: newVoucherLedger(),
-		newClients: func(config, string) (participantClients, error) {
-			return participantClients{dynamic: dyn}, nil
-		},
-	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-	return srv, cfg, dyn
+	f := newSharedStreamFixture(t)
+	return f.server, f.cfg
 }
 
 func coffeeScopeQuery() string {
 	return "?version=v1alpha1&group=examples.configbutler.ai&resource=coffeeconfigs" +
-		"&namespace=" + storefrontNamespace + "&name=demo-coffee"
+		"&namespace=" + storefrontNamespace + "&name=testnet"
 }
 
 func TestStreamOpensAsSSEForAnAllowlistedScope(t *testing.T) {
-	srv, cfg, _ := streamFixture(t)
+	srv, cfg := streamFixture(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 
@@ -771,7 +753,7 @@ func TestStreamOpensAsSSEForAnAllowlistedScope(t *testing.T) {
 // an object the caller may not see is never revealed. SSE cannot change the
 // status code after the headers are sent, so the refusal is a terminal event.
 func TestStreamRefusesAnUnallowlistedResource(t *testing.T) {
-	srv, cfg, _ := streamFixture(t)
+	srv, cfg := streamFixture(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 
@@ -803,7 +785,7 @@ func TestStreamRefusesAnUnallowlistedResource(t *testing.T) {
 }
 
 func TestStreamRequiresASession(t *testing.T) {
-	srv, cfg, _ := streamFixture(t)
+	srv, cfg := streamFixture(t)
 
 	url := srv.URL + "/public/stream" + coffeeScopeQuery()
 	req := mustOutbound(t, signedInRequest(t, cfg, "GET", url, ""), url)
@@ -824,7 +806,7 @@ func TestStreamRequiresASession(t *testing.T) {
 }
 
 func TestStreamRejectsWrongMethods(t *testing.T) {
-	srv, cfg, _ := streamFixture(t)
+	srv, cfg := streamFixture(t)
 	url := srv.URL + "/public/stream" + coffeeScopeQuery()
 	req := mustOutbound(t, signedInRequest(t, cfg, "POST", url, ""), url)
 	req.Method = http.MethodPost
@@ -837,65 +819,6 @@ func TestStreamRejectsWrongMethods(t *testing.T) {
 
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want 405", resp.StatusCode)
-	}
-}
-
-// The watch must be opened with the PARTICIPANT's credential. If this ever
-// regressed to a ServiceAccount, every browser would see everything the server
-// can see -- and the demo's central claim would be false.
-func TestStreamWatchesWithTheParticipantsOwnToken(t *testing.T) {
-	old := sessionCookieCodec
-	sessionCookieCodec = testCodec(t)
-	t.Cleanup(func() { sessionCookieCodec = old })
-
-	seen := make(chan string, 4)
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case seen <- r.Header.Get("Authorization"):
-		default:
-		}
-		for key := range r.Header {
-			lower := strings.ToLower(key)
-			if strings.HasPrefix(lower, "impersonate-") || strings.HasPrefix(lower, "x-remote-") {
-				t.Errorf("untrusted identity header forwarded upstream: %s", key)
-			}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"apiVersion":"examples.configbutler.ai/v1alpha1","kind":"CoffeeConfigList","metadata":{"resourceVersion":"1"},"items":[]}`))
-	}))
-	defer upstream.Close()
-
-	cfg := testConfig()
-	cfg.CoffeeConfigName = "demo-coffee"
-	cfg.KubernetesAPIServer = upstream.URL
-
-	mux := http.NewServeMux()
-	registerParticipantStreamHandlers(mux, handlerDeps{
-		cfg: cfg, defaultNS: storefrontNamespace, vouchers: newVoucherLedger(),
-	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
-	defer cancel()
-	url := srv.URL + "/public/stream" + coffeeScopeQuery()
-	req := mustOutbound(t, signedInRequest(t, cfg, "GET", url, ""), url).WithContext(ctx)
-	req.Header.Set("Authorization", "Bearer attacker-token")
-	req.Header.Set("Impersonate-User", "system:admin")
-
-	resp, err := srv.Client().Do(req)
-	if err != nil {
-		t.Fatalf("open stream: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	select {
-	case got := <-seen:
-		if got != "Bearer participant-token" {
-			t.Fatalf("upstream Authorization = %q, want the participant's own token", got)
-		}
-	case <-ctx.Done():
-		t.Fatal("the gateway never reached the upstream")
 	}
 }
 

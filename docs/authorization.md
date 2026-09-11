@@ -101,3 +101,37 @@ plan tracks those remaining proofs.
 
 See [network suite details](../room-pass/test/network/README.md) for testing the
 actual platform policy file and the distinction between local k3s and live Cilium.
+
+## Shared-stream implementation awaiting release
+
+CoffeeConfig streams use one service-account backend per process. Voter resolves the
+subscriber's full Kubernetes identity with their token at stream opening and applies
+`SubjectAccessReviewAuthorizer` before cache disclosure and every 30 seconds. Initial
+and periodic checks have five-second deadlines, as do individual SSE writes/flushes.
+Session/token expiry cancels only that subscription. Failed identity resolution,
+denied list/watch, and access-review errors fail closed.
+
+The service account gets named CoffeeConfig reads and SAR creation only. Direct REST
+reads, CoffeeConfig PATCH and CommitRequest creation retain participant credentials;
+audit watch events now identify the service account while writes identify the person.
+The fixture and platform manifests carry the same narrow grants. Production remains
+on the release recorded in PLAN until GitOps promotion. See [verification](shared-streams.md).
+
+### Revocation timing and the cached subject
+
+Voter now enforces cached stream disclosure using Kubernetes SAR verdicts; the API
+server authorizes the shared watch as the service account. This differs from a
+participant-token watch, where Kubernetes directly authorizes that person's watch.
+Scope checks, trusted identity resolution and SARs must precede every cache disclosure.
+
+Periodic checks reevaluate **RBAC for the subject captured when the stream opened**.
+A removed RoleBinding is detected on a subsequent check (30-second interval,
+five-second check timeout; the end-to-end target is 60 seconds including delivery
+and scheduling). The local rehearsal observed approximately 30 seconds.
+
+An IdP group-membership change or account disablement does not rewrite already-issued
+token claims, and the periodic SAR does not re-resolve the subject or contact Dex.
+Such identity changes are therefore **not covered by the RBAC recheck bound**.
+Existing streams are bounded by the earlier application-session/token expiry. A new
+stream resolves identity again, but the same still-valid token may retain old claims.
+Do not describe a 30-second RBAC check as universal identity revocation.

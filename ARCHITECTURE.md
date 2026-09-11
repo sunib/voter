@@ -4,7 +4,7 @@ Voter is a coffee and voting demo consuming public infrastructure components. Ro
 is an independent enrollment service being prepared for extraction. krm-stream owns
 generic live-resource behavior. The **krm-stream 0.3.0 integration is deployed as
 `55e287d`**, verified on **2026-09-11**. This document distinguishes that implementation
-from the remaining shared-stream target in [PLAN.md](PLAN.md).
+from the shared-stream implementation awaiting release in [PLAN.md](PLAN.md).
 
 ## Ownership
 
@@ -80,10 +80,10 @@ process-local. Cookie custody does not make XSS harmless: same-origin script can
 still perform actions as the user even though it cannot read the token.
 
 Direct REST reads and writes use the session's token against a fixed API server with
-TLS verification. The target shared watch uses a narrowly authorized service account;
+TLS verification. The new shared watch uses a narrowly authorized service account;
 `kube.SubjectAccessReviewAuthorizer` asks Kubernetes whether each subscriber may list and watch the
 fixed scope before serving cached data. Its identity mapping uses the authenticated
-session's Kubernetes SelfSubjectReview result, including applicable UID/extras, not
+session token's Kubernetes SelfSubjectReview result at stream opening, including UID/extras, not
 browser headers or guessed prefixes. The host must enforce that verdict before disclosure.
 The service account needs read and SubjectAccessReview creation permissions, not
 impersonation or application write grants. Shared watch audit events identify the
@@ -110,13 +110,16 @@ Application mutations require CSRF proof. Logout clears the Voter session, not R
 Pass enrollment or an issued Dex token. Stopping a Room blocks new enrollment/assertions;
 it does not revoke existing tokens. Open Kubernetes watches are not immediately
 re-authorized on every event. The deployed implementation bounds each subscription by session/token
-expiry. The future shared-stream integration uses 0.3.0's authorization checks at snapshot cycles plus a 30-second
+expiry. The new shared-stream integration uses 0.3.0's authorization checks at snapshot cycles plus a 30-second
 `ReauthorizationInterval` and five-second `ReauthorizationTimeout`. Timed checks pause
 that subscriber's delivery; denial, timeout or changed projection policy terminates it.
 The target withdrawal-to-termination bound is 60 seconds, including check and sink
 scheduling, subject to cancellable callbacks and bounded writes. At 200 subscribers,
 periodic list/watch SARs add about 13.3 requests/second plus opening/cycle checks.
-The captured principal does not refresh session validity; Voter owns its expiry deadline.
+The captured principal does not refresh session validity; Voter owns its expiry deadline. RBAC withdrawal
+is rechecked for that captured subject; IdP membership changes do not update the
+subject or already-issued token claims. Those changes remain bounded by session/token
+expiry, not the 30-second SAR interval. See the [revocation timing](docs/authorization.md#revocation-timing-and-the-cached-subject).
 Tests must prove
 that expiry or denial ends the affected subscription and rejects reconnects while
 other authorized viewers continue. The shared upstream stops when its last subscriber
@@ -125,9 +128,8 @@ leaves, not when the first attendee's session expires.
 ## Live editing: implementation versus target
 
 Voter pins krm-stream gateway/kube and npm `@configbutler/krm-stream`
-to **0.3.0**, used through `useLiveCoffeeConfig`. Each caller gets an
-upstream backend using their token; **there is no shared-watch coalescing in Voter**.
-For the **200-attendee demo**, the target explicitly enables the library's documented
+to **0.3.0**, used through `useLiveCoffeeConfig`. Production revision `55e287d`
+still opens a backend per participant. The working tree enables the library's documented
 [SharedBackend integration](https://github.com/ConfigButler/krm-stream/blob/main/docs/auth.md#two-things-that-are-easy-to-confuse).
 One process-wide backend instance maintains one upstream watch per scope. The first
 subscriber opens it; later authorized subscribers receive a snapshot from its cache
@@ -147,8 +149,8 @@ draft, derived changes and conflicts directly. Every edit and row operation goes
 through store APIs. Products/vouchers use atomic array reconciliation; existing SKU/code
 inputs are read-only. Display fallbacks do not modify the resource or its base.
 
-The diagram combines the implemented editor/save ownership with the remaining shared
-watch target. Current watches still use each participant's token:
+The diagram describes the working-tree editor/save and shared-watch implementation.
+Production remains on participant-token watches until the shared-stream release:
 
 ```mermaid
 flowchart LR
@@ -302,7 +304,7 @@ The user also confirmed the deployed app works. Authenticated editing was exerci
 in the disposable fixture; the production smoke test stopped at login.
 
 The library-store migration and conditional saves are deployed; shared
-streaming remains outstanding. [PLAN.md](PLAN.md) records release digests, rollback,
+streaming is implemented locally; its production release remains outstanding. [PLAN.md](PLAN.md) records release digests, rollback,
 remaining acceptance criteria and platform follow-up. Design history belongs in Git.
 
 ## Earlier voting release verification

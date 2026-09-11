@@ -1,3 +1,56 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: voter
+  namespace: room-pass
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: voter
+  namespace: room-pass
+rules:
+  - apiGroups: [examples.configbutler.ai]
+    resources: [coffeeconfigs]
+    resourceNames: [demo-coffee]
+    verbs: [list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: voter
+  namespace: room-pass
+subjects:
+  - kind: ServiceAccount
+    name: voter
+    namespace: room-pass
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: voter
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: voter-stream-access-review
+rules:
+  - apiGroups: [authorization.k8s.io]
+    resources: [subjectaccessreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: voter-stream-access-review
+subjects:
+  - kind: ServiceAccount
+    name: voter
+    namespace: room-pass
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: voter-stream-access-review
+---
 # Voter in the local fixture.
 #
 # The demo-client next door proves that Room Pass can complete an OIDC login.
@@ -39,9 +92,8 @@ spec:
       displayMessage: TestNet coffee is on us
 ---
 # The audience group the fixture's Room assigns. Participants read and patch the
-# CoffeeConfig with their OWN token, so this Role is what the stream and the
-# editor are actually bounded by -- if it were missing, every browser here would
-# get a 403 and the test would say so.
+# CoffeeConfig REST endpoints with their own token. Shared-stream access reviews
+# check these same grants before disclosing service-account watch data.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -100,14 +152,24 @@ spec:
       labels:
         app: voter
     spec:
+      serviceAccountName: voter
       containers:
         - name: voter
           image: voter:dev
           imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: '1'
+              memory: 256Mi
           ports:
             - name: http
               containerPort: 8080
           env:
+            - name: METRICS_ADDRESS
+              value: '0.0.0.0:9090'
             - name: OIDC_ISSUER_URL
               value: https://login.roompass.test:18443
             - name: OIDC_CLIENT_ID

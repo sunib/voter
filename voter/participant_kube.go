@@ -68,6 +68,12 @@ func participantRESTConfig(cfg config, idToken string) (*rest.Config, error) {
 		rc.CAFile = ""
 	}
 
+	if cfg.participantTLS != nil {
+		// Never copy a shared rest.Config: it can contain tokens, client keys,
+		// exec plugins, impersonation or a credential-bearing transport wrapper.
+		rc.TLSClientConfig = *cfg.participantTLS
+		rc.CAData = append([]byte(nil), cfg.participantTLS.CAData...)
+	}
 	return rc, nil
 }
 

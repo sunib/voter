@@ -2,11 +2,12 @@
 
 A phone-friendly coffee and quiz demo for showing Kubernetes as an application
 API, with participant identity carried into audit events and ConfigButler's Git
-workflow. The presentation narrative is in [talk-outline.md](talk-outline.md).
+workflow.
 
 Login works, and so does the coffee journey: browse the menu, order, hit the
-depleted voucher, edit the CoffeeConfig. The quiz journey and the editor's live
-watches are still on the retired path. See [PLAN.md](PLAN.md) for what is left.
+depleted voucher, edit the CoffeeConfig. Voting and conditional live editing also
+work. Shared-stream capacity and observed Git commits remain release gates; see
+[PLAN.md](PLAN.md) for implementation and deployment status.
 
 ## How access works
 
@@ -29,7 +30,6 @@ Opening GitHub login to everyone is a proposed change, not the current configura
 - [Authorization](docs/authorization.md): who can do what, and what is proven.
 - [Room Pass](room-pass/README.md): the enrollment component and local fixture.
 - [Frontend](FRONTEND.md): UI design notes.
-- [Talk outline](talk-outline.md): the presentation narrative.
 
 Earlier design notes — the ForwardAuth/impersonation model, the `auth-service`
 split, the alternative gateway proposals — have been removed rather than
