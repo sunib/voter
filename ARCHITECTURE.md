@@ -121,6 +121,11 @@ an expired code. Voter vouches for nothing it carries, holds none of Room Pass's
 and never signs it. Room Pass keeps the typed path for anyone who cannot scan. The
 contract is in [qr-join.md](room-pass/docs/qr-join.md).
 
+A rejected code or name re-renders the join form with the reason on it and the offending
+field marked, rather than a dead-end error page: the code an audience mistypes is the
+most common failure of the whole demo, and the back button loses both the typed name and
+the single-use CSRF token, which is minted per render.
+
 Application mutations require CSRF proof. Logout clears the Voter session, not Room
 Pass enrollment or an issued Dex token. Stopping a Room blocks new enrollment/assertions;
 it does not revoke existing tokens. Open Kubernetes watches are not immediately

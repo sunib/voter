@@ -81,7 +81,9 @@ Three quarters of an hour, spent believing it was a test bug. The chain of
 misreadings is worth recording:
 
 1. The browser stayed on the join form after clicking Continue, so it looked
-   like the click had not worked.
+   like the click had not worked. (A rejected code now leaves the browser on the
+   form too, but with a red message on it. A blocked form-action leaves the page
+   untouched and silent — that difference is the tell.)
 2. Room Pass logged `reason=csrf-mismatch`, which is what it genuinely saw: the
    POST never arrived, so the form nonce never matched anything. **An accurate
    log that pointed away from the cause.**

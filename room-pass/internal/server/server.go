@@ -426,7 +426,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 
 var page = template.Must(template.New("join").Parse(pageSource))
 
-const pageSource = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Join the room</title><style>body{font:18px system-ui;margin:3rem auto;padding:0 1rem;max-width:30rem;background:#f8fafc;color:#172033}input,button{box-sizing:border-box;width:100%;padding:.8rem;margin:.4rem 0 1rem;font:inherit}button{background:#1749a5;color:white;border:0;border-radius:.4rem}label{display:block}small{line-height:1.5}.scanned{background:#e8f0fe;border-radius:.4rem;padding:.6rem .8rem;margin:.4rem 0 1rem}</style><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .Form}}<form method="post" action="/join"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="handoff" value="{{.Handoff}}"><input type="hidden" name="return" value="{{.Return}}">{{if .Enrolled}}<p>You’re already enrolled as <strong>{{.EnrolledName}}</strong>. Continue with the same demo identity.</p>{{else}}{{if .Code}}<p class="scanned">Room code <strong>{{.Code}}</strong>, from the code you scanned. <input type="hidden" name="code" value="{{.Code}}"></p>{{else}}<label>Room code<input name="code" required maxlength="24" autocomplete="off" autocapitalize="characters" placeholder="BCDFGH"></label>{{end}}<label>Display name<input name="name" required maxlength="64" autocomplete="nickname"{{if .Code}} autofocus{{end}}></label>{{end}}<button>Continue</button></form>{{end}}{{if .Enrolled}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out of this browser</button></form>{{end}}<small>Your name is a demo label, not a verified identity. Demo changes may appear in Git with this name and a generated email address.</small></html>`
+const pageSource = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Join the room</title><style>body{font:18px system-ui;margin:3rem auto;padding:0 1rem;max-width:30rem;background:#f8fafc;color:#172033}input,button{box-sizing:border-box;width:100%;padding:.8rem;margin:.4rem 0 1rem;font:inherit}button{background:#1749a5;color:white;border:0;border-radius:.4rem}label{display:block}small{line-height:1.5}.scanned{background:#e8f0fe;border-radius:.4rem;padding:.6rem .8rem;margin:.4rem 0 1rem}.error{color:#b3261e;font-weight:600}input[aria-invalid=true]{border:2px solid #b3261e;background:#fff5f5}</style><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}{{if .Form}}<form method="post" action="/join"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="handoff" value="{{.Handoff}}"><input type="hidden" name="return" value="{{.Return}}">{{if .Enrolled}}<p>You’re already enrolled as <strong>{{.EnrolledName}}</strong>. Continue with the same demo identity.</p>{{else}}{{if .Code}}<p class="scanned">Room code <strong>{{.Code}}</strong>, from the code you scanned. <input type="hidden" name="code" value="{{.Code}}"></p>{{else}}<label>Room code<input name="code" required maxlength="24" autocomplete="off" autocapitalize="characters" placeholder="BCDFGH"{{if .CodeInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "code"}} autofocus{{end}}></label>{{end}}<label>Display name<input name="name" required maxlength="64" autocomplete="nickname" value="{{.Name}}"{{if .NameInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "name"}} autofocus{{end}}></label>{{end}}<button>Continue</button></form>{{end}}{{if .Enrolled}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out of this browser</button></form>{{end}}<small>Your name is a demo label, not a verified identity. Demo changes may appear in Git with this name and a generated email address.</small></html>`
 
 func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" && r.Method != "POST" {
@@ -506,7 +506,10 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		message = "Joining is closed. If you already joined, return to the demo."
 		form = false
 	}
-	if r.Method == "GET" {
+	// A mistyped code is the one mistake every audience makes, so it returns the form
+	// rather than a dead-end error page: the back button would lose both the typed
+	// name and a CSRF token that is only minted here. Each render issues a fresh one.
+	render := func(status int, failure, field, name string) {
 		csrf, e := randomID()
 		if e != nil {
 			http.Error(w, "Try again later", 503)
@@ -520,8 +523,16 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		// is one that gets silently reused on the next join, long after it
 		// stopped being the code on the screen.
 		clearJoinCodeHandoff(w)
+		focus := field
+		if focus == "" && scanned != "" {
+			focus = "name"
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_ = page.Execute(w, map[string]any{"Title": room.Spec.Title, "Message": message, "Form": form, "CSRF": csrf, "Handoff": handoff, "Return": dest, "Enrolled": enrolled, "EnrolledName": enrolledName, "Code": scanned})
+		w.WriteHeader(status)
+		_ = page.Execute(w, map[string]any{"Title": room.Spec.Title, "Message": message, "Form": form, "CSRF": csrf, "Handoff": handoff, "Return": dest, "Enrolled": enrolled, "EnrolledName": enrolledName, "Code": scanned, "Error": failure, "Name": name, "Focus": focus, "CodeInvalid": field == "code", "NameInvalid": field == "name"})
+	}
+	if r.Method == "GET" {
+		render(200, "", "", "")
 		return
 	}
 	if reason := s.csrfReason(r); reason != "" {
@@ -544,12 +555,16 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		}
 		name, e := validName(r.FormValue("name"))
 		if e != nil {
-			http.Error(w, e.Error(), 400)
+			render(400, e.Error(), "name", r.FormValue("name"))
 			return
 		}
 		ss, e = s.enrollParticipant(r.Context(), r.FormValue("code"), name)
 		if e != nil {
-			http.Error(w, e.Error(), 403)
+			field := ""
+			if errors.Is(e, errBadCode) {
+				field = "code"
+			}
+			render(403, e.Error(), field, name)
 			return
 		}
 		if e = s.cookie(w, "__Host-rp-session", ss, int(s.cfg.CookieLifetime.Seconds())); e != nil {
@@ -578,6 +593,11 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	}
 	http.Redirect(w, r, dest, 303)
 }
+
+// The one enrollment failure the participant can fix by retyping, so it is the only
+// one that marks the code field rather than the form as a whole.
+var errBadCode = errors.New("That code is invalid or joining has closed. Check the presenter’s current code.")
+
 func (s *Server) enrollParticipant(ctx context.Context, code, name string) (session, error) {
 	result := "storage_error"
 	defer func() {
@@ -593,7 +613,7 @@ func (s *Server) enrollParticipant(ctx context.Context, code, name string) (sess
 	}
 	if !controller.Accepts(room, code, s.now()) {
 		result = "code_or_room_rejected"
-		return session{}, errors.New("That code is invalid or joining has closed. Check the presenter’s current code.")
+		return session{}, errBadCode
 	}
 	ps := &api.ParticipantList{}
 	if e = s.db.List(ctx, ps, client.InNamespace(room.Namespace)); e != nil {

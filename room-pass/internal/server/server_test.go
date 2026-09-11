@@ -577,3 +577,68 @@ func TestScannedCodeDoesNotReopenAClosedRoom(t *testing.T) {
 		t.Errorf("a closed room still rendered a join form: %s", body)
 	}
 }
+
+func TestWrongCodeReturnsACorrectableForm(t *testing.T) {
+	s, db := fixture(t, "http://dex.test")
+	b := newBrowser()
+	value := func(body, name string) string {
+		_, rest, _ := strings.Cut(body, fmt.Sprintf(`name="%s" value="`, name))
+		v, _, _ := strings.Cut(rest, `"`)
+		return v
+	}
+	// Everything the template wrote for one input, so an attribute added elsewhere
+	// in the form cannot make this pass by accident.
+	input := func(body, name string) string {
+		_, rest, _ := strings.Cut(body, fmt.Sprintf(`name="%s"`, name))
+		v, _, _ := strings.Cut(rest, ">")
+		return v
+	}
+	w := b.request(s, "GET", "https://demo.test/join", nil)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	form := url.Values{"csrf": {value(w.Body.String(), "csrf")}, "return": {"https://demo.test/app/"}, "code": {"WRONG"}, "name": {"Ada"}}
+	w = b.request(s, "POST", "https://demo.test/join", form)
+	body := w.Body.String()
+	if w.Code != 403 || !strings.Contains(body, "That code is invalid") {
+		t.Fatalf("wrong code: %d %s", w.Code, body)
+	}
+	// The participant stays on a form they can correct: the code is marked, the name
+	// they already typed survives, and nothing was enrolled on the way.
+	if !strings.Contains(input(body, "code"), `aria-invalid="true"`) {
+		t.Fatalf("code field not marked: %s", body)
+	}
+	if strings.Contains(input(body, "name"), "aria-invalid") || !strings.Contains(input(body, "name"), `value="Ada"`) {
+		t.Fatalf("name field marked or cleared: %s", body)
+	}
+	ps := &api.ParticipantList{}
+	_ = db.List(context.Background(), ps)
+	if len(ps.Items) != 0 {
+		t.Fatalf("a rejected code enrolled someone: %d", len(ps.Items))
+	}
+	// The token minted by that re-render has to be good, or the retry is another dead end.
+	form.Set("csrf", value(body, "csrf"))
+	form.Set("code", "BCDFGH")
+	if w = b.request(s, "POST", "https://demo.test/join", form); w.Code != 303 {
+		t.Fatalf("retry after a wrong code: %d %s", w.Code, w.Body.String())
+	}
+	_ = db.List(context.Background(), ps)
+	if len(ps.Items) != 1 || ps.Items[0].Spec.DisplayName != "Ada" {
+		t.Fatalf("retry did not enroll Ada: %v", ps.Items)
+	}
+	// A rejected name marks the name field instead, and leaves the code alone.
+	nb := newBrowser()
+	w = nb.request(s, "GET", "https://demo.test/join", nil)
+	bad := url.Values{"csrf": {value(w.Body.String(), "csrf")}, "return": {"https://demo.test/app/"}, "code": {"BCDFGH"}, "name": {"Ada<b>"}}
+	w = nb.request(s, "POST", "https://demo.test/join", bad)
+	body = w.Body.String()
+	if w.Code != 400 || !strings.Contains(body, "angle brackets") {
+		t.Fatalf("rejected name: %d %s", w.Code, body)
+	}
+	if !strings.Contains(input(body, "name"), `aria-invalid="true"`) || strings.Contains(input(body, "code"), "aria-invalid") {
+		t.Fatalf("wrong field marked: %s", body)
+	}
+	if strings.Contains(body, "<b>") {
+		t.Fatalf("echoed name was not escaped: %s", body)
+	}
+}

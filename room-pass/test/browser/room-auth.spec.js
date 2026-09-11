@@ -59,7 +59,9 @@ test("room login and returning enrollment work in a phone-sized browser", async 
   );
 });
 
-test("invalid room code does not enroll", async ({ page }) => {
+test("invalid room code does not enroll and is corrected in place", async ({
+  page,
+}) => {
   await page.goto("/app/login");
   await page.getByLabel("Room code").fill("INVALID");
   await page.getByLabel("Display name").fill(testName);
@@ -72,6 +74,21 @@ test("invalid room code does not enroll", async ({ page }) => {
   expect(
     participants().filter((p) => p.spec.displayName === testName),
   ).toHaveLength(0);
+  // The form stays put with the code marked and the typed name kept, so a
+  // mistyped code is retyped rather than started over.
+  await expect(page.getByLabel("Room code")).toHaveAttribute(
+    "aria-invalid",
+    "true",
+  );
+  await expect(page.getByLabel("Display name")).toHaveValue(testName);
+  await page.getByLabel("Room code").fill(room().status.joinCode.code);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(
+    page.getByText(`Welcome, ${testName}.`, { exact: true }),
+  ).toBeVisible();
+  expect(
+    participants().filter((p) => p.spec.displayName === testName),
+  ).toHaveLength(1);
 });
 
 test("a tampered form CSRF token does not enroll", async ({ page }) => {
