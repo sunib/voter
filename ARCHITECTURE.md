@@ -2,9 +2,10 @@
 
 Voter is a coffee and voting demo consuming public infrastructure components. Room Pass is an
 independent enrollment service being prepared for extraction. krm-stream owns generic
-live-resource behavior. This document separates the implementation at `d7d38ba`
+live-resource behavior. This document separates the implementation at `14dffd4`
 (reviewed **2026-09-11**) from the target in [PLAN.md](PLAN.md). The first implementation
-increment is deployed and preserves projected REST resources and fixes editor error/usage handling;
+increment is deployed and preserves projected REST resources and fixes editor error/usage handling.
+Voting is restored and deployed as described below;
 the store migration and shared streaming below remain target behavior.
 
 ## Ownership
@@ -254,7 +255,8 @@ workloads with kubectl; disposable fixtures use explicit local kubeconfigs.
 
 On **2026-09-11**, CI for `d7d38ba` passed all jobs, including browser tests and both
 image publications. GitOps commit `5d3d176772587193571d557f93547839478a4b6b` deployed
-Voter and Room Pass `sha-d7d38ba` with explicit digest pins. Flux `voter-demo` is Ready
+The first rollout used Voter and Room Pass `sha-d7d38ba` with explicit digest pins. At
+that verification, Flux `voter-demo` was Ready
 at that revision; both running pod image IDs match the published artifacts.
 The public build-info endpoint reports `d7d38ba` with a clean build, and a Chromium
 smoke check reached the Room Pass enrollment form through the public application.
@@ -264,6 +266,16 @@ in the disposable fixture; the production smoke test stopped at login.
 The library-store migration, conditional saves and shared streaming described above
 are still target behavior. [PLAN.md](PLAN.md) records release digests, rollback,
 remaining acceptance criteria and platform follow-up. Design history belongs in Git.
+
+## Voting release verification
+
+Voter `14dffd4` is deployed through platform GitOps commit `ef45717`, pinned to
+`sha256:9f82a3157b7c160506f6332aaaae6ae9d538a5fb8f218491d87ea505d8b23e89`.
+Room Pass remains on `d7d38ba`. Full CI run `34584101156` passed. Flux applied the
+GitOps revision, the ready pod uses the matching digest, and public build metadata
+reports the new revision. The sample `demo-round-1` is live; production `/vote`
+reaches the enrollment form. Authenticated voting was tested with two independent
+browser identities in the disposable fixture; no production ballots were created.
 
 ## Voting rounds
 

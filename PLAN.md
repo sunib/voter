@@ -2,8 +2,8 @@
 
 This is the implementation plan, not a claim that the target design is deployed.
 [ARCHITECTURE.md](ARCHITECTURE.md) defines the boundaries and target data flow.
-Updated **2026-09-11** for deployed application revision `d7d38ba` and GitOps
-revision `5d3d176`. Historical investigations remain in Git; this file keeps actionable
+Updated **2026-09-11** for deployed Voter revision `14dffd4` and GitOps
+revision `ef45717`; Room Pass remains on `d7d38ba`. Historical investigations remain in Git; this file keeps actionable
 work and operational facts that still matter.
 
 ## Outcome
@@ -45,28 +45,44 @@ The library-store migration, receipt-only saves, conditional writes and shared s
 remain outstanding. The deployed increment does not yet provide safe concurrent editing
 or the planned shared-watch capacity for 200 attendees.
 
+## Voting increment
+
+Deployed Voter `14dffd4` through GitOps `ef45717` on 2026-09-11. `/vote` lists rounds,
+`/answer/demo-round-1` is open, and `/answer/demo-round-1/results` shows results on
+explicit refresh. Ballots persist in Kubernetes; text answers serialize correctly;
+required/type/choice/range validation, closed/stale-round rejection and duplicate
+prevention use the participant-token backend. Removed the obsolete ForwardAuth
+client and cached quiz-session store. See [voting demo](docs/voting-demo.md).
+
+All 10 browser tests pass locally and the fresh-cluster browser CI job passed.
+The full [CI run 34584101156](https://github.com/sunib/voter/actions/runs/34584101156)
+succeeded, including lint, unit/integration/network tests and both image builds.
+Production checks verified Flux revision, ready pod digest, public build metadata,
+a live sample round and the `/vote` login path. The authenticated two-voter journey
+was exercised in the disposable fixture, not by casting votes in the production round.
+
 ## Verified release and current gaps
 
 | Area | Evidence and remaining gap |
 | --- | --- |
-| CI | [Run 34575594811](https://github.com/sunib/voter/actions/runs/34575594811) for `d7d38ba` passed all jobs: unit tests, lint, browser login, devcontainer checks and both image builds. |
-| Deployment | GitOps commit `5d3d176772587193571d557f93547839478a4b6b` is pushed to `ConfigButler/k8s` main. Flux `voter-demo` is Ready at that exact revision; both deployments completed rollout. |
-| Running versions | Voter and Room Pass both run `sha-d7d38ba`, pinned by digest. Running pod image IDs match the published digests recorded below. |
-| Production checks | Public `/public/build-info` reports `gitCommit: d7d38ba`, `gitDirty: 0`. Chromium reached the Room Pass enrollment form through `/admin` and Dex. The user subsequently confirmed the deployed app works; no stronger claim about tested workflows is inferred. |
+| CI | [Run 34584101156](https://github.com/sunib/voter/actions/runs/34584101156) for `14dffd4` passed all jobs, including the new voting browser case. |
+| Deployment | GitOps commit `ef45717b6218f2e4d866d1e44bc36188adba538d` is pushed to `ConfigButler/k8s` main. Flux `voter-demo` is Ready at that revision; Voter completed rollout and the sample round is live. |
+| Running versions | Voter runs `sha-14dffd4`, pinned to `sha256:9f82a3157b7c160506f6332aaaae6ae9d538a5fb8f218491d87ea505d8b23e89`; the ready pod image ID matches. Room Pass remains on `sha-d7d38ba`. |
+| Production checks | Public `/public/build-info` reports `gitCommit: 14dffd4`, `gitDirty: 0`. Chromium reached Room Pass through `/vote`; anonymous round reads return 401. The sample QuizSession is live. |
 | Editor | Still uses `reconcileValue`, local dirty/conflict maps and whole-spec PATCH. Array reconciliation, conditional writes and library ownership of the draft remain open. |
 | Stream | Live updates are deployed, but sharing, managed gap recovery and complete stream/session failure handling remain open. |
 | Resource contract | REST reads and transitional save responses now use the library projection. Runtime typing, common store initialization and conflict recovery still need the planned migration. |
 | Git payoff | At the latest CRD check, `commitrequests.configbutler.ai` was absent. Neither an observed Git commit nor end-to-end actor attribution has been verified. |
 
-Pinned release artifacts:
+First-increment artifacts retained as a rollback reference:
 
 - Voter: `sha256:c6dd9cfe0903fb169c599907ac5b385fd53956952bdd55f70de6e3f1af233659`.
 - Room Pass: `sha256:7e1690adb4e304c600afbed2e1f529b98dc727bd5c1bb5f14b2356d5287b8cee`.
 
-Rollback: revert GitOps commit `5d3d176` in `ConfigButler/k8s`, push and let Flux
-reconcile. That restores Voter `sha-ee001d6` and Room Pass `sha-2a90ef2`.
-All workload changes for this rollout came from Git; Flux reconciliation was triggered
-to apply the committed revision without waiting for its interval.
+Rollback the voting increment by reverting GitOps commit `ef45717` in
+`ConfigButler/k8s`, pushing and letting Flux reconcile. That restores Voter `d7d38ba`
+and removes the sample round from GitOps. All workload changes came from Git;
+Flux reconciliation was triggered to apply the committed revision.
 
 ## 1. Establish the public resource contract and library changes
 
@@ -334,8 +350,9 @@ an unrelated OIDC application through Dex, and upgrade without changing identiti
       own results screen. Results refresh on demand, without attendee watches/polling.
       Go tests/vet/lint, 14 frontend tests/build/lint and all 10 browser tests pass
       locally (9.1s); CI and deployment are tracked separately below.
-- [ ] Publish the voting increment and provision `voter/config/demo-round.yaml` in
-      the platform GitOps repository after CI passes. Verify Flux and running image.
+- [x] Published `14dffd4` after validation and provisioned the sample round through
+      GitOps `ef45717`. Full CI passed; verified Flux, ready pod digest, public build
+      revision, live round and login path. Room Pass image remains unchanged.
 - [ ] Remove unsupported admin-order/history affordances from active navigation;
       restoring voting does not imply implementing unrelated legacy screens.
 - [x] Deploy the first tested increment (`d7d38ba`) through GitOps (`5d3d176`);
