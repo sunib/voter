@@ -5,11 +5,18 @@ migration or a description of the deployed Voter application.
 
 ## Purpose
 
-Build a reusable service that performs browser login, keeps credentials server-side,
-proxies Kubernetes APIs without application-specific DTOs, and hosts krm-stream.
-A frontend should work with Kubernetes objects and semantics while the service owns
-sessions and transport. Adding another CRD should require configuration and frontend
-work, not a new backend handler.
+Extract reusable browser authentication and Kubernetes transport so multiple applications
+can share a maintained implementation. The value is reuse across applications, not a
+promise that Voter immediately becomes smaller. Voter already returns Kubernetes-shaped
+CoffeeConfig views and unmodified QuizSession objects/lists. Its existing stream host
+already supplies krm-stream's principal, authorizer, client and scope seams.
+
+The service owns sessions, native API proxying and krm-stream hosting. Adding another
+resource whose access and invariants are already safe at the Kubernetes boundary should
+require configuration and frontend work, not another transport handler. Domain validation,
+private result views and multi-step operations may still require domain services.
+See [universal versus domain BFF](bff-choice.md) for the decision criteria, Kubernetes
+API limitations and alternatives involving admission or per-person namespaces.
 
 Product name: **k8s-front**. Description: **a Kubernetes BFF for browser applications**.
 It provides browser login, Kubernetes API access and live resource streams.
@@ -17,7 +24,7 @@ The [naming discussion and decision](name.md) records the alternatives and URL r
 
 It remains a backend for frontend in the authentication/proxy sense. Its contract
 is generic Kubernetes access, rather than a separate REST model for each application.
-This follows the BFF pattern described in [OAuth 2.0 for Browser-Based Applications](https://www.ietf.org/ietf-ftp/rfc/rfc10017.html).
+This follows the BFF pattern described in [OAuth 2.0 for Browser-Based Applications](https://www.rfc-editor.org/rfc/rfc10017.html).
 
 ## Shape
 
@@ -64,7 +71,9 @@ Proposed paths, not existing endpoints:
 
 For example, fetching `/k8s/apis/<group>/<version>/namespaces/demo/quizsessions`
 returns a Kubernetes list, and POSTing a QuizSubmission to its collection returns
-the Kubernetes create response. No `/public/rounds` translation is required.
+the Kubernetes create response—but only after the exposure prerequisites below pass.
+Existing `/public/rounds` reads already preserve Kubernetes shapes; the change is a
+reusable route and policy mechanism, not removal of an existing read DTO.
 
 Preserve resource bodies, response status, Kubernetes `Status` errors, content types,
 relevant headers and query parameters. Support pagination, selectors, native watch,
@@ -75,9 +84,15 @@ Kubernetes describes these contracts in its [API concepts](https://kubernetes.io
 
 “All Kubernetes APIs” means no baked-in resource catalogue. It does not mean every
 user gets every permission, or that every wire protocol is implemented in the first
-release. Kubernetes RBAC and admission remain authoritative. An operator can further
-restrict resources, namespaces, verbs and subresources. Discovery must not automatically
-grant access or open service-account-backed streams for everything it finds.
+release. Kubernetes RBAC and admission remain authoritative. Release 1 requires an
+operator-configured, default-deny allowlist for API groups/versions, resources, namespaces,
+verbs and subresources; an empty allowlist exposes no Kubernetes routes. Non-resource
+URLs such as discovery need explicit grants too. Distinguish get/list/watch and
+collection deletion rather than matching HTTP methods alone. Resolve and normalize
+paths before policy checks; unknown or ambiguous scope fails closed. Discovery must not
+automatically grant access or open service-account-backed streams for everything it finds.
+Apply exposure restrictions to both raw API and stream paths. This is generic boundary
+configuration, not a place to encode quiz business rules.
 
 Initial scope includes ordinary HTTP requests, streaming logs and native HTTP watches.
 Exec, attach and port-forward require explicit WebSocket/upgrade protocol support and
@@ -93,6 +108,17 @@ contents stay server-side; the cookie contains only an opaque, random session ID
 Use a Secure, HttpOnly, host-scoped cookie with appropriate SameSite settings. The
 current Voter encrypted cookie contains an ID token: moving to an opaque session is
 a deliberate change in storage and operations, not just extracting existing handlers.
+Today encryption and HttpOnly already prevent frontend JavaScript from extracting that
+token. The proposed improvement is per-session revocation, bounded logout propagation
+and refresh-token management, rather than newly hiding credentials from JavaScript.
+A copied current cookie remains usable until expiry; clearing one browser's cookie does
+not invalidate that copy. Server-side revocation still does not revoke an independently
+issued Kubernetes credential or undo an already accepted write.
+
+Opaque sessions add a stateful dependency, availability work and failure modes. The
+200-attendee demo has not established an urgent need for that trade. Keep this as an
+explicit product requirement and operational budget, not a prerequisite for the next
+Voter demo release.
 
 Use a maintained OIDC library. Bind pending login transactions to the browser; validate
 issuer, audience and callback state; allow only validated local return paths. Keep
@@ -166,37 +192,49 @@ krm-stream owns the view and draft; the host owns credentials and the API server
 write enforcement. k8s-front becomes that reusable host. It does not require a new
 writer inside krm-stream or assume unreleased upstream features.
 
-## What this changes for Voter
+## Exposure prerequisites and Voter pilot
 
-CoffeeConfig can use generic resource GET/PATCH and a configured stream, removing
-application-specific resource transport handlers once equivalent race tests pass.
-Coffee ordering, voucher redemption and Git workflow are separate domain operations;
-they do not disappear merely because configuration uses Kubernetes directly.
+**Do not expose a resource through either generic path until all operations being
+exposed are safe without the existing application handler.** The gate is routing, not
+frontend migration. Merely deploying with an empty allowlist is safe; enabling all
+participant RBAC grants is not equivalent to the current narrow application boundary.
 
-QuizSession reads and QuizSubmission creates can use native Kubernetes endpoints.
-The frontend can construct submission objects, but it cannot be trusted to enforce
-ownership, round state, eligibility, question validity or one submission per person.
-Before removing current server checks, map each invariant to RBAC, CRD validation,
-admission or a domain controller. Cross-object checks and identity-bound uniqueness
-need particular design; moving an existing check into the browser is not equivalent.
-Create-only RBAC also needs review of all additive grants and intended administrator access.
+The checked-in platform [audience Role](../external/k8s/k8s.koudijs.dev/2-gitops/voter-demo/participant-rbac.yaml)
+grants `get/list/watch/create` on QuizSubmissions. The current
+[quiz handler](../voter/participant_quiz.go) enforces live-round checks, question
+validation and a server-derived unique name; it explicitly notes direct API access
+can bypass those rules. A generic create route would expose that bypass; raw reads
+would disclose submission metadata currently omitted from results. These are checked-in
+configuration findings, not a fresh audit of all live cluster grants.
 
-Direct results aggregation in the browser is suitable only when participants may read
-all underlying submissions. The current result endpoint omits identity metadata. If
-that boundary must remain, expose a controller-maintained aggregate resource with its
-own read grants, or keep a small domain service. Do not broaden access to individual
-submissions just to delete an endpoint.
+Keep QuizSubmission raw reads, writes and streams denied for the initial pilot.
+A future aggregate-resource design must remove shared raw submission read grants from
+the audience, audit additive grants, and grant reads on the aggregate instead. The
+existing result handler reads with the participant token: removing those grants breaks
+it unless the replacement result path ships first or in a coordinated cutover.
+Admission must protect creates before a raw create route opens. Per-person namespaces
+are another possible redesign, discussed in the decision document; neither is implicit
+in this proposal.
+
+CoffeeConfig is the candidate pilot because its reads already use the library projection
+and its saves have concurrency tests. Still preserve or deliberately replace the existing
+fixed-name, spec-only and projection restrictions before allowing raw writes. RBAC's
+patch permission alone does not express all those restrictions. CoffeeConfig PATCH and
+CommitRequest creation are separate writes with possible partial success; keep that
+workflow host-owned for the pilot. Pricing, voucher redemption and orders also stay in
+the domain service. Removing transport duplication does not remove these responsibilities.
 
 ## Delivery and acceptance
 
 1. Build an independent service/module with configurable OIDC, a fixed cluster, opaque
    sessions and the generic HTTP API proxy. Prove it with an unrelated CRD and no Voter
-   imports or handlers.
+   imports or handlers. Require the default-deny allowlist from the first release.
 2. Add the released krm-stream host integration and a framework-independent auth helper.
    Test native API reads/writes alongside managed stream recovery and editor races.
-3. Pilot CoffeeConfig; retain the existing route until projected reconciliation and
-   conditional saves pass end-to-end tests. Define quiz admission and results access
-   before migrating QuizSubmission creation.
+3. Before exposing any Voter resource, pass its exposure review and adversarial direct
+   API tests. Pilot only the approved CoffeeConfig operations; retain the existing route
+   until reconciliation, conditional saves and partial-success behavior pass. Keep quiz
+   routes denied until their admission and read-privacy design is deployed and verified.
 4. Evaluate shared streams under the intended load, then extract and publish the service
    with its own fixture, documentation and versioned image.
 
@@ -204,7 +242,14 @@ Acceptance must cover OIDC callback failures, session expiry/logout across repli
 CSRF refusal, header/path bypass attempts, unchanged Kubernetes errors and patch types,
 watch cancellation, stream isolation and bounded denial. Include a real conflicting
 write, an ambiguous create response, and prevention of automatic duplicate writes.
+Test that empty policy denies all proxy/stream scopes, that selectors or alternate
+versions cannot bypass restrictions, and that allowed reads do not enable writes.
 A second frontend must be able to use another API group without a backend code change.
+
+For the near-term talk, retain the current service and prioritize the planned shared
+streaming/capacity work. Develop k8s-front independently; evaluate total maintained code,
+services and operational burden across consumers before proposing a Voter cutover.
+Extraction may shrink Voter's module while increasing total system code and deployments.
 
 This proposal does not change Voter, its deployment or the accepted implementation plan.
 The main decision is whether to adopt this generic authentication-and-transport boundary;
