@@ -106,6 +106,21 @@ callback routing and network isolation instead of treating their manifests as in
 See [handoff.md](room-pass/docs/handoff.md) for the protocol and
 [csp-form-action.md](room-pass/docs/csp-form-action.md) for browser redirect constraints.
 
+A participant may also arrive by scanning the presenter's QR code, which encodes
+`/auth/login?code=<current>&return=<path>`. The destination rides in the Voter login
+transaction, server-side, as any `return` does. The room code uses a **Room Pass
+feature**, not a Voter one: an application sharing the join host may pre-supply a code
+in the plain `__Host-room-pass-joincode` cookie, and the join page then asks only for a
+display name. Room Pass owns that cookie's name, accepted values and attributes; Voter is
+one consumer, and nothing in the channel knows what a QR code is. The cookie exists
+because the join URL is built by Room Pass after Dex from a handoff id Voter never sees,
+and it is delivered only because the join origin and the application origin are one host.
+It is untrusted by construction: it becomes a prefill and is checked against the Room's
+valid codes through the ordinary POST, so a forged one is a wrong code and a stale one is
+an expired code. Voter vouches for nothing it carries, holds none of Room Pass's keys,
+and never signs it. Room Pass keeps the typed path for anyone who cannot scan. The
+contract is in [qr-join.md](room-pass/docs/qr-join.md).
+
 Application mutations require CSRF proof. Logout clears the Voter session, not Room
 Pass enrollment or an issued Dex token. Stopping a Room blocks new enrollment/assertions;
 it does not revoke existing tokens. Open Kubernetes watches are not immediately

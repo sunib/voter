@@ -61,6 +61,23 @@ tasks:
       - mkdir -p bin
       - go build -o ./bin/room-pass ./cmd/room-pass
 
+  present:
+    desc: Show the presenter's QR code, following the Room's rotating join code
+    # The join code is operator-only credential material, so this runs under
+    # YOUR kubeconfig and inherits the answer Kubernetes already gives: no
+    # access to rooms/status, no QR code. That is also why it is a terminal
+    # tool rather than a page in the application, which would need an operator
+    # login of its own.
+    #
+    #   task room-pass:present BASE=https://voter.koudijs.dev NEXT=/answer/round-1
+    vars:
+      BASE: '{{.BASE | default "https://voter.koudijs.dev"}}'
+      NEXT: '{{.NEXT | default "/"}}'
+      ROOM: '{{.ROOM | default "demo"}}'
+      ROOM_NAMESPACE: '{{.ROOM_NAMESPACE | default "voter"}}'
+    cmds:
+      - go run ./cmd/room-qr --base {{.BASE}} --next {{.NEXT}} --room {{.ROOM}} --namespace {{.ROOM_NAMESPACE}}
+
   image:
     desc: Build the standalone Room Pass image
     # The published image is built by the root `task image-room-pass`, which stamps

@@ -199,6 +199,11 @@ func (p *oidcProvider) handleLogin(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   int(loginTransactionLifetime.Seconds()),
 	})
 
+	// A login started by scanning the presenter's QR code carries the room
+	// code with it, so the participant only has to choose a display name. See
+	// the QR join hand-off section below for why this is a cookie.
+	setJoinCodeHandoff(w, r.URL.Query().Get("code"))
+
 	// S256 PKCE. Belt and braces for a confidential client, but it costs
 	// nothing and closes code interception if the secret ever leaks.
 	sum := sha256.Sum256([]byte(verifier))
@@ -372,4 +377,97 @@ func clearBrowserBinding(w http.ResponseWriter) {
 func noStore(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Referrer-Policy", "no-referrer")
+}
+
+// --- QR join hand-off -------------------------------------------------------
+//
+// A scanned QR code lands on /auth/login carrying two things: where the
+// participant should end up (?return=, handled by the ordinary login
+// transaction) and the room code currently on the presenter's screen (?code=).
+//
+// The destination is this service's own business -- kept server-side in the
+// transaction, where it survives the whole Dex round trip. The code is not: the
+// Room Pass join URL is built by Room Pass itself, after Dex, from a handoff id
+// this service never sees, so there is no parameter to thread it through.
+//
+// Room Pass publishes a channel for exactly this, and the code below is a
+// CONSUMER of it, not the design: an application sharing the join host may
+// pre-supply a code in a named cookie, and the join page then asks only for a
+// display name. The contract -- cookie name, accepted values, attributes,
+// single use -- belongs to Room Pass and is documented in its
+// docs/qr-join.md. Read that before changing anything here; a local tweak to
+// the name or the attributes silently degrades the flow to typing the code,
+// which is the correct failure but a confusing one to debug.
+//
+// This works only because Room Pass answers /join on THIS SAME HOST (JOIN_ORIGIN
+// in the deployment; Traefik splits the paths). Move either service to its own
+// host and the hand-off stops arriving, by design.
+
+// joinCodeHandoffCookie is the name Room Pass reads. Keep it in step with the
+// constant of the same name in room-pass/internal/server -- the two modules
+// cannot share it, so this is a contract kept by tests and documentation.
+//
+// It is deliberately a PLAIN cookie, not a signed one. The value is a room
+// code, which is untrusted input however it arrives: Room Pass checks it
+// against the Room's currently valid codes whether it was typed, pasted or
+// scanned, and presenting one confers exactly what typing one confers. Signing
+// it here would imply this service vouches for it. It does not, and it holds
+// none of Room Pass's keys to sign it with anyway.
+const joinCodeHandoffCookie = "__Host-room-pass-joincode"
+
+// joinCodeHandoffLifetime outlives the code itself on purpose. Codes are valid
+// for seconds; a cookie that lingers a little longer can only ever produce the
+// ordinary "that code is invalid" answer from Room Pass, whereas one that
+// expires too early produces an empty field and a confused participant.
+const joinCodeHandoffLifetime = 5 * time.Minute
+
+// maxJoinCodeLength matches the Room CRD's upper bound for joinCode.length.
+const maxJoinCodeLength = 12
+
+// safeJoinCode bounds what may be placed into a Set-Cookie header, and nothing
+// more. It is NOT a validity check: Room Pass owns that, against the Room's
+// rotating status, and this service has no way to second-guess it.
+//
+// Deliberately looser than Room Pass's generator alphabet. Duplicating that
+// alphabet here would mean a future change to it silently breaking scanned
+// logins in a different module; "uppercase letters and digits, bounded" stays
+// correct either way.
+func safeJoinCode(raw string) string {
+	value := strings.ToUpper(strings.TrimSpace(raw))
+	// Room Pass normalises a typed "BCD-FGH" the same way, so a presenter who
+	// hyphenates for legibility gets a QR that still works.
+	value = strings.ReplaceAll(value, "-", "")
+	if value == "" || len(value) > maxJoinCodeLength {
+		return ""
+	}
+	for _, r := range value {
+		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
+			return ""
+		}
+	}
+	return value
+}
+
+// setJoinCodeHandoff forwards a scanned code to Room Pass, or does nothing at
+// all when the login did not come from a QR code.
+func setJoinCodeHandoff(w http.ResponseWriter, raw string) {
+	code := safeJoinCode(raw)
+	if code == "" {
+		return
+	}
+	// Never logged. A room code is short-lived, but it is still the thing that
+	// lets someone into the room, and application logs outlive it.
+	http.SetCookie(w, &http.Cookie{
+		Name:     joinCodeHandoffCookie,
+		Value:    code,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		// Lax, not Strict. The browser reaches /join by following a redirect
+		// chain that passes through the issuer's host, so the request that
+		// needs this cookie is a cross-site top-level GET navigation --
+		// exactly what Lax allows and Strict drops.
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int(joinCodeHandoffLifetime.Seconds()),
+	})
 }

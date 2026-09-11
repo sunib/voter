@@ -482,6 +482,25 @@ an unrelated OIDC application through Dex, and upgrade without changing identiti
       restoring voting does not imply implementing unrelated legacy screens.
 - [x] Deploy the first tested increment (`d7d38ba`) through GitOps (`5d3d176`);
       verify Flux revision, ready pods, pinned digests and the public login path.
+- [x] Add QR-code joining: the presenter projects `task room-pass:present`, a scan
+      lands on `/auth/login?code=<current>&return=<path>`, and the participant types
+      only a display name before arriving at the chosen page. The destination rides
+      in Voter's login transaction; the room code rides in a plain, single-use,
+      same-host `__Host-room-pass-joincode` cookie that Room Pass treats as an untrusted
+      prefill and re-checks through the ordinary POST. Go tests/vet/lint on both
+      modules and all 6 room-auth browser tests pass locally, including the two new
+      ones that prove the cookie survives the Dex redirect chain in a real browser.
+      See [qr-join.md](room-pass/docs/qr-join.md). Not yet published or deployed.
+- [x] Give scanners time to choose a name: the Room now pins `joinCode` to
+      `rotateEvery: 30s` / `validFor: 120s`, overriding the CRD's 15s/30s defaults.
+      120s is the most the four-rotation ceiling allows (enforced by CEL and again in
+      `Advance`), so the requested 10s rotation was not possible — and buys nothing,
+      since `validFor` alone sets how long a photographed code works. Applied by
+      recreating the Room through `kustomize.toolkit.fluxcd.io/force: enabled`, which
+      retired the eight test Participants.
+- [ ] Remove that force annotation from `room.yaml` once the code settings are
+      settled. It stays armed, so the next edit to an immutable field silently wipes
+      the participant list instead of failing loudly.
 - [ ] For the completed refactor, publish tested images, then change
       `external/k8s/k8s.koudijs.dev/2-gitops/voter-demo/{app,room-pass}.yaml` in Git.
       No direct live workload mutation. Verify Flux revision, ready pods, image digests

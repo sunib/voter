@@ -460,3 +460,120 @@ func TestFormActionIgnoresUnusableReturnEntries(t *testing.T) {
 		t.Fatalf("form-action = %q, want only 'self' and the issuer", got)
 	}
 }
+
+// A scanned QR code turns the join page into one field. The code arrives in a
+// cookie set by the application on this shared host, is rendered back as a
+// hidden field, and comes home through the ordinary POST -- where it is
+// checked against the Room like any typed code. None of that makes the cookie
+// trusted; these tests pin the boundary.
+func TestScannedCodeIsAPrefillAndNothingMore(t *testing.T) {
+	s, _ := fixture(t, "http://dex.test")
+
+	get := func(url string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest("GET", url, nil)
+		r.Host = "demo.test"
+		for _, c := range cookies {
+			r.AddCookie(c)
+		}
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, r)
+		return w
+	}
+	handoff := func(code string) *http.Cookie {
+		return &http.Cookie{Name: joinCodeHandoffCookie, Value: code}
+	}
+
+	t.Run("the cookie prefills the form and retires the code field", func(t *testing.T) {
+		body := get("https://demo.test/join", handoff("bcd-fgh")).Body.String()
+		if !strings.Contains(body, `<input type="hidden" name="code" value="BCDFGH">`) {
+			t.Errorf("the scanned code was not carried into the form: %s", body)
+		}
+		if strings.Contains(body, `placeholder="BCDFGH"`) {
+			t.Error("the code field is still being asked for after a scan")
+		}
+		if !strings.Contains(body, "Choose a display name") {
+			t.Error("the page still asks for a code the participant already scanned")
+		}
+	})
+
+	t.Run("a query parameter works too, for a QR pointing straight here", func(t *testing.T) {
+		body := get("https://demo.test/join?code=BCDFGH").Body.String()
+		if !strings.Contains(body, `value="BCDFGH"`) {
+			t.Errorf("the query code was not carried into the form: %s", body)
+		}
+	})
+
+	t.Run("the code is used once and then expired", func(t *testing.T) {
+		res := get("https://demo.test/join", handoff("BCDFGH")).Result()
+		for _, c := range res.Cookies() {
+			if c.Name == joinCodeHandoffCookie {
+				if c.MaxAge >= 0 {
+					t.Errorf("MaxAge = %d, want the hand-off cookie expired after use", c.MaxAge)
+				}
+				return
+			}
+		}
+		t.Error("the hand-off cookie was left in the jar for the next join")
+	})
+
+	t.Run("an ordinary visit still asks for a code", func(t *testing.T) {
+		body := get("https://demo.test/join").Body.String()
+		if !strings.Contains(body, `placeholder="BCDFGH"`) {
+			t.Errorf("the code field disappeared without a scan: %s", body)
+		}
+	})
+
+	t.Run("junk in the cookie is not rendered as a code", func(t *testing.T) {
+		for _, bad := range []string{
+			"", "   ", strings.Repeat("B", 13), "BCD FGH", "BCD_FGH",
+			`"><script>alert(1)</script>`,
+		} {
+			body := get("https://demo.test/join", handoff(bad)).Body.String()
+			if !strings.Contains(body, `placeholder="BCDFGH"`) {
+				t.Errorf("cookie %q suppressed the code field: %s", bad, body)
+			}
+			if strings.Contains(body, "<script>alert(1)</script>") {
+				t.Errorf("cookie %q was rendered as markup", bad)
+			}
+		}
+	})
+
+	t.Run("a forged code is still only a wrong code", func(t *testing.T) {
+		// The cookie is plain text and anything on this host can write it.
+		// That has to be worth nothing: the POST re-checks the value against
+		// the Room's valid codes, so a made-up one fails exactly as a typed
+		// made-up one fails.
+		if _, err := s.enrollParticipant(context.Background(), "ZZZZZZ", "Mallory"); err == nil {
+			t.Fatal("a code that the Room never issued was accepted")
+		}
+	})
+}
+
+// Prefilling must not quietly relax the page's other rules. A closed Room does
+// not open because somebody arrived with a code in a cookie.
+func TestScannedCodeDoesNotReopenAClosedRoom(t *testing.T) {
+	s, db := fixture(t, "http://dex.test")
+	room := &api.Room{}
+	if err := db.Get(context.Background(), s.cfg.Room, room); err != nil {
+		t.Fatal(err)
+	}
+	room.Spec.Enrollment = "Closed"
+	if err := db.Update(context.Background(), room); err != nil {
+		t.Fatal(err)
+	}
+
+	r := httptest.NewRequest("GET", "https://demo.test/join", nil)
+	r.Host = "demo.test"
+	r.AddCookie(&http.Cookie{Name: joinCodeHandoffCookie, Value: "BCDFGH"})
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, r)
+
+	body := w.Body.String()
+	if !strings.Contains(body, "Joining is closed") {
+		t.Errorf("a scan was offered a form into a closed room: %s", body)
+	}
+	if strings.Contains(body, `name="code"`) {
+		t.Errorf("a closed room still rendered a join form: %s", body)
+	}
+}

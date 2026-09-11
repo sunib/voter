@@ -93,6 +93,16 @@ func main() {
 			}
 			s = session{State: id(), Verifier: oauth2.GenerateVerifier()}
 			set(w, s)
+			// The QR hand-off, exactly as the real application does it: a
+			// login started by scanning carries the room code, and the only
+			// way to get it to Room Pass is a cookie on this shared host,
+			// because the join URL is built after Dex from a handoff id this
+			// client never sees. SameSite=Lax is the load-bearing part -- the
+			// request that needs this cookie is a top-level navigation
+			// arriving from the issuer's origin.
+			if code := joinCode(r.URL.Query().Get("code")); code != "" {
+				http.SetCookie(w, &http.Cookie{Name: "__Host-room-pass-joincode", Value: code, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: 300})
+			}
 			http.Redirect(w, r, oauth.AuthCodeURL(s.State, oauth2.S256ChallengeOption(s.Verifier)), 303)
 			return
 		case "/app/callback":
@@ -149,4 +159,20 @@ func main() {
 	})
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
 	log.Fatal((&http.Server{Addr: ":8080", ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, Handler: http.DefaultServeMux}).ListenAndServe())
+}
+
+// joinCode bounds what may go into the hand-off cookie. Room Pass decides
+// whether the code is valid; this only refuses to forward things that were
+// never a code.
+func joinCode(raw string) string {
+	code := strings.ToUpper(strings.ReplaceAll(strings.TrimSpace(raw), "-", ""))
+	if code == "" || len(code) > 12 {
+		return ""
+	}
+	for _, r := range code {
+		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
+			return ""
+		}
+	}
+	return code
 }

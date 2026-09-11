@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gorilla/securecookie"
+	"golang.org/x/oauth2"
 )
 
 func testConfig() config {
@@ -429,5 +430,123 @@ func TestSessionReportsTheAPIServersUsername(t *testing.T) {
 				t.Errorf("username = %v, want %q", got, tc.kubeUser)
 			}
 		})
+	}
+}
+
+// A scanned QR code hands the room code to Room Pass over a cookie, because
+// the join URL is built by Room Pass after Dex and has nowhere to carry it.
+// What goes into that cookie is bounded here; whether the code is VALID is
+// Room Pass's question, asked against the Room's rotating status.
+func TestSafeJoinCode(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{"a plain code passes through", "BCDFGH", "BCDFGH"},
+		{"lowercase is normalised the way Room Pass normalises it", "bcdfgh", "BCDFGH"},
+		{"a presenter's hyphens are stripped", "BCD-FGH", "BCDFGH"},
+		{"surrounding whitespace is trimmed", "  BCDFGH  ", "BCDFGH"},
+		{"digits are allowed, so a future alphabet still works", "BC1FG2", "BC1FG2"},
+		{"an absent code is not a code", "", ""},
+		{"whitespace alone is not a code", "   ", ""},
+		// The Room CRD caps joinCode.length at 12. Anything longer was never
+		// a code, so it has no business in a Set-Cookie header.
+		{"an over-long value is refused", strings.Repeat("B", 13), ""},
+		{"a maximum-length code is accepted", strings.Repeat("B", 12), strings.Repeat("B", 12)},
+		// Not an escaping test -- http.SetCookie would sanitise these anyway.
+		// This is about refusing to forward anything that was never a code.
+		{"header injection is refused", "BCD\r\nSet-Cookie: x=y", ""},
+		{"a cookie attribute is refused", "BCDFGH; Path=/", ""},
+		{"punctuation is refused", "BCD_FGH", ""},
+		{"a unicode lookalike is refused", "ВCDFGH", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := safeJoinCode(tc.in); got != tc.want {
+				t.Errorf("safeJoinCode(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// The hand-off cookie has to survive a redirect chain that leaves this origin
+// for the issuer and comes back. That rules out SameSite=Strict, and it has to
+// stay unreadable to script on the way.
+func TestJoinCodeHandoffCookieAttributes(t *testing.T) {
+	rec := httptest.NewRecorder()
+	setJoinCodeHandoff(rec, "bcd-fgh")
+
+	var found *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == joinCodeHandoffCookie {
+			found = c
+		}
+	}
+	if found == nil {
+		t.Fatalf("no %s cookie was set; got %v", joinCodeHandoffCookie, rec.Result().Cookies())
+	}
+	if found.Value != "BCDFGH" {
+		t.Errorf("value = %q, want the normalised code", found.Value)
+	}
+	if !found.HttpOnly {
+		t.Error("the hand-off cookie must not be readable by script")
+	}
+	if !found.Secure {
+		t.Error("the hand-off cookie must be Secure; the __Host- prefix requires it")
+	}
+	if found.SameSite != http.SameSiteLaxMode {
+		// Strict drops the cookie on the top-level navigation back from the
+		// issuer, which is the one request that needs it.
+		t.Errorf("SameSite = %v, want Lax", found.SameSite)
+	}
+	if found.Path != "/" {
+		t.Errorf("Path = %q, want / so Room Pass's /join receives it", found.Path)
+	}
+	if found.MaxAge <= 0 {
+		t.Errorf("MaxAge = %d, want a bounded positive lifetime", found.MaxAge)
+	}
+
+	// A login that did not come from a QR code must not set anything at all.
+	empty := httptest.NewRecorder()
+	setJoinCodeHandoff(empty, "")
+	if cookies := empty.Result().Cookies(); len(cookies) != 0 {
+		t.Errorf("an ordinary login set %d cookies, want none", len(cookies))
+	}
+}
+
+// The QR code carries both halves of the single URL: the room code and where
+// the participant should end up. This checks they survive /auth/login together
+// -- the destination into the server-side transaction, the code into the cookie.
+func TestLoginCarriesTheScannedCodeAndDestination(t *testing.T) {
+	p := &oidcProvider{
+		cfg:          config{OIDCConnectorID: "room-pass"},
+		oauth:        oauth2.Config{ClientID: "voter", Endpoint: oauth2.Endpoint{AuthURL: "https://dex.test/auth"}, RedirectURL: "https://voter.test/auth/callback"},
+		transactions: map[string]*loginTransaction{},
+		now:          time.Now,
+	}
+
+	rec := httptest.NewRecorder()
+	p.handleLogin(rec, httptest.NewRequest(http.MethodGet, "/auth/login?code=bcd-fgh&return=/answer/round-1", nil))
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want a redirect to the issuer", rec.Code)
+	}
+	var handoff string
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == joinCodeHandoffCookie {
+			handoff = c.Value
+		}
+	}
+	if handoff != "BCDFGH" {
+		t.Errorf("hand-off cookie = %q, want the scanned code", handoff)
+	}
+	if len(p.transactions) != 1 {
+		t.Fatalf("%d transactions, want exactly one", len(p.transactions))
+	}
+	for _, tx := range p.transactions {
+		if tx.Return != "/answer/round-1" {
+			t.Errorf("Return = %q, want the questionnaire page", tx.Return)
+		}
+	}
+	// The code belongs in the cookie, not in the URL handed to the issuer:
+	// that URL ends up in the issuer's logs and the browser's history.
+	if location := rec.Header().Get("Location"); strings.Contains(strings.ToUpper(location), "BCDFGH") {
+		t.Errorf("the room code leaked into the authorization request: %s", location)
 	}
 }

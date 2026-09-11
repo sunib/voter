@@ -53,6 +53,25 @@ kubectl -n room-pass get room demo \
 kubectl -n demo get configmaps
 ```
 
+Or project a QR code instead, so nobody has to type anything but a name:
+
+```sh
+task room-pass:present BASE=https://voter.koudijs.dev NEXT=/answer/round-1
+```
+
+That follows the rotating code and redraws, under your own kubeconfig — a join code is
+operator-only credential material, so Kubernetes decides who may see one. The scan lands
+on the application's login URL carrying both the code and the page to finish on.
+
+That works through a general Room Pass integration point: **an application sharing the
+join host may pre-supply a room code in the `__Host-room-pass-joincode` cookie**, and the
+join page then asks only for a display name. Room Pass owns the name and the rules, any
+application can use it, and nothing in the channel knows what a QR code is — a QR is just
+the most convenient way to get a code into a phone. Room Pass never trusts the value: it
+becomes a prefill and is checked against the Room's valid codes through the ordinary
+POST. [Joining by QR code](docs/qr-join.md) has the contract and a worked integration.
+The typed path is unchanged and still works for anyone who cannot scan.
+
 Six letters may be shown as `BCD-FGH`; case, display hyphens and outer whitespace are
 ignored. Defaults rotate every **15 seconds** and expire each code after **30 seconds**:
 two overlapping codes, with 15 seconds to finish typing the previous displayed code.

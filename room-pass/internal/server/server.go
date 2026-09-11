@@ -426,7 +426,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 
 var page = template.Must(template.New("join").Parse(pageSource))
 
-const pageSource = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Join the room</title><style>body{font:18px system-ui;margin:3rem auto;padding:0 1rem;max-width:30rem;background:#f8fafc;color:#172033}input,button{box-sizing:border-box;width:100%;padding:.8rem;margin:.4rem 0 1rem;font:inherit}button{background:#1749a5;color:white;border:0;border-radius:.4rem}label{display:block}small{line-height:1.5}</style><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .Form}}<form method="post" action="/join"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="handoff" value="{{.Handoff}}"><input type="hidden" name="return" value="{{.Return}}">{{if .Enrolled}}<p>You’re already enrolled as <strong>{{.EnrolledName}}</strong>. Continue with the same demo identity.</p>{{else}}<label>Room code<input name="code" required maxlength="24" autocomplete="off" autocapitalize="characters" placeholder="BCDFGH"></label><label>Display name<input name="name" required maxlength="64" autocomplete="nickname"></label>{{end}}<button>Continue</button></form>{{end}}{{if .Enrolled}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out of this browser</button></form>{{end}}<small>Your name is a demo label, not a verified identity. Demo changes may appear in Git with this name and a generated email address.</small></html>`
+const pageSource = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Join the room</title><style>body{font:18px system-ui;margin:3rem auto;padding:0 1rem;max-width:30rem;background:#f8fafc;color:#172033}input,button{box-sizing:border-box;width:100%;padding:.8rem;margin:.4rem 0 1rem;font:inherit}button{background:#1749a5;color:white;border:0;border-radius:.4rem}label{display:block}small{line-height:1.5}.scanned{background:#e8f0fe;border-radius:.4rem;padding:.6rem .8rem;margin:.4rem 0 1rem}</style><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .Form}}<form method="post" action="/join"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="handoff" value="{{.Handoff}}"><input type="hidden" name="return" value="{{.Return}}">{{if .Enrolled}}<p>You’re already enrolled as <strong>{{.EnrolledName}}</strong>. Continue with the same demo identity.</p>{{else}}{{if .Code}}<p class="scanned">Room code <strong>{{.Code}}</strong>, from the code you scanned. <input type="hidden" name="code" value="{{.Code}}"></p>{{else}}<label>Room code<input name="code" required maxlength="24" autocomplete="off" autocapitalize="characters" placeholder="BCDFGH"></label>{{end}}<label>Display name<input name="name" required maxlength="64" autocomplete="nickname"{{if .Code}} autofocus{{end}}></label>{{end}}<button>Continue</button></form>{{end}}{{if .Enrolled}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out of this browser</button></form>{{end}}<small>Your name is a demo label, not a verified identity. Demo changes may appear in Git with this name and a generated email address.</small></html>`
 
 func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" && r.Method != "POST" {
@@ -487,7 +487,17 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 			enrolledName = p.Spec.DisplayName
 		}
 	}
+	// A code carried here by a scanned QR code. Only ever a prefill: the POST
+	// below re-reads it from the form and Room Pass checks it against the
+	// Room's rotating status exactly as it checks a typed one.
+	scanned := ""
+	if r.Method == "GET" && !enrolled {
+		scanned = scannedCode(r)
+	}
 	message := "Enter the room code and choose a display name."
+	if scanned != "" {
+		message = "Choose a display name to join."
+	}
 	form := true
 	if !controller.Active(room, s.now()) {
 		message = "This demo has ended."
@@ -506,8 +516,12 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Try again later", 503)
 			return
 		}
+		// Single use. The code is in the form now, and a code left in the jar
+		// is one that gets silently reused on the next join, long after it
+		// stopped being the code on the screen.
+		clearJoinCodeHandoff(w)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_ = page.Execute(w, map[string]any{"Title": room.Spec.Title, "Message": message, "Form": form, "CSRF": csrf, "Handoff": handoff, "Return": dest, "Enrolled": enrolled, "EnrolledName": enrolledName})
+		_ = page.Execute(w, map[string]any{"Title": room.Spec.Title, "Message": message, "Form": form, "CSRF": csrf, "Handoff": handoff, "Return": dest, "Enrolled": enrolled, "EnrolledName": enrolledName, "Code": scanned})
 		return
 	}
 	if reason := s.csrfReason(r); reason != "" {
@@ -760,4 +774,96 @@ func (s *Server) confirm(w http.ResponseWriter, r *http.Request) {
 	id = next
 	tx.Confirmed = true
 	http.Redirect(w, r, s.cfg.JoinOrigin+"/join?handoff="+url.QueryEscape(id), 303)
+}
+
+// --- Pre-supplied join codes ------------------------------------------------
+//
+// A Room Pass integration point: an application sharing this host may supply
+// the join code ahead of the participant, and the join page then asks only for
+// a display name. Room Pass offers this; no particular application owns it.
+//
+// The motivating case is a QR code on the presenter's screen carrying the
+// current code, but nothing here knows about QR codes. Any application that
+// has obtained a code by any means can use the same channel.
+//
+// Why a cookie rather than a parameter. The /join URL is built HERE, after
+// Dex, from a handoff id the application never sees, so there is no query
+// string for a caller to populate. A cookie works because the join origin and
+// the application origin are one host (JOIN_ORIGIN; the deployment's proxy
+// splits the paths), which makes this a same-host integration and not a
+// general remote API:
+//
+//	app login endpoint (sets the cookie) -> Dex -> /callback/<connector>
+//	   -> /bind -> /confirm -> /join, where the cookie arrives with the browser
+//
+// The application keeps its own post-login destination in its own login
+// transaction. It cannot travel through this gateway's return parameter, which
+// is an exact, immutable allowlist entry and cannot carry a deep link.
+//
+// Nothing here trusts the cookie. Its value reaches the participant's form as
+// a prefill and comes back through the ordinary POST, where enrollParticipant
+// checks it against the Room's currently valid codes. A forged one is an
+// invalid code; a stale one is an expired code. Both already have answers.
+//
+// See docs/qr-join.md for the integration contract.
+
+// joinCodeHandoffCookie is the name in that contract. Spelled out rather than
+// following the internal __Host-rp-* convention: the other cookies here are
+// Room Pass talking to itself, while this one is written by somebody else's
+// code, where "rp" is an abbreviation only we can expand.
+//
+// It is a plain cookie on purpose. Signing it would claim the writer vouches
+// for the code, and the whole point is that nobody does until the Room says so
+// -- which also means an integrator needs no key material from us.
+const joinCodeHandoffCookie = "__Host-room-pass-joincode"
+
+// maxScannedCodeLength matches the Room CRD's upper bound for joinCode.length.
+const maxScannedCodeLength = 12
+
+// scannedCode returns the code a QR scan carried in, or "" for an ordinary
+// visit. The query parameter is supported so a QR can point straight at this
+// gateway when no application destination is involved; the cookie is what the
+// application uses.
+func scannedCode(r *http.Request) string {
+	if code := normalizeScannedCode(r.URL.Query().Get("code")); code != "" {
+		return code
+	}
+	if c, e := r.Cookie(joinCodeHandoffCookie); e == nil {
+		return normalizeScannedCode(c.Value)
+	}
+	return ""
+}
+
+// normalizeScannedCode bounds what may be echoed back into the form. It is not
+// a validity check -- enrollParticipant owns that -- only a guard against
+// rendering unbounded junk from a cookie or a query string as if it were a
+// code. html/template escapes the value either way.
+func normalizeScannedCode(raw string) string {
+	code := controller.Normalize(raw)
+	if code == "" || len(code) > maxScannedCodeLength {
+		return ""
+	}
+	for _, r := range code {
+		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') {
+			return ""
+		}
+	}
+	return code
+}
+
+// clearJoinCodeHandoff expires the hand-off cookie. Written raw rather than
+// through s.cookie because this cookie is not ours to encode: the application
+// set it in plain text, and the attributes must match for the browser to
+// accept the deletion.
+func clearJoinCodeHandoff(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     joinCodeHandoffCookie,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+	})
 }

@@ -130,3 +130,56 @@ test("closing enrollment removes the browser join form", async ({ page }) => {
     );
   }
 });
+
+// Scanning the presenter's QR code should leave one field to fill in. The
+// interesting part is not the form -- it is that the room code survives a
+// redirect chain that leaves this origin for Dex and comes back, carried by a
+// cookie the application set before any of that happened. Only a real browser
+// enforces the SameSite rule that makes or breaks it, which is why this test
+// is here and not in the Go suite.
+test("a scanned QR code joins the room without typing a code", async ({
+  page,
+  context,
+}, testInfo) => {
+  const code = room().status.joinCode.code;
+
+  // What the QR code encodes: the application's login URL, carrying the code
+  // on screen. The real one also carries ?return=, which this demo client has
+  // no pages to return to.
+  await page.goto(`/app/login?code=${code}`);
+
+  await expect(page.getByText("Choose a display name to join.")).toBeVisible();
+  await expect(page.getByLabel("Room code")).toHaveCount(0);
+  await expect(page.getByText(code, { exact: false })).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("scanned.png"),
+    fullPage: true,
+  });
+
+  await page.getByLabel("Display name").fill(testName);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(
+    page.getByText(`Welcome, ${testName}.`, { exact: true }),
+  ).toBeVisible();
+  expect(
+    participants().filter((p) => p.spec.displayName === testName),
+  ).toHaveLength(1);
+
+  // Used once. A code left in the jar is one that gets silently replayed on
+  // the next join, long after it stopped being the code on the screen.
+  expect(
+    (await context.cookies()).find((c) => c.name === "__Host-room-pass-joincode"),
+  ).toBeUndefined();
+});
+
+// A cookie anything on this host can write must be worth nothing on its own.
+test("a forged join code is still just a wrong code", async ({ page }) => {
+  await page.goto("/app/login?code=ZZZZZZ");
+  await expect(page.getByLabel("Room code")).toHaveCount(0);
+  await page.getByLabel("Display name").fill(testName);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page.getByText(/invalid or joining has closed/i)).toBeVisible();
+  expect(
+    participants().filter((p) => p.spec.displayName === testName),
+  ).toHaveLength(0);
+});
