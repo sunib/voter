@@ -1,7 +1,10 @@
 # Shared CoffeeConfig streams
 
-Status: implemented and verified in the disposable fixture on 2026-09-11;
-not published or deployed to production. Production remains on `55e287d`.
+Status: deployed to production on 2026-09-11 as `85de0c0`, promoted through GitOps
+`2d770a1`. Verified first in the disposable fixture, then on the cluster: the narrowed
+service-account grants authorize named list/watch on Kubernetes 1.36.1, public
+`/metrics` returns 404, and the ready pod matches the published digest. An
+authenticated 200-attendee production rehearsal has not been run.
 
 ## Implementation
 
@@ -60,7 +63,7 @@ five-second deadline. The opt-in test opens the full cohort concurrently.
 
 Final checks passed: Go race tests, vet/lint, 21 frontend tests, frontend
 type-check/build/lint, container build and platform Kustomize rendering. All 13
-browser tests passed in 41.5 seconds against the rebuilt fixture. The simultaneous
+browser tests passed in 41.9 seconds against the rebuilt fixture. The simultaneous
 200-identity rehearsal passed in 45.0 seconds.
 
 Go tests cover exact scope rejection before identity/API access, full identity
@@ -111,15 +114,22 @@ load, upstream recycling and attendee OIDC/browser behavior under event conditio
 
 ## Release handoff
 
-The fixture has its own `voter` service account and matching narrow grants. The
-platform checkout has a prepared change in
-`external/k8s/k8s.koudijs.dev/2-gitops/voter-demo/app.yaml`, which also removes its old
-unused QuizSession/QuizSubmission service-account read grants. That checkout is a
-separate Git repository. Its image pin remains unchanged.
+The fixture has its own `voter` service account and matching narrow grants. The same
+grants were promoted to the platform repository (a separate Git checkout) in commit
+`2d770a1`, together with the image pin and `METRICS_ADDRESS`. That change also removed
+the old unused `get` verb and QuizSession/QuizSubmission service-account read grants,
+which no code path used.
 
-Publish a validated Voter image and promote its digest together with these grants
-through platform GitOps. Verify rollout, actual watch counts and the authenticated
-journey. Keep the production capacity gate in PLAN open until its evidence exists.
+Verified after promotion: Flux applied `2d770a1`, the ready pod matches the published
+digest, `/public/build-info` reports `85de0c0`, and on Kubernetes **1.36.1** the
+service account is allowed named `coffeeconfigs/demo-coffee` list and watch while
+unnamed list, `get`, `patch`, quiz resources, Secrets and impersonation are all denied.
+That closes the named-authorization gate on the production API version.
+
+Still open: **no attendee has opened a stream against the deployed build**, so every
+production stream counter is zero and the authenticated journey, actual shared-watch
+count under load, and the `Recreate` rollout/reconnect cycle remain unverified in
+production. Keep the production capacity gate in PLAN open until that evidence exists.
 Room Pass extraction, k8s-front prototyping, CI artifact promotion and ConfigButler
 commit observation remain separate changes.
 

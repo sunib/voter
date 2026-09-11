@@ -2,9 +2,9 @@
 
 Voter is a coffee and voting demo consuming public infrastructure components. Room Pass
 is an independent enrollment service being prepared for extraction. krm-stream owns
-generic live-resource behavior. The **krm-stream 0.3.0 integration is deployed as
-`55e287d`**, verified on **2026-09-11**. This document distinguishes that implementation
-from the shared-stream implementation awaiting release in [PLAN.md](PLAN.md).
+generic live-resource behavior. The **krm-stream 0.3.0 integration with shared streams
+is deployed as `85de0c0`**, verified on **2026-09-11**. Remaining targets are tracked
+in [PLAN.md](PLAN.md).
 
 ## Ownership
 
@@ -128,8 +128,8 @@ leaves, not when the first attendee's session expires.
 ## Live editing: implementation versus target
 
 Voter pins krm-stream gateway/kube and npm `@configbutler/krm-stream`
-to **0.3.0**, used through `useLiveCoffeeConfig`. Production revision `55e287d`
-still opens a backend per participant. The working tree enables the library's documented
+to **0.3.0**, used through `useLiveCoffeeConfig`. Production revision `85de0c0`
+enables the library's documented
 [SharedBackend integration](https://github.com/ConfigButler/krm-stream/blob/main/docs/auth.md#two-things-that-are-easy-to-confuse).
 One process-wide backend instance maintains one upstream watch per scope. The first
 subscriber opens it; later authorized subscribers receive a snapshot from its cache
@@ -149,8 +149,7 @@ draft, derived changes and conflicts directly. Every edit and row operation goes
 through store APIs. Products/vouchers use atomic array reconciliation; existing SKU/code
 inputs are read-only. Display fallbacks do not modify the resource or its base.
 
-The diagram describes the working-tree editor/save and shared-watch implementation.
-Production remains on participant-token watches until the shared-stream release:
+The diagram describes the deployed editor/save and shared-watch implementation:
 
 ```mermaid
 flowchart LR
@@ -303,8 +302,9 @@ smoke check reached the Room Pass enrollment form through the public application
 The user also confirmed the deployed app works. Authenticated editing was exercised
 in the disposable fixture; the production smoke test stopped at login.
 
-The library-store migration and conditional saves are deployed; shared
-streaming is implemented locally; its production release remains outstanding. [PLAN.md](PLAN.md) records release digests, rollback,
+The library-store migration, conditional saves and shared streaming are all deployed;
+an authenticated production smoke test of the shared stream is still outstanding.
+[PLAN.md](PLAN.md) records release digests, rollback,
 remaining acceptance criteria and platform follow-up. Design history belongs in Git.
 
 ## Earlier voting release verification

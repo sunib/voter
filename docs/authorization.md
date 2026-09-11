@@ -102,7 +102,7 @@ plan tracks those remaining proofs.
 See [network suite details](../room-pass/test/network/README.md) for testing the
 actual platform policy file and the distinction between local k3s and live Cilium.
 
-## Shared-stream implementation awaiting release
+## Shared streams
 
 CoffeeConfig streams use one service-account backend per process. Voter resolves the
 subscriber's full Kubernetes identity with their token at stream opening and applies
@@ -114,8 +114,10 @@ denied list/watch, and access-review errors fail closed.
 The service account gets named CoffeeConfig reads and SAR creation only. Direct REST
 reads, CoffeeConfig PATCH and CommitRequest creation retain participant credentials;
 audit watch events now identify the service account while writes identify the person.
-The fixture and platform manifests carry the same narrow grants. Production remains
-on the release recorded in PLAN until GitOps promotion. See [verification](shared-streams.md).
+The fixture and platform manifests carry the same narrow grants. Deployed as `85de0c0`
+through GitOps `2d770a1`; on Kubernetes 1.36.1 the service account is allowed named
+`coffeeconfigs/demo-coffee` list and watch and denied everything else checked.
+See [verification](shared-streams.md).
 
 ### Revocation timing and the cached subject
 

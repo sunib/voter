@@ -4,8 +4,8 @@ This is the implementation plan, not a claim that the target design is deployed.
 [ARCHITECTURE.md](ARCHITECTURE.md) defines the boundaries and target data flow.
 Reviewed against krm-stream **0.3.0** and upstream main `2154f9d` on **2026-09-11**;
 the released primitives are integrated and deployed as described below.
-Updated **2026-09-11** after verifying deployed Voter revision `55e287d` and GitOps
-revision `59fc828`; Room Pass remains on `d7d38ba`. Historical investigations remain in Git; this file keeps actionable
+Updated **2026-09-11** after verifying deployed Voter revision `85de0c0` and GitOps
+revision `2d770a1`; Room Pass remains on `d7d38ba`. Historical investigations remain in Git; this file keeps actionable
 work and operational facts that still matter.
 
 ## Outcome
@@ -26,17 +26,17 @@ Dex. Voter keeps coffee and voting behavior, its application session, narrow aut
 and presentation. Reducing code means deleting duplicate responsibilities, not moving
 an entire demo into a general-purpose package.
 
-## Current working-tree increment: shared streams
+## Deployed increment: shared streams
 
-Implemented locally on **2026-09-11**, awaiting CI publication and GitOps promotion.
-Production versions in the historical verification below have not changed.
+Deployed on **2026-09-11** as Voter `85de0c0`, promoted through GitOps `2d770a1`.
 
 - One process-wide library `SharedBackend`; participant SelfSubjectReview identity
   and list/watch SARs before cache disclosure, with 30-second rechecks.
 - Independent session deadlines, five-second authorization/write deadlines and
   aggregate stream metrics. Direct REST reads/writes retain participant tokens.
-- Narrow grants applied in the disposable fixture and prepared in the separate
-  platform checkout; its production image pin remains unchanged.
+- Narrow grants applied in the disposable fixture and promoted to the platform:
+  named `demo-coffee` list/watch plus SubjectAccessReview creation, nothing else.
+  The vestigial `get` verb and quizsessions/quizsubmissions grants were removed.
 - Local 200-identity rehearsal proved **one actual upstream watch**, update convergence,
   50-client reconnect reuse, grant withdrawal in 30.00s and last-disconnect cleanup
   under 1 CPU / 256 MiB limits. Uses real Kubernetes service-account identities in
@@ -44,14 +44,26 @@ Production versions in the historical verification below have not changed.
 
 Validation: Go tests with race detection, vet/lint, all **21 frontend tests**,
 frontend type-check/build/lint, container build and platform Kustomize rendering
-passed. All **13 browser tests passed in 41.5s**, including real RBAC withdrawal
+passed. All **13 browser tests passed in 41.9s**, including real RBAC withdrawal
 while another viewer continues. The simultaneous 200-identity rehearsal passed in
-45.0s. These are local checks; CI and production promotion remain outstanding.
+45.0s. [CI run 34605972419](https://github.com/sunib/voter/actions/runs/34605972419)
+passed every job for `85de0c0`.
+
+Production verification: Flux applied `2d770a1`; the ready pod runs
+`ghcr.io/sunib/voter:sha-85de0c0@sha256:cc0f384099ca002a697aeadf5f5617d35658b0b9c33416373cb72af21bf057e3`
+and `/public/build-info` reports `gitCommit: 85de0c0`, `gitDirty: 0`. On Kubernetes
+**1.36.1** the service account is allowed named `coffeeconfigs/demo-coffee` list and
+watch, and denied unnamed list, `get`, `patch`, quiz resources, Secrets and
+impersonation -- the named-authorization promotion gate is closed. Public `/metrics`
+returns 404 while the pod-proxy listener on 9090 serves counters; an unauthenticated
+stream returns 401 and the Dex login redirect is intact.
 
 See [shared-stream verification and release handoff](docs/shared-streams.md) for
-measurements, commands and limitations. **Next: CI publication/GitOps promotion and
-production-equivalent capacity evidence**, then ConfigButler commit observation and
-actor attribution. k8s-front remains a separate proposal.
+measurements, commands and limitations. **Next: an authenticated production smoke
+test and production-equivalent capacity evidence** -- no attendee has opened a stream
+against the deployed build yet, so all stream counters are still zero. Then
+ConfigButler commit observation and actor attribution. k8s-front remains a separate
+proposal.
 
 ### Review fixes and upstream boundary
 
