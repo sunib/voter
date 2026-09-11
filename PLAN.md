@@ -3,10 +3,9 @@
 This is the implementation plan, not a claim that the target design is deployed.
 [ARCHITECTURE.md](ARCHITECTURE.md) defines the boundaries and target data flow.
 Reviewed against krm-stream **0.3.0** and upstream main `2154f9d` on **2026-09-11**;
-the released primitives are now integrated in the working tree as described below.
-Deployment facts below are retained from the earlier verification, not rechecked by this review.
-Updated **2026-09-11** for deployed Voter revision `14dffd4` and GitOps
-revision `ef45717`; Room Pass remains on `d7d38ba`. Historical investigations remain in Git; this file keeps actionable
+the released primitives are integrated and deployed as described below.
+Updated **2026-09-11** after verifying deployed Voter revision `55e287d` and GitOps
+revision `59fc828`; Room Pass remains on `d7d38ba`. Historical investigations remain in Git; this file keeps actionable
 work and operational facts that still matter.
 
 ## Outcome
@@ -44,11 +43,10 @@ Validation: Go tests/vet/lint and frontend unit tests/type-check/build/lint pass
 All **9 browser tests passed in 6.0s** against the rebuilt image in the disposable
 fixture after clearing local disk pressure and restoring its issuer DNS aliases.
 
-That deployed increment predates the working-tree migration below. Shared streaming
-and the 200-attendee acceptance rehearsal remain outstanding; these source changes
-have not been released or deployed to production.
+That increment predates the deployed library migration below. Shared streaming
+and the 200-attendee acceptance rehearsal remain outstanding.
 
-## Voting increment
+## Earlier voting increment
 
 Deployed Voter `14dffd4` through GitOps `ef45717` on 2026-09-11. `/vote` lists rounds,
 `/answer/demo-round-1` is open, and `/answer/demo-round-1/results` shows results on
@@ -68,13 +66,13 @@ was exercised in the disposable fixture, not by casting votes in the production 
 
 | Area | Evidence and remaining gap |
 | --- | --- |
-| CI | [Run 34584101156](https://github.com/sunib/voter/actions/runs/34584101156) for `14dffd4` passed all jobs, including the new voting browser case. |
-| Deployment | GitOps commit `ef45717b6218f2e4d866d1e44bc36188adba538d` is pushed to `ConfigButler/k8s` main. Flux `voter-demo` is Ready at that revision; Voter completed rollout and the sample round is live. |
-| Running versions | Voter runs `sha-14dffd4`, pinned to `sha256:9f82a3157b7c160506f6332aaaae6ae9d538a5fb8f218491d87ea505d8b23e89`; the ready pod image ID matches. Room Pass remains on `sha-d7d38ba`. |
-| Production checks | Public `/public/build-info` reports `gitCommit: 14dffd4`, `gitDirty: 0`. Chromium reached Room Pass through `/vote`; anonymous round reads return 401. The sample QuizSession is live. |
-| Editor | Deployed revision remains the old editor. Working tree now uses the library store, atomic arrays and conditional intent saves; no custom reconciliation remains. |
-| Stream | Working tree adds managed recovery, exact namespace/name/version restrictions and per-session deadlines. Shared watches and bounded RBAC rechecks remain open. |
-| Resource contract | Working tree initializes from stream snapshots, reconciles guarded projected GETs and returns receipt-only saves. |
+| CI | [Run 34593086461](https://github.com/sunib/voter/actions/runs/34593086461) for `55e287d` passed all jobs, including browser tests and both image builds. |
+| Deployment | GitOps commit `59fc82848caf63a40cf2f8e95aebf00d6d0ecc10` is pushed to `ConfigButler/k8s` main. Flux `voter-demo` is Ready at that revision; Voter completed rollout and the sample round is live. |
+| Running versions | Voter runs `sha-55e287d`, pinned to `sha256:ccffb1ca260f78e46af1316e639faabea73b93a160b056a0938d86dd0ce4d186`; the ready pod image ID matches. Room Pass remains on `sha-d7d38ba`. |
+| Production checks | Public `/public/build-info` reports `gitCommit: 55e287d`, `gitDirty: 0`. Chromium reached the room-code form through the quiz, results and editor routes without page errors. The sample QuizSession is live. |
+| Editor | Deployed editor uses the library store, atomic arrays and conditional intent saves; no custom reconciliation remains. |
+| Stream | Deployed stream adds managed recovery, exact namespace/name/version restrictions and per-session deadlines. Shared watches and bounded RBAC rechecks remain open. |
+| Resource contract | Deployed editor initializes from stream snapshots, reconciles guarded projected GETs and returns receipt-only saves. |
 | Git payoff | At the latest CRD check, `commitrequests.configbutler.ai` was absent. Neither an observed Git commit nor end-to-end actor attribution has been verified. |
 
 First-increment artifacts retained as a rollback reference:
@@ -82,9 +80,9 @@ First-increment artifacts retained as a rollback reference:
 - Voter: `sha256:c6dd9cfe0903fb169c599907ac5b385fd53956952bdd55f70de6e3f1af233659`.
 - Room Pass: `sha256:7e1690adb4e304c600afbed2e1f529b98dc727bd5c1bb5f14b2356d5287b8cee`.
 
-Rollback the voting increment by reverting GitOps commit `ef45717` in
-`ConfigButler/k8s`, pushing and letting Flux reconcile. That restores Voter `d7d38ba`
-and removes the sample round from GitOps. All workload changes came from Git;
+Rollback the current library migration by reverting GitOps commit `59fc828` in
+`ConfigButler/k8s`, pushing and letting Flux reconcile. That restores Voter `14dffd4`
+while retaining the sample round. All workload changes came from Git;
 Flux reconciliation was triggered to apply the committed revision.
 
 ## 1. Adopt the released integration primitives
@@ -95,7 +93,7 @@ Voter now pins npm and both Go modules to **0.3.0**. The Go module and image bui
 use **1.27.1**. Upstream runtime behavior was reviewed at the release tag; no local
 upstream override or core library copy is used.
 
-### Implemented locally, not yet deployed
+### Implemented and deployed as `55e287d`
 
 - AdminScreen now renders the store's draft and derived changes/conflicts. Removed
   custom reconciliation, mutation helpers and dirty registries. Arrays remain atomic;
@@ -120,10 +118,16 @@ vet/lint and the Go 1.27.1 container build passed. **All 12 browser tests passed
 10.7s** against the final rebuilt disposable fixture, including a real Kubernetes 409 followed
 by a fresh reviewed save, receipt-only response and explicit conflict choice. Backend
 tests also prove exact scope refusal and expiry isolation; a client integration test
-proves transport reconnection preserves edits through a fresh snapshot. Production remains on the
-previous revision; shared-watch capacity and the full race/reconnect matrix remain open.
-The final fixture run required extending the expired local Room deadline; no production
-room or deployment was changed.
+proves transport reconnection preserves edits through a fresh snapshot. Shared-watch capacity and the full race/reconnect matrix remain open.
+The final fixture run required extending the expired local Room deadline. The subsequent
+production rollout was verified through Flux, the ready pod digest, public build metadata
+and anonymous browser smoke checks; authenticated tests ran in the fixture, and no
+production QuizSubmissions were created.
+
+The existing live quiz is [demo-round-1](https://voter.koudijs.dev/answer/demo-round-1),
+“How do you change Kubernetes configuration today?” Its
+[results](https://voter.koudijs.dev/answer/demo-round-1/results) are available after room
+login. Room `demo` is open through **2026-09-30 18:00 UTC** at this verification.
 
 | Earlier upstream request | 0.3.0 finding | Voter decision |
 | --- | --- | --- |
@@ -392,7 +396,7 @@ an unrelated OIDC application through Dex, and upgrade without changing identiti
 
 - [ ] Install/configure ConfigButler through `external/k8s` and provision its Git target.
       Represent Kubernetes save, CommitRequest acceptance and observed Git commit as
-      separate states. The working tree now names request acceptance `commitRequested`;
+      separate states. The deployed receipt names request acceptance `commitRequested`;
       end-to-end commit observation is still missing.
       Show the resulting commit reference and verify actor attribution end to end.
 - [ ] Use ConfigButler's public APIs for durable change history and commit observation;

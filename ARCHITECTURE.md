@@ -2,10 +2,9 @@
 
 Voter is a coffee and voting demo consuming public infrastructure components. Room Pass
 is an independent enrollment service being prepared for extraction. krm-stream owns
-generic live-resource behavior. This document distinguishes the deployed `14dffd4`
-revision from the **2026-09-11 working-tree integration of krm-stream 0.3.0** and the
-remaining shared-stream target in [PLAN.md](PLAN.md). The integration has not been
-released or deployed to production. Historical production facts below were not reverified.
+generic live-resource behavior. The **krm-stream 0.3.0 integration is deployed as
+`55e287d`**, verified on **2026-09-11**. This document distinguishes that implementation
+from the remaining shared-stream target in [PLAN.md](PLAN.md).
 
 ## Ownership
 
@@ -110,7 +109,7 @@ See [handoff.md](room-pass/docs/handoff.md) for the protocol and
 Application mutations require CSRF proof. Logout clears the Voter session, not Room
 Pass enrollment or an issued Dex token. Stopping a Room blocks new enrollment/assertions;
 it does not revoke existing tokens. Open Kubernetes watches are not immediately
-re-authorized on every event. The working tree bounds each subscription by session/token
+re-authorized on every event. The deployed implementation bounds each subscription by session/token
 expiry. The future shared-stream integration uses 0.3.0's authorization checks at snapshot cycles plus a 30-second
 `ReauthorizationInterval` and five-second `ReauthorizationTimeout`. Timed checks pause
 that subscriber's delivery; denial, timeout or changed projection policy terminates it.
@@ -125,7 +124,7 @@ leaves, not when the first attendee's session expires.
 
 ## Live editing: implementation versus target
 
-The working tree pins krm-stream gateway/kube and npm `@configbutler/krm-stream`
+Voter pins krm-stream gateway/kube and npm `@configbutler/krm-stream`
 to **0.3.0**, used through `useLiveCoffeeConfig`. Each caller gets an
 upstream backend using their token; **there is no shared-watch coalescing in Voter**.
 For the **200-attendee demo**, the target explicitly enables the library's documented
@@ -264,12 +263,12 @@ remain server-authoritative. Changing maximumUsage affects subsequent orders.
 Redemptions are currently in process memory: a restart resets counts and a second
 replica would enforce a different tally. Keep one replica until shared atomic
 persistence exists. A resource watch is neither order storage nor change history.
-Voting is restored in the next increment described below; unsupported admin-order
+Voting is restored in the deployed increment described below; unsupported admin-order
 and history screens remain separate work.
 
 ConfigButler should own durable Git history and commit completion. The UI needs three
-separate facts: Kubernetes saved, CommitRequest accepted, Git commit observed. The working-tree receipt uses `commitRequested` for request acceptance and does not
-claim an observed commit. The deployed revision still calls that flag `committed`.
+separate facts: Kubernetes saved, CommitRequest accepted, Git commit observed. The deployed receipt uses `commitRequested` for request acceptance and does not
+claim an observed commit. The previous revision called that flag `committed`.
 The previous cluster verification found no CommitRequest CRD; installing it and proving
 the Git payoff remain platform work.
 
@@ -280,7 +279,7 @@ OIDC fixture. Voter will test against those releases. Voter-specific CoffeeConfi
 live-editor tests move out of Room Pass before its extraction is complete. Generic
 merge/transport regression suites live in krm-stream; application tests prove the
 integration, authorization and user-visible race handling. Adopt published 0.3.0
-npm and Go artifacts, then delete the duplicate editor using its existing APIs.
+npm and Go artifacts; the duplicate editor has been replaced using its existing APIs.
 Both Go modules require Go 1.27.1; validate the consuming module, CI and image builds
 outside upstream's workspace. Main consumes published packages and production consumes
 validated releases. Track 0006's contract and watch-continuation work independently;
@@ -302,19 +301,38 @@ smoke check reached the Room Pass enrollment form through the public application
 The user also confirmed the deployed app works. Authenticated editing was exercised
 in the disposable fixture; the production smoke test stopped at login.
 
-The library-store migration and conditional saves are implemented locally; shared
-streaming and production rollout remain outstanding. [PLAN.md](PLAN.md) records release digests, rollback,
+The library-store migration and conditional saves are deployed; shared
+streaming remains outstanding. [PLAN.md](PLAN.md) records release digests, rollback,
 remaining acceptance criteria and platform follow-up. Design history belongs in Git.
 
-## Voting release verification
+## Earlier voting release verification
 
-Voter `14dffd4` is deployed through platform GitOps commit `ef45717`, pinned to
+Voter `14dffd4` was deployed through platform GitOps commit `ef45717`, pinned to
 `sha256:9f82a3157b7c160506f6332aaaae6ae9d538a5fb8f218491d87ea505d8b23e89`.
 Room Pass remains on `d7d38ba`. Full CI run `34584101156` passed. Flux applied the
 GitOps revision, the ready pod uses the matching digest, and public build metadata
 reports the new revision. The sample `demo-round-1` is live; production `/vote`
 reaches the enrollment form. Authenticated voting was tested with two independent
 browser identities in the disposable fixture; no production QuizSubmissions were created.
+
+## Current release verification
+
+[CI run 34593086461](https://github.com/sunib/voter/actions/runs/34593086461) passed
+all jobs for Voter `55e287d`. Platform GitOps commit `59fc828` deployed image
+`ghcr.io/sunib/voter:sha-55e287d@sha256:ccffb1ca260f78e46af1316e639faabea73b93a160b056a0938d86dd0ce4d186`.
+Flux reports Ready at that revision, the rollout completed, and the ready pod image ID
+matches the published digest. Public build metadata reports `55e287d` and `gitDirty: 0`.
+Room Pass remains on `d7d38ba` because its source was unchanged.
+
+The live sample quiz, “How do you change Kubernetes configuration today?”, is available
+at [demo-round-1](https://voter.koudijs.dev/answer/demo-round-1), with
+[results](https://voter.koudijs.dev/answer/demo-round-1/results) and the
+[coffee editor](https://voter.koudijs.dev/admin) using the same room login.
+Room `demo` is open through **2026-09-30 18:00 UTC** at this verification.
+Chromium checked all three routes through the room-code form without page errors.
+Authenticated editing and voting were covered in the fixture and CI; this deployment
+check created no production QuizSubmissions. Revert platform commit `59fc828` to restore
+the previous Voter image while retaining the quiz.
 
 ## Voting rounds
 
