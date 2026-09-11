@@ -1,13 +1,8 @@
 import type { SaveRequest } from '@configbutler/krm-stream'
 import type {
   CoffeeConfig,
-  CoffeeConfigChangeRecord,
-  CoffeeConfigChangesSnapshot,
-  CoffeeConfigWatchEvent,
-  CoffeeOrderRecord,
   CoffeeOrderRequest,
   CoffeeOrderResponse,
-  CoffeeOrdersSnapshot,
   CoffeeProductSpec,
   CoffeeVoucherSpec,
   StorefrontResponse,
@@ -157,57 +152,6 @@ export type VoucherUsageSnapshot = {
 
 export async function getVoucherUsage(): Promise<VoucherUsageSnapshot> {
   return await requestJson<VoucherUsageSnapshot>('/public/vouchers')
-}
-
-export async function getCoffeeConfigChangesSnapshot(): Promise<CoffeeConfigChangesSnapshot> {
-  return await requestJson<CoffeeConfigChangesSnapshot>(
-    '/public/admin/coffeeconfig/changes',
-  )
-}
-
-export async function getOrdersSnapshot(): Promise<CoffeeOrdersSnapshot> {
-  return await requestJson<CoffeeOrdersSnapshot>('/public/admin/orders')
-}
-
-function openEventStream<T>(
-  path: string,
-  onMessage: (payload: T) => void,
-  onError?: (event: Event) => void,
-): EventSource {
-  const source = new EventSource(path)
-  source.onmessage = (event) => {
-    onMessage(JSON.parse(event.data) as T)
-  }
-  if (onError) {
-    source.onerror = onError
-  }
-  return source
-}
-
-export function watchCoffeeConfig(
-  path: string,
-  onMessage: (event: CoffeeConfigWatchEvent) => void,
-  onError?: (event: Event) => void,
-): EventSource {
-  return openEventStream(path, onMessage, onError)
-}
-
-export function watchOrders(
-  onMessage: (event: CoffeeOrderRecord) => void,
-  onError?: (event: Event) => void,
-): EventSource {
-  return openEventStream('/public/admin/orders/stream', onMessage, onError)
-}
-
-export function watchCoffeeConfigChanges(
-  onMessage: (event: CoffeeConfigChangeRecord) => void,
-  onError?: (event: Event) => void,
-): EventSource {
-  return openEventStream(
-    '/public/admin/coffeeconfig/changes/stream',
-    onMessage,
-    onError,
-  )
 }
 
 export function buildStorefrontFromConfig(

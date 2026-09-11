@@ -3,8 +3,6 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { getSession } from './api/session'
 import OrderScreen from './screens/OrderScreen.vue'
 import AdminScreen from './screens/AdminScreen.vue'
-import AdminCommitsScreen from './screens/AdminCommitsScreen.vue'
-import AdminOrdersScreen from './screens/AdminOrdersScreen.vue'
 import RoundsScreen from './screens/RoundsScreen.vue'
 import VoteResultsScreen from './screens/VoteResultsScreen.vue'
 import AnswerScreen from './screens/AnswerScreen.vue'
@@ -38,12 +36,12 @@ export const router = createRouter({
     {
       path: '/admin/orders',
       name: 'admin-orders',
-      component: AdminOrdersScreen,
+      redirect: '/admin',
     },
     {
       path: '/admin/commits',
       name: 'admin-commits',
-      component: AdminCommitsScreen,
+      redirect: '/admin',
     },
     {
       path: '/answer/:session',

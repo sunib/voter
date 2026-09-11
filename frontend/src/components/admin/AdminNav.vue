@@ -7,19 +7,9 @@ const route = useRoute()
 const currentRouteName = computed(() => route.name)
 const tabs = [
   {
-    name: 'admin-orders',
-    to: '/admin/orders',
-    label: 'List',
-  },
-  {
     name: 'admin',
     to: '/admin',
     label: 'Config',
-  },
-  {
-    name: 'admin-commits',
-    to: '/admin/commits',
-    label: 'ConfigHistory',
   },
 ] as const
 

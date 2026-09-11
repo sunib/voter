@@ -87,31 +87,6 @@ export type StorefrontResponse = {
   products: StorefrontProduct[]
 }
 
-export type CoffeeConfigWatchEvent = {
-  type: string
-  object: CoffeeConfig
-}
-
-export type CoffeeConfigFieldChange = {
-  path: string
-  previousValue?: unknown
-  newValue?: unknown
-}
-
-export type CoffeeConfigChangeRecord = {
-  id: string
-  createdAt: string
-  actor: string
-  reason?: string
-  summary: string
-  generation?: number
-  changes: CoffeeConfigFieldChange[]
-}
-
-export type CoffeeConfigChangesSnapshot = {
-  changes: CoffeeConfigChangeRecord[]
-}
-
 export type CoffeeOrderItemRequest = {
   sku: string
   quantity: number
@@ -121,15 +96,6 @@ export type CoffeeOrderRequest = {
   voucherCode?: string
   source?: Record<string, string>
   items: CoffeeOrderItemRequest[]
-}
-
-export type CoffeeOrderLine = {
-  sku: string
-  name: string
-  quantity: number
-  unitPriceCents: number
-  lineTotalCents: number
-  voucherApplied: boolean
 }
 
 export type CoffeeOrderFailure = {
@@ -143,22 +109,4 @@ export type CoffeeOrderResponse = {
   currency: string
   totalPriceCents: number
   failure?: CoffeeOrderFailure
-}
-
-export type CoffeeOrderRecord = {
-  orderId: string
-  submittedAt: string
-  voucherCode?: string
-  items: CoffeeOrderLine[]
-  source?: Record<string, string>
-  currency: string
-  totalPriceCents: number
-  status: 'placed' | 'rejected'
-  failureCode?: string
-  failureMessage?: string
-}
-
-export type CoffeeOrdersSnapshot = {
-  orders: CoffeeOrderRecord[]
-  voucherUsage: Record<string, number>
 }
