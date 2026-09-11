@@ -367,7 +367,10 @@ RBAC grants create/read access without update or patch. This is not a CRD-wide
 immutability guarantee against administrators or other identities with broader grants.
 Kubernetes stores QuizSubmissions durably. A deterministic hash of round UID and OIDC
 subject supplies the create-only QuizSubmission name, making duplicate tabs/retries one
-vote per enrollment in that round. Reopening a round preserves votes; create a
+vote per enrollment in that round. The round GET looks that name up and returns a
+`voted` flag beside the round, so a returning voter is shown the outcome instead of a
+form they cannot submit; the create stays authoritative, so a failed lookup costs only
+the early warning. Reopening a round preserves votes; create a
 new named round for another vote. Drafts are scoped to participant and round UID.
 `/public/rounds/:name/results` reads QuizSubmissions selected by round UID and returns
 counts, numeric averages and text answers without QuizSubmission metadata. The browser

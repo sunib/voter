@@ -56,19 +56,22 @@ test('two participants vote, see durable results, and cannot vote twice or after
     await alice.reload();
     await expect(alice.getByTestId('vote-total')).toHaveText('2 votes recorded');
 
+    // A returning voter is told before the form is drawn, so there is nothing to fill in.
     await alice.goto(`${APP}/answer/${name}`);
-    await alice.getByRole('button', { name: 'GitOps', exact: true }).click();
-    await alice.getByRole('button', { name: 'Submit', exact: true }).click();
     await expect(alice.getByText('You have already voted in this round.')).toBeVisible();
+    await expect(alice.getByRole('heading', { name: 'Which approach?' })).toBeHidden();
+    await expect(alice.getByRole('button', { name: 'Submit', exact: true })).toBeHidden();
+    await alice.getByRole('link', { name: 'View results' }).click();
     await expect(alice.getByTestId('vote-total')).toHaveText('2 votes recorded');
 
-    await bob.goto(`${APP}/answer/${name}`);
-    await bob.getByRole('button', { name: 'GitOps', exact: true }).click();
+    // Carol has not voted, so she still gets the form and meets the closure instead.
+    const carol = await signIn('carol');
+    await carol.getByRole('button', { name: 'GitOps', exact: true }).click();
     kube('patch', 'quizsession', name, '--type=merge', '-p', '{"spec":{"state":"closed"}}');
-    await bob.getByRole('button', { name: 'Submit', exact: true }).click();
-    await expect(bob.getByText('This round is not open for voting.')).toBeVisible();
-    await bob.reload();
-    await expect(bob.getByRole('button', { name: 'Submit', exact: true })).toBeDisabled();
+    await carol.getByRole('button', { name: 'Submit', exact: true }).click();
+    await expect(carol.getByText('This round is not open for voting.')).toBeVisible();
+    await carol.reload();
+    await expect(carol.getByRole('button', { name: 'Submit', exact: true })).toBeDisabled();
     const quizSubmissions = JSON.parse(kube('get', 'quizsubmissions', '-l', `voter.configbutler.ai/round-uid=${uid}`, '-o', 'json')).items;
     expect(quizSubmissions).toHaveLength(2);
   } finally {

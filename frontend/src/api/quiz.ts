@@ -13,7 +13,12 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
   return data as T
 }
 export const listRounds = () => request<{ items: QuizSession[] }>('')
-export const getQuizSession = (name: string) => request<QuizSession>(`/${encodeURIComponent(name)}`)
+export interface RoundView {
+  round: QuizSession
+  /** This participant already has a QuizSubmission for this round UID. */
+  voted: boolean
+}
+export const getQuizSession = (name: string) => request<RoundView>(`/${encodeURIComponent(name)}`)
 export const createQuizSubmission = (round: QuizSession, answers: QuizSubmission['spec']['answers']) =>
   request<{ name: string }>(`/${encodeURIComponent(round.metadata.name!)}`, {
     uid: round.metadata.uid, resourceVersion: round.metadata.resourceVersion, answers,

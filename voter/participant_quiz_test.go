@@ -47,6 +47,9 @@ func TestVotingRound(t *testing.T) {
 		return rec
 	}
 	const valid = `{"uid":"round-uid","resourceVersion":"1","answers":[{"questionId":"choice","singleChoice":"A"},{"questionId":"text","freeText":"hello"}]}`
+	if rec := request("GET", "/public/rounds/demo", "alice", "", true); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"voted":false`) {
+		t.Fatalf("round before voting: %d %s", rec.Code, rec.Body)
+	}
 	for _, tc := range []struct {
 		name, body string
 		want       int
@@ -68,6 +71,13 @@ func TestVotingRound(t *testing.T) {
 				t.Fatalf("status %d: %s", rec.Code, rec.Body)
 			}
 		})
+	}
+	// The form is skipped for a returning voter, so the GET must say so before it is drawn.
+	if rec := request("GET", "/public/rounds/demo", "alice", "", true); !strings.Contains(rec.Body.String(), `"voted":true`) {
+		t.Fatalf("voter was not warned before the form: %s", rec.Body)
+	}
+	if rec := request("GET", "/public/rounds/demo", "bob", "", true); !strings.Contains(rec.Body.String(), `"voted":false`) {
+		t.Fatalf("another participant must still get the form: %s", rec.Body)
 	}
 	for _, method := range []string{http.MethodPut, http.MethodPatch, http.MethodDelete} {
 		before := len(client.Actions())

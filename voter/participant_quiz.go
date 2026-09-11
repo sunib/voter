@@ -111,6 +111,13 @@ func validateQuizAnswers(questions []quizQuestion, answers []quizAnswer) error {
 	return nil
 }
 
+// One QuizSubmission name per enrolled identity and round UID. Name uniqueness in
+// the API server, not application bookkeeping, is what keeps a vote single-use.
+func submissionName(roundUID, subject string) string {
+	hash := sha256.Sum256([]byte(roundUID + "\x00" + subject))
+	return fmt.Sprintf("vote-%x", hash[:])
+}
+
 // The API owns voting rules and resource construction; Kubernetes authorizes
 // every operation with the participant token. These rules are not an admission
 // policy: direct Kubernetes access can bypass application validation.
@@ -154,7 +161,10 @@ func registerParticipantQuizHandlers(mux *http.ServeMux, deps handlerDeps) {
 			return
 		}
 		if r.Method == http.MethodGet {
-			writeJSON(w, 200, round)
+			// Tell a returning voter before they fill in the form. The atomic create below
+			// stays authoritative, so a lookup failure costs only the early warning.
+			_, err := clients.dynamic.Resource(quizSubmissions).Namespace(deps.defaultNS).Get(ctx, submissionName(string(round.GetUID()), s.Subject), metav1.GetOptions{})
+			writeJSON(w, 200, map[string]any{"round": round, "voted": err == nil})
 			return
 		}
 		spec, err := decodeQuizSpec(round)
@@ -189,10 +199,9 @@ func registerParticipantQuizHandlers(mux *http.ServeMux, deps handlerDeps) {
 			writeJSON(w, 400, map[string]string{"error": err.Error()})
 			return
 		}
-		// Atomic create makes retries/concurrent tabs one vote per enrolled identity
-		// and round UID. Recreating a round starts fresh; reopening it does not.
-		hash := sha256.Sum256([]byte(req.UID + "\x00" + s.Subject))
-		name := fmt.Sprintf("vote-%x", hash[:])
+		// Atomic create keeps retries and concurrent tabs to one vote, whatever the GET
+		// reported. Recreating a round starts fresh; reopening it does not.
+		name := submissionName(req.UID, s.Subject)
 		answers, _ := json.Marshal(req.Answers)
 		var answerObjects []any
 		_ = json.Unmarshal(answers, &answerObjects)

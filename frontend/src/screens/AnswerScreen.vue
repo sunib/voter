@@ -29,6 +29,7 @@ const round = ref<QuizSession>()
 const draft = useDraftSubmissionStore()
 
 const busy = ref(false)
+const voted = ref(false)
 const submitError = ref<string | null>(null)
 const loadError = ref<string | null>(null)
 
@@ -38,17 +39,16 @@ const questions = computed(() => round.value?.spec?.questions ?? [])
 
 watch(() => props.session, async () => {
   round.value = undefined
+  voted.value = false
   loadError.value = null
   submitError.value = null
   try {
-    round.value = await getQuizSession(props.session)
+    const view = await getQuizSession(props.session)
+    round.value = view.round
+    voted.value = view.voted
     draft.load(`${currentSession()?.username}:${round.value?.metadata.uid}`)
   } catch (e: any) {
     const status = e?.status
-    if (e?.code === 'AlreadyVoted') {
-      await router.replace({ name: 'vote-results', params: { session: props.session }, query: { submitted: 'already' } })
-      return
-    }
     if ((status === 401 || status === 403) && (await isSignedOut())) {
       await router.replace({ name: 'login', query: { next: route.fullPath } })
       return
@@ -60,7 +60,7 @@ watch(() => props.session, async () => {
 async function submit() {
   submitError.value = null
 
-  if (busy.value || !round.value) return
+  if (busy.value || !round.value || voted.value) return
   if (state.value !== 'live') {
     submitError.value = 'This round is not open for voting.'
     return
@@ -74,6 +74,7 @@ async function submit() {
   } catch (e: any) {
     const status = e?.status
     if (e?.code === 'AlreadyVoted') {
+      voted.value = true
       await router.replace({ name: 'vote-results', params: { session: props.session }, query: { submitted: 'already' } })
       return
     }
@@ -122,6 +123,26 @@ async function submit() {
         </template>
       </Card>
 
+      <Card v-else-if="voted" class="rounded-[var(--radius)]">
+        <template #content>
+          <div class="p-5">
+            <div class="space-y-3">
+              <h1 class="text-xl font-extrabold">You have already voted in this round.</h1>
+              <p class="text-sm text-black/60">
+                Your QuizSubmission is recorded and cannot be changed. A new round is
+                needed to vote again.
+              </p>
+              <RouterLink
+                :to="{ name: 'vote-results', params: { session } }"
+                class="font-semibold underline"
+              >
+                View results
+              </RouterLink>
+            </div>
+          </div>
+        </template>
+      </Card>
+
       <Card v-else class="rounded-[var(--radius)]">
         <template #content>
           <div class="p-5">
@@ -147,11 +168,12 @@ async function submit() {
       </Card>
     </div>
 
-    <p class="mt-4 text-sm text-black/60">
+    <p v-if="!voted" class="mt-4 text-sm text-black/60">
       Submitting creates your QuizSubmission for this round. You can change your
       answers before submitting, but submitted answers cannot be edited.
     </p>
     <SubmitBar
+      v-if="!voted"
       :busy="busy"
       :disabled="!round || state !== 'live'"
       :error="submitError ?? undefined"

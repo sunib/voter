@@ -36,8 +36,11 @@ QuizSubmission per round UID, so retries do not create additional submissions.
 
 - QuizSubmissions survive application restarts because Kubernetes stores them.
 - An enrolled identity can create one QuizSubmission per round UID through Voter. Duplicate
-  submits, including those with changed answers, never replace the recorded QuizSubmission. A lost success response can be retried;
-  the app then reports the existing vote and shows results.
+  submits, including those with changed answers, never replace the recorded QuizSubmission.
+  Reopening a round asks whether this participant already voted and shows that instead of
+  the questions. A submit that still races through, such as a second tab or a retried lost
+  success response, is refused by the create; the app then reports the existing vote and
+  shows results.
 - Required answers, choices, types, numeric bounds and text length are checked on
   the server. Drafts survive reloads, scoped to the participant and round UID.
 - Answers are shared with the room, including free text. These submissions are not anonymous;

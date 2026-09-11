@@ -21,7 +21,7 @@ See [architecture](../ARCHITECTURE.md) and
 | `GET /public/vouchers` | Process-local voucher usage |
 | `GET /public/stream` | krm-stream CoffeeConfig events |
 | `GET /public/rounds` | List voting rounds |
-| `GET,POST /public/rounds/{name}` | Read questions or submit a validated QuizSubmission |
+| `GET,POST /public/rounds/{name}` | Read questions plus this participant's `voted` flag, or submit a validated QuizSubmission |
 | `GET /public/rounds/{name}/results` | Aggregated counts, averages and shared text answers |
 
 Voting uses persisted QuizSession/QuizSubmission resources. See the
