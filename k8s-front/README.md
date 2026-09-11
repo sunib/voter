@@ -18,11 +18,11 @@ service. A frontend developer can read resources, submit changes and observe pro
 Kubernetes objects and krm-stream. A domain team can support browsers, command-line clients
 and automation through the same resource contract.
 
-For example, a workspace portal could let a user create a `WorkspaceRequest`, observe its
-provisioning status and open the resulting workspace. An equipment portal could expose
-`ReservationRequest` resources and their acceptance outcomes. A configuration editor could
-read and conditionally patch an existing resource while other browsers receive live updates.
-These are illustrative domain models, not built-in k8s-front endpoints.
+A workspace portal, equipment reservation service and configuration editor can all use
+the same transport. Their domain contracts differ: provisioning is asynchronous, scarce
+reservations need arbitration, and editing needs conflict handling. The
+[decision guide](bff-choice.md#compare-application-fits) compares these cases with reporting
+and payment workflows.
 
 Adding a resource whose permissions and invariants are already enforced should require
 configuration and frontend work, not another backend transport handler. The benefit is
@@ -35,10 +35,34 @@ CustomResourceDefinitions (CRDs) can express desired state or immutable requests
 checks constraints before storage; domain controllers process resources and publish status.
 The frontend creates or edits a resource and observes its outcome.
 
-For a `WorkspaceRequest`, HTTP 201 acknowledges that the request was stored. It does not
-mean the workspace is ready. The domain contract must distinguish pending work, acceptance,
-rejection, processing failure and completion, and define which outcomes are terminal.
-The frontend presents those distinctions; k8s-front transports them.
+### Example: requesting a workspace
+
+A user chooses a template and submits an immutable `WorkspaceRequest`. Assume this example
+domain permits a user to request several workspaces; one-per-person enforcement would need
+an additional identity and uniqueness contract.
+
+1. The browser checks its session and starts OIDC login if required. After login, it POSTs
+   the resource with its CSRF proof. Admission validates the template and binds ownership
+   to trusted identity. It rejects invalid input before storage.
+2. Kubernetes returns HTTP 201 and the stored object's UID. The UI displays **Request
+   received**, not **Workspace ready**, and subscribes to the permitted resource stream.
+3. The domain controller evaluates eligibility and capacity. It publishes acceptance or
+   rejection in protected status. A policy rejection has a stable reason the UI can explain.
+4. For accepted work, the controller provisions using a stable operation key tied to the
+   request UID. After a restart, it discovers or resumes the same work rather than blindly
+   creating another workspace. The UI displays **Provisioning** and any retryable failure.
+5. Once ready, status supplies an authorized workspace reference. The UI offers **Open
+   workspace**. That destination enforces its own access checks; knowing its URL is not a grant.
+
+A lost create response leaves the outcome uncertain: the frontend uses an authorized
+lookup and the domain's stable request key to reconcile before offering a retry. The
+controller contract defines retryable versus terminal failures. A disconnected browser
+shows stale/unknown progress; it must not turn missing updates into a domain rejection.
+Cancellation and cleanup need their own lifecycle rules rather than assuming DELETE
+instantly cancels external work.
+
+This is an illustrative domain, not a built-in API or a proven implementation. Its acceptance,
+provisioning and ready states are domain outcomes transported by k8s-front and krm-stream.
 
 The domain backend lives in controllers and admission, commonly packaged as a Kubernetes
 operator. Domain developers design and test its guarantees; the platform team operates it.
@@ -122,6 +146,17 @@ resources, namespaces, verbs, subresources and permitted non-resource URLs. Dist
 get/list/watch and collection deletion, normalize paths before checks, and reject unknown
 or ambiguous scopes. Discovery does not grant access.
 
+Query parameters are part of policy evaluation. Recognize `watch=true` on a collection
+path as watch access, not an ordinary list. Explicitly configure allowed label/field
+selectors and enforce any required scope on every request, including requests with
+`limit` and `continue`. Reject unsupported or ambiguous query combinations. Selectors
+may narrow an authorized scope; user-controlled selectors cannot establish ownership.
+
+Bound page sizes, response bytes, request rates, watch duration and concurrent streams.
+Do not claim these bounds prevent export: a user allowed to list a namespace can normally
+retrieve it through repeated pages. If full enumeration is unacceptable, narrow the
+underlying readable resources or provide a restricted domain view.
+
 Apply restrictions to raw APIs and streams. Kubernetes RBAC and admission remain authoritative;
 the allowlist further limits which permissions browser clients can exercise through this service.
 Never use a privileged service account as a fallback for a user's direct API request.
@@ -200,7 +235,7 @@ of partial success.
 | --- | --- |
 | Reuse | Two frontends using different API groups without application-specific backend handlers |
 | Authentication | Callback failure, expiry, refresh, restart and logout tests across replicas |
-| Exposure | Empty policy denies access; paths, selectors, alternate versions and subresources cannot bypass restrictions |
+| Exposure | Empty policy denies access; paths, selectors, watch queries, pagination, alternate versions and subresources cannot bypass restrictions |
 | Proxy semantics | Kubernetes errors and patch types preserved; conflicting writes and ambiguous create outcomes handled without automatic replay |
 | Streams | Cancellation, recovery, expiry, subscriber isolation and measured load under declared capacity targets |
 | Editing | Conditional saves and guarded reconciliation preserve newer state and drafts |
@@ -210,3 +245,26 @@ of partial success.
 The domain operator's tests establish domain guarantees; the gateway's tests establish
 transport and access behavior. Publish the service with its own integration fixture,
 versioned image and documented supported protocols.
+
+## Status and next decision
+
+The current name remains **k8s-front**. `kube-foyer` is an alternative for later
+consideration; the [naming assessment](name.md) records prior uses and tradeoffs.
+Revisiting the name does not block the prototype decision.
+
+The service is a design proposal. The next decision is whether to fund an independent
+prototype and assign its maintainers. Product and platform leads should agree on one
+example domain, supported protocols, session-store ownership and measurable load targets.
+
+Build the prototype in this order:
+
+1. Implement OIDC sessions and the default-deny native API proxy in an isolated fixture.
+2. Add krm-stream and demonstrate the workspace request lifecycle, including rejection,
+   uncertain create outcomes, controller recovery and session expiry.
+3. Integrate a second frontend/API group without domain-specific gateway handlers, then
+   measure the full operational cost against keeping authentication/transport in each app.
+
+Maintainers assess the release criteria with domain and platform owners before publishing
+an initial release. Each consuming application then makes its own adoption decision using
+the [decision guide](bff-choice.md#record-the-adoption-decision). Prototype approval does
+not authorize routing an existing application's resources through the new service.

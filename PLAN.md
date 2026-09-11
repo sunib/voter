@@ -16,6 +16,9 @@ its configuration while other browsers update live. Kubernetes sees the person's
 identity for writes; the UI distinguishes a Kubernetes save from an observed Git commit.
 The demo targets **200 concurrent attendees**: shared streaming is a required part
 of this refactor, delivered as a separate change from the editor replacement.
+The [k8s-front adoption recommendation](docs/k8s-front-adoption.md) keeps this capacity
+work ahead of a possible CoffeeConfig pilot and separates product prototyping from
+Voter deployment decisions.
 
 Generic resource streaming, reconciliation and editor state belong in krm-stream.
 Room Pass becomes an independently released room-enrollment service integrated with

@@ -24,6 +24,8 @@ Opening GitHub login to everyone is a proposed change, not the current configura
 - [Architecture](ARCHITECTURE.md): how it works now — components, the identity
   model, the trust boundaries, and a login walked through end to end.
 - [What is left](PLAN.md): the single remaining-work list.
+- [k8s-front adoption](docs/k8s-front-adoption.md): Voter-specific recommendation,
+  pilot prerequisites and the boundary between prototype work and deployment.
 - [Authorization](docs/authorization.md): who can do what, and what is proven.
 - [Room Pass](room-pass/README.md): the enrollment component and local fixture.
 - [Frontend](FRONTEND.md): UI design notes.

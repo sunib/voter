@@ -46,8 +46,8 @@ metadata. For a quiz, one possible design is:
 | QuizSubmission status | Pending processing, accepted or rejected, with stable reasons | Define terminal decisions, retries and failure separately; users cannot forge outcomes |
 | QuizResults | A read model of accepted submissions suitable for the audience | Specify read grants, update lag and counting each accepted submission once |
 
-In this example, a successful create acknowledges persistence. The UI must then distinguish pending processing from a
-successful domain outcome. Missing status is not success; a controller outage is not a
+In this example, a successful create acknowledges persistence. The UI must distinguish
+pending processing from a successful domain outcome. Missing status is not success; a controller outage is not a
 business rejection. A useful status contract identifies which intent/revision was processed
 and which conditions or decisions are authoritative, including terminality and correction.
 
@@ -87,42 +87,57 @@ applications. It does not necessarily remove DTOs: a domain BFF can already retu
 Kubernetes-shaped objects. Count all maintained components when evaluating savings,
 including session storage, deployment, policies, controllers and tests.
 
-Server-side sessions add revocation and refresh management, but require available shared
-storage across replicas. An encrypted HttpOnly cookie can already keep bearer credentials
-unreadable by JavaScript. Compare the required session lifecycle and operational cost,
-rather than treating opaque sessions as the only way to keep tokens out of frontend code.
+Include the cost of [session storage](README.md#login-and-sessions) and complete the
+[exposure review](README.md#access-boundaries) before enabling routes. Those service
+requirements apply regardless of which domain model is chosen.
 
-Enabling generic routes can expose more behavior than the old application, even without
-changing RBAC. For example, a user's create grant may previously have been reachable only
-through a handler that validates answers and assigns a unique name. Raw create access
-allows other bodies and names unless admission enforces those constraints. A raw list
-route can disclose records previously presented only as aggregate results.
+## The constraints that decide most cases
 
-Require default-deny policy on raw APIs and streams. Review effective permissions and
-enforcement before enabling each route; frontend migration order does not protect an
-already exposed API. Controller-based acceptance is an alternative only when the resource
-contract explicitly permits pending or rejected requests to be stored.
+**Authorization granularity.** A create grant does not express “one reservation per
+person” or “accept only while booking is open.” If arbitrary authorized API calls can
+violate those rules, implement admission or a deliberate request/acceptance protocol
+before exposing the resource. An asynchronous rejection cannot prevent initial storage.
 
-## Where native Kubernetes APIs fit poorly
+**Read privacy.** A readable resource includes its metadata and status. An application
+that shows anonymized totals cannot safely expose the underlying records just because
+its users already have list permission. Use separate read grants and aggregate resources,
+or keep a domain query endpoint. UI hiding and stream projection cannot protect fields
+available through a raw GET.
 
-These are tradeoffs for browser products, including domains deliberately designed in KRM.
-Good CRDs and status contracts can make them manageable, but do not remove them.
+**Client contract.** With native access, resource versions, schemas and lifecycle states
+are a public domain API. The team must maintain compatibility and translate outcomes into
+usable screens. Choose this when the resource model is useful to several clients. A domain
+HTTP API may better isolate browsers from storage changes or present stable commands.
 
-| Property | Consequence for a frontend/product | Possible response and its cost |
+Other constraints still need explicit design:
+
+| Constraint | Required design work |
+| --- | --- |
+| Concurrent edits | UID/version guards, patch semantics and understandable conflict handling |
+| Multi-object operations | Recovery and partial-success behavior; neither a proxy nor a BFF creates a transaction automatically |
+| Reporting | Aggregation, indexing or a separate read model; list/watch is not a general query engine |
+| Capacity | Bounded lists/watches and tested write volume; consider another store for high-volume records |
+| Operations | Owners for CRDs, admission, controllers, sessions and upgrades |
+
+See [Kubernetes API semantics](https://kubernetes.io/docs/reference/using-api/api-concepts/)
+for the native contract. Deliberate KRM modeling can address these constraints, but the
+implementation and operational costs remain part of the choice.
+
+## Compare application fits
+
+These are starting recommendations under the stated assumptions, not built-in features.
+
+| Application | Starting choice | What would change the decision? |
 | --- | --- | --- |
-| Resource/verb authorization | “May create submissions” does not express “one valid answer to this live round”; list access can disclose all readable objects | Admission for writes; separate private resources/read grants or a domain result endpoint |
-| Full resource responses | Identity metadata and internal fields may not belong in a participant screen | Separate aggregate resources or a restricted domain view; hiding fields in the UI is insufficient |
-| Object-oriented concurrency | UID, resourceVersion, patch types, arrays and apply ownership become client concerns | Reuse editor primitives, but still test races and translate failures into understandable choices |
-| No general multi-object transaction endpoint | Saving configuration and requesting a Git commit can partially succeed; reading a round then creating a submission is not atomic | Explicit partial-success UX, command/controller protocol or domain orchestration; a BFF alone does not create a transaction either |
-| List/watch rather than reporting queries | Joins, anonymous aggregation and result-specific projections require client work or another component | A domain endpoint or controller-maintained read model; account for aggregate lag and privileged reads |
-| Resource schema as client contract | API groups, versions, namespaces and CRD changes affect browser releases | Treat CRDs as a versioned domain API with compatibility obligations, or provide a domain HTTP API to decouple clients |
-| Control-plane operations | Many browser watches, large lists and high write volume consume cluster capacity | Bound scopes, pagination, sharing and load tests; compare a database/service for high-volume records |
-| Kubernetes operational lifecycle | RBAC, CRDs, admission availability and controller rollout become product dependencies | Accept this when the platform is already owned and useful; include it in support and deployment cost |
+| Workspace provisioning with observable progress | KRM domain plus universal BFF | An immediate all-or-nothing allocation requirement needs a stronger allocation protocol |
+| Shared configuration editor where users may read and edit the resource | Universal BFF with conditional writes | Field confidentiality or narrow write permissions may require separate resources, admission or a domain endpoint |
+| Equipment reservations with limited inventory | KRM request/status if pending decisions are acceptable | Guaranteed immediate booking may be simpler in a transactional domain service |
+| Customer reporting with private records and flexible queries | Domain query API, possibly beside generic resource access | A small, predefined aggregate resource could serve the required views safely |
+| Payments involving external providers | Domain service or operator with provider-supported idempotency | KRM can expose durable intent/status, but cannot itself guarantee a single external charge |
 
-Kubernetes documents its native [API semantics](https://kubernetes.io/docs/reference/using-api/api-concepts/).
-Our inference is that those semantics suit resource-management interfaces especially well;
-they also support domains built around durable intent and observable processing. Neither
-fit automatically makes an end-user workflow simpler.
+The [workspace walkthrough](README.md#example-requesting-a-workspace) follows a suitable
+KRM case end to end. The quiz below examines a harder case: identity-bound uniqueness and
+private results. Its mechanisms also apply to applications, registrations and reservations.
 
 ## Example: a quiz with one submission per participant
 
@@ -158,7 +173,7 @@ acceptance record to select one, and reconcile each request's status from that d
 record. It must never reselect a winner after a crash or count pending/rejected requests.
 This is a viable alternative if the requirement is one counted answer. It does not meet
 a requirement that a second request object must never exist. Changing that requirement
-needs a deliberate product decision, and corresponding API/UX changes.
+needs a deliberate product decision and corresponding API/UX changes.
 
 The stronger storage guarantee still belongs at the creation boundary: admission/policy
 and API-server atomic create, possibly using namespaces provisioned by an operator.
@@ -178,8 +193,8 @@ that merely lists existing submissions and rejects a duplicate can admit two con
 requests before either is persisted. Avoid side-effecting reservations during admission.
 A read of the round in a webhook likewise does not atomically lock it until submission
 persistence. Specify whether voting must be open at validation time or whether a stronger
-close boundary needs a coordinated command-processing design. A domain BFF that reads the round and
-then creates a submission has the same cross-object race.
+close boundary needs a coordinated command-processing design. A domain BFF that reads
+the round and then creates a submission has the same cross-object race.
 
 This is domain code moved to the Kubernetes write boundary, where it can protect all
 clients. It does not eliminate domain code. Budget for webhook certificates, permissions,
@@ -238,7 +253,7 @@ resource. Consider quotas and retention alongside privacy.
 
 Choose this when personal workspaces already make sense for the product. Creating a
 namespace, binding, identity mapping and aggregate controller solely to express one quiz
-submission is a strong candidate for feeling *gekunsteld*.
+submission may cost more to build and operate than a small domain handler.
 
 ### Protect results and individual submissions
 
