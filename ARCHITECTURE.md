@@ -1,249 +1,215 @@
 # Architecture
 
-How Voter and Room Pass work today. Verified 2026-09-10 against the source in
-this repository, the platform checkout under `external/k8s/`, and the running
-`k8s.koudijs.dev` cluster.
+Voter is a coffee demo consuming public infrastructure components. Room Pass is an
+independent enrollment service being prepared for extraction. krm-stream owns generic
+live-resource behavior. This document separates the implementation at `2fecdd5`
+(reviewed **2026-09-11**) from the target in [PLAN.md](PLAN.md).
 
-Companion documents: [who may do what](docs/authorization.md) for the access
-matrix, [PLAN.md](PLAN.md) for what is still missing, and
-[room-pass/docs/handoff.md](room-pass/docs/handoff.md) for the browser-bound
-handoff protocol in detail.
+## Ownership
 
-## The idea
+| Component | Owns | Boundary |
+| --- | --- | --- |
+| Voter Vue app | Coffee screens, cart, field presentation, save intent | Uses library resource state; no custom reconciliation |
+| Voter Go backend | Application OIDC session/CSRF, fixed resource scope, participant-token requests, coffee pricing/orders, commit-request orchestration | No fallback participant writes as a ServiceAccount; no generic stream engine |
+| krm-stream | Kubernetes watch-to-SSE protocol, projections, snapshots, reconciliation, draft/conflicts, patch generation, generic recovery and optional framework adapters | No coffee semantics, application credentials, login UI or Git commit workflow |
+| Room Pass | Room lifecycle, rotating codes, browser enrollment, stable participant identity, bound handoff to Dex | No application grants or token signing; no Voter dependency |
+| Dex | OAuth 2.0/OIDC authorization server and OpenID Provider, connectors, codes and signed tokens | Trusts Room Pass assertions only through a protected authproxy integration |
+| Kubernetes | Resource storage, token authentication, RBAC, admission and audit | Identity does not itself grant permission |
+| ConfigButler | Persisting accepted configuration changes to Git, commit status/history | Request acceptance is distinct from an observed commit |
+| Platform GitOps repository | Installed versions, routes, CRDs, RBAC, issuer configuration and deployment | Live application changes arrive through Flux |
 
-Kubernetes is the application API. A conference attendee signs in with a room
-code, and the request they make from their phone reaches the kube-apiserver
-carrying *their* identity — so RBAC, admission and the audit log all see a
-person rather than a service account. ConfigButler then turns an accepted change
-into a Git commit.
+Generic recovery/framework APIs in this table are the target ownership, not a claim
+that every necessary API is already released. Prefer existing public APIs; contribute
+missing behavior upstream with a non-demo example rather than copying it into Voter.
 
-Everything below exists to make that one sentence true without letting a room
-code become cluster access.
-
-## Components
-
-```mermaid
-flowchart TB
-    subgraph untrusted["UNTRUSTED"]
-        browser["Browser (phone)"]
-    end
-    subgraph edge["EDGE — Traefik"]
-        t["voter.koudijs.dev → Voter<br/>dex.k8s.koudijs.dev → Dex<br/>…/bind, /join, /logout,<br/>/callback/room-pass, /room-pass/* → Room Pass"]
-    end
-    subgraph app["APPLICATION"]
-        v["voter — one image<br/>Vue bundle + Go backend + OIDC client"]
-    end
-    subgraph id["IDENTITY — NetworkPolicy: Traefik + Room Pass only"]
-        rp["Room Pass<br/>room code → trusted assertion"]
-        dex["Dex — ONE issuer, THREE connectors<br/>github · room-pass · linkedin"]
-    end
-    subgraph k8s["KUBERNETES"]
-        api["kube-apiserver<br/>username prefix derived from<br/>federated_claims.connector_id"]
-    end
-    browser --> t
-    t --> v
-    t --> rp
-    t --> dex
-    rp -->|"X-Remote-* headers"| dex
-    v -->|"participant ID token"| api
-    rp -->|"own ServiceAccount<br/>(Room/Participant CRs)"| api
-```
-
-**Voter** is one container image holding the Vue bundle and the Go backend. The
-binary serves the frontend from `STATIC_DIR`, so the two can never sit at
-different revisions. It is the OIDC client, owns `/auth/login`,
-`/auth/callback`, `/auth/session` and `/auth/logout`, and forwards the signed-in
-person's ID token to Kubernetes.
-
-**Room Pass** is a separate service and controller. It reconciles `Room` and
-`Participant` CRDs, serves the join form, and converts a valid room code into a
-trusted-header assertion for Dex's authproxy connector. It has its own
-ServiceAccount with no permission to create RBAC or impersonate anyone.
-
-**Dex** is a single issuer at `dex.k8s.koudijs.dev` serving three connectors.
-There is no separate demo issuer — `dex-demo` was deleted.
-
-Traefik must route the Room Pass paths *before* the SPA fallback; the SPA
-deliberately claims no `/join` route, because doing so shadowed the real form.
-
-## Identity is not permission
-
-The kube-apiserver derives the username from Dex's
-`federated_claims.connector_id`, a claim Dex sets from its own state that no
-caller can forge:
-
-| Connector | Who | Kubernetes username | Grants |
-| --- | --- | --- | --- |
-| `github` | operators, restricted to the `koudijs-dev` org | `github:<email>` | named bindings only |
-| `room-pass` | conference participants, via room code | `demo:<dex-sub>` | the demo Role in `voter` |
-| `linkedin` | anyone with a LinkedIn account | `linkedin:<email>` | nothing unless named |
-
-Three rules in `1-talos/templates/_authentication-config.tpl` carry the whole
-containment argument:
-
-1. A missing or unknown connector is **rejected**, not defaulted.
-2. Tokens from the participant connector must carry only `demo:`-prefixed
-   groups. This is what stops a forged `X-Remote-Group` header reaching an
-   operator group on a shared issuer.
-3. The username expression names every connector explicitly, and the *fallback*
-   branch is the low-privilege one — a connector added to Dex but forgotten here
-   produces a `demo:` identity, never an operator one.
-
-A name typed into the join form is display attribution. The participant's email
-is synthetic (`@demo.invalid`). GitHub and LinkedIn email claims *do* carry
-authorization weight, because operator RBAC binds them.
-
-Voter does not construct the username itself. It asks Kubernetes with
-`SelfSubjectReview` at login, so the name on screen is the name in the audit log.
-An earlier version guessed `"demo:" + subject` and displayed a LinkedIn login as
-a `demo:` identity.
-
-## Boundaries that must hold
-
-- **Only Traefik and Room Pass may reach Dex.** A NetworkPolicy enforces it
-  (verified live: a pod in `default` times out to `dex-dex.dex.svc:5556`). The
-  demo Dex originally existed because the platform Dex had a public Ingress and
-  no policy, so every pod — including pull-request preview code — could reach it.
-  The policy uses `podSelector: {}` deliberately: a `matchLabels` that guessed
-  the chart's labels wrong would select nothing and silently protect nothing.
-- **Every client whose tokens reach Kubernetes must request the `federated:id`
-  scope.** Dex only emits `federated_claims` for that scope. Without it the
-  authenticator rejects the token outright. `kubectl oidc-login` needs
-  `--oidc-extra-scope=federated:id` too.
-- **Dex does not restrict which connector may authenticate which client.** Each
-  client on the shared issuer must reject non-operator connectors itself. Flux
-  Web does it with a CEL `validations` rule; Grafana with JMESPath; oauth2-proxy
-  with an email-domain gate. Three mechanisms, one intent — see
-  [PLAN.md](PLAN.md).
-- **Participant Kubernetes clients use only the session's token.** Voter builds
-  a fresh client per request from that request's token, against a fixed API
-  destination with TLS verification. It never impersonates, never falls back to
-  a ServiceAccount, and no longer constructs an unused server client at startup.
-  Browser-supplied `Authorization` or `Impersonate-*` headers cannot change it.
-- **Cookie-authenticated mutations need CSRF proof.** Voter accepts an absent
-  Origin with a matching token and rejects `null` and foreign origins. Room Pass
-  accepts absent or `null` only with its valid signed CSRF cookie and matching
-  form token. The asymmetry is deliberate and pinned by tests.
-- **RBAC is additive.** Every matching binding contributes, including platform
-  grants to `system:authenticated`.
-
-## Following an attendee login
+## Identity flow and Room Pass's product boundary
 
 ```mermaid
 sequenceDiagram
     participant B as Browser
-    participant V as Voter
+    participant V as Voter OIDC client
     participant D as Dex
     participant R as Room Pass
     participant K as Kubernetes
-    B->>V: GET /auth/login
-    V-->>B: Redirect to Dex, connector_id=room-pass
+    B->>V: Sign in
+    V-->>B: Dex authorization request with PKCE
     B->>D: Authorization request
-    D-->>B: Redirect to /callback/room-pass
-    B->>R: Connector callback, routed by Traefik
-    R-->>B: Bound enrollment form if needed
-    B->>R: Room code, display name and CSRF proof
-    R->>K: Check Room and Participant
-    R->>D: Trusted identity headers after bound handoff
-    D-->>B: Authorization code for Voter callback
-    B->>V: GET /auth/callback
-    V->>D: Exchange code with PKCE
-    D-->>V: Signed ID token
-    V->>K: SelfSubjectReview with that token
-    K-->>V: Kubernetes username and groups
-    V-->>B: Encrypted HttpOnly session cookie
-    B->>V: CoffeeConfig PATCH, cookie and CSRF token
-    V->>K: PATCH using the session's ID token
-    K-->>V: Allow or deny via RBAC/admission
-    V-->>B: Save result or authorization error
+    D-->>B: Room Pass connector callback
+    B->>R: Browser-bound room enrollment/handoff
+    R->>K: Read Room and Participant; enroll if eligible
+    R->>D: Trusted identity assertion on connector callback
+    D-->>B: Authorization code for Voter
+    B->>V: OIDC callback
+    V->>D: Code exchange and token validation
+    V->>K: SelfSubjectReview with participant token
+    V-->>B: Encrypted HttpOnly application session cookie
+    B->>V: Resource request with session cookie
+    V->>K: Request with participant's own ID token
 ```
 
-The diagram abbreviates Room Pass's browser-bound, single-use handoff: the
-handle is replaced with fresh randomness at each step, so a copied cross-host
-link cannot enroll another browser. [handoff.md](room-pass/docs/handoff.md) has
-the full protocol.
+Room Pass is currently an **authenticating proxy for Dex**, not an OAuth authorization
+server or standalone OpenID Provider. Dex's authproxy connector consumes a trusted
+upstream identity; Dex handles the application's OAuth/OIDC exchange. See
+[Dex authproxy](https://dexidp.io/docs/connectors/authproxy/) and the distinction between
+OAuth authorization and OIDC authentication in the
+[OpenID Foundation introduction](https://openid.net/developers/how-connect-works/).
 
-`/auth/login` preselects `connector_id=room-pass` so the audience never sees
-Dex's connector chooser. `/auth/login?connector=github|linkedin` is the operator
-door, allowlisted rather than free text. The connector id is also its callback
-path, so it is `CONNECTOR_ID` configuration rather than a string in Go.
+Keep the product name **Room Pass** with a description such as “room-code sign-in for
+applications, powered by Dex.” The combination supports ordinary OIDC applications;
+those applications need no CoffeeConfig or Kubernetes client. Room Pass itself still
+uses Kubernetes storage. Naming it `room-oauth` would imply protocol responsibilities
+it currently delegates to Dex. Native OIDC issuance would require a separate design
+and a mature provider implementation; it is not part of extraction.
 
-## What the browser keeps
+Room Pass already has a separate Go module, Docker build, controller, CRDs and tests.
+Remaining coupling includes the module's Voter repository path, parent CI/tasks, the
+new Voter browser fixture, and demo-specific group/email assumptions. Extraction
+preserves the API group, object UIDs, cookie keys, connector ID and subject mapping;
+a new repository must not unexpectedly create new identities.
 
-The Voter cookie holds the ID token, encrypted and signed with persisted
-application keys, `HttpOnly` and `Secure`. JavaScript gets identity metadata and
-a per-session CSRF token from `/auth/session`, never the token itself.
-Persistent cookie keys let established sessions survive a backend restart;
-pending login transactions live in process memory and do not.
+## Trust boundaries
 
-The session ends no later than the token expires.
+Voter owns `/auth/login`, `/auth/callback`, `/auth/session` and `/auth/logout`.
+It uses established OIDC libraries. The signed/encrypted, Secure HttpOnly cookie
+contains the ID token; JavaScript receives identity metadata and a CSRF token only.
+Persistent keys preserve established sessions across restarts; pending logins are
+process-local. Cookie custody does not make XSS harmless: same-origin script can
+still perform actions as the user even though it cannot read the token.
 
-## Lifecycle limits, stated plainly
+Participant reads, writes and watches use the session's token against a fixed API
+server with TLS verification. Browser Authorization/Impersonate headers cannot select
+another identity. Kubernetes makes the authorization decision. The stream adds a host
+scope restriction; today it allowlists CoffeeConfig as a resource type, while the
+target also fixes namespace and name. Do not substitute a privileged shared watch
+without an explicit authorization model for every subscriber.
 
-Stopping a Room prevents new enrollment and new identity handoff. It **cannot
-revoke an already-issued Dex ID token**, which stays usable until expiry
-wherever its grants permit. Removing a RoleBinding removes that grant, but other
-matching bindings still apply.
+The deployed issuer combines `github`, `room-pass` and `linkedin`. Platform
+containment derives usernames from Dex's `federated_claims.connector_id` and restricts
+room identities to demo groups. Display names and synthetic email are attribution,
+not verified personal identity. Voter obtains the Kubernetes username through
+SelfSubjectReview. See [authorization.md](docs/authorization.md) for intended grants;
+additive platform bindings, including `system:authenticated`, still need auditing.
 
-`/auth/logout` clears the Voter cookie only. It does not clear Room Pass
-enrollment or revoke the Dex token, so the next login may recognise the attendee
-without asking for the room code again.
+Room Pass strips untrusted identity headers before proxying, accepts only configured
+return URLs and uses a browser-bound single-use handoff. Every callback alias must
+remain protected, with no bypass route to the authproxy assertion endpoint. The
+standalone fixture routes issuer traffic through Room Pass; the shared platform also
+routes other connectors through Traefik. Preserve each topology's header sanitization,
+callback routing and network isolation instead of treating their manifests as interchangeable.
+See [handoff.md](room-pass/docs/handoff.md) for the protocol and
+[csp-form-action.md](room-pass/docs/csp-form-action.md) for browser redirect constraints.
 
-## Deployment
+Application mutations require CSRF proof. Logout clears the Voter session, not Room
+Pass enrollment or an issued Dex token. Stopping a Room blocks new enrollment/assertions;
+it does not revoke existing tokens. Open Kubernetes watches are not immediately
+re-authorized on every event. The target bounds stream lifetime by session expiry
+and handles authorization denial when opening/reopening a watch.
 
-The application deployment is GitOps, owned by the Flux Kustomization
-`voter-demo` in the private `ConfigButler/k8s` repository under
-`k8s.koudijs.dev/2-gitops/voter-demo/`. **Do not `kubectl apply` into the `voter`
-namespace** — change Git and let Flux reconcile.
+## Live editing: implementation versus target
 
-The deploy loop: push to `main` here → CI publishes
-`ghcr.io/sunib/{voter,room-pass}:sha-<short>` (~9 min) → bump the tag in
-`2-gitops/voter-demo/app.yaml` → push → Flux reconciles.
+Today `/public/stream` mounts krm-stream gateway/kube 0.2.1. The browser uses npm
+`@configbutler/krm-stream` 0.2.1 through `useLiveCoffeeConfig`. Each caller gets an
+upstream backend using their token; **there is no shared-watch coalescing in Voter**.
+This preserves identity isolation at a cost proportional to active browser streams.
 
-This repository keeps Room Pass's own component manifests under
-`room-pass/deploy/` and its disposable local fixture under `room-pass/test/`.
-The former root `k8s/` deployment and `k8s-examples/` overlay have been deleted.
+The storefront renders live objects, but AdminScreen takes `live.server` into its old
+`reconcileValue` and maintains a separate draft/dirty/conflict state. This is the main
+architectural defect. The seven passing browser tests prove delivery and one benign
+merge case; they do not prove safe concurrent editing. The new blank-draft guard is
+not a substitute for a typed resource contract or a tested merge.
 
-## What is actually implemented
+The target has one state owner and one write path:
 
-Login works end to end through the `room-pass` connector; this was confirmed in
-the running cluster on 2026-09-10.
+```mermaid
+flowchart LR
+    K[Kubernetes] -->|participant watch| G[krm-stream Go gateway]
+    G -->|projected snapshot and events| S[krm-stream resource store]
+    S -->|draft and field state| U[Vue coffee editor]
+    U -->|setValue and conflict resolution| S
+    S -->|explicit patch and base version| H[Voter save handler]
+    H -->|conditional participant PATCH| K
+    H -->|save receipt| U
+    H -->|CommitRequest| C[ConfigButler]
+    C -->|observed commit status| U
+```
 
-Deleting the legacy browser-asserted session removed every endpoint that
-depended on it. The coffee journey has since been rebuilt on participant tokens:
+The generic Vue binding synchronizes library state with rendering and owns subscription
+cleanup. Voter supplies the CoffeeConfig type/scope, editable fields, labels and
+business actions. No parallel server copy, dirty registry or handwritten merge exists
+in the component. Path addresses use arrays of segments, including numeric indices,
+so arbitrary object keys remain unambiguous.
 
-| Route | Status |
-| --- | --- |
-| `/healthz`, `/public/build-info` | 200 |
-| `/auth/login`, `/auth/callback`, `/auth/session`, `/auth/logout` | working |
-| `GET /public/storefront` | the menu and voucher state, priced per request |
-| `POST /public/orders` | prices a basket and enforces `maximumUsage` |
-| `GET,PATCH /public/coffeeconfig` | the editor, wired to the SPA |
-| `/public/admin/*`, `/public/storefront/watch` | not restored — SSE watches, change history, admin orders |
-| the quiz flow | not restored; still on the retired ForwardAuth path |
+A stream snapshot, a manual reread and conflict recovery must all enter the same store
+with one projected KRM contract. Preserve GVK, UID, resourceVersion and JSON semantics.
+Use the library's projection for HTTP reads as well; display defaults never mutate the
+merge base. Current Go CoffeeConfig DTOs omit UID and use `omitempty` on values whose
+absence may differ from zero/false. They can remain useful for coffee business logic,
+but must not define a lossy generic editor transport.
 
-`participant_coffee.go` is the pattern the remaining routes follow.
-[PLAN.md](PLAN.md) lists them.
+Arrays are atomic unless an authoritative structural schema declares associative
+keys. Optional keyed behavior uses `withOpenAPIKeyedLists`; Voter does not invent its
+own positional reconciliation. Products/vouchers require schema uniqueness and key
+semantics before enabling it. Even with keyed merging, RFC 7386 writes arrays whole.
 
-**Voucher redemptions are counted in this process**, not in Kubernetes
-(`coffee_vouchers.go` says why, and what it costs). The limit itself is read
-from the CoffeeConfig on every order, so raising `maximumUsage` in Git unblocks
-the next order without a restart — which is the demo's punchline. The count is
-per-replica and per-boot, so this is single-replica behaviour by construction.
+## Save consistency
 
-Note that `committed: true` from the CoffeeConfig PATCH means a `CommitRequest`
-was *created*, not that a Git commit was observed. It is also worth knowing that
-ConfigButler is **not currently installed in the demo cluster** — there is no
-CommitRequest CRD — so today every save reports `committed: false`, and the
-editor says "Saved, but not committed".
+Three-way merge compares previous server state, local draft and incoming server state.
+It protects typing from incoming events. It cannot prevent an unseen concurrent write
+between the last event and a save. Optimistic concurrency closes that separate race.
 
-## Retired
+The target captures explicit patch, resourceVersion and UID from the same base. The
+host validates scope, editable paths and projection (`gateway.ValidateMergePatch`),
+then submits a conditional PATCH using the participant token. A stale version produces
+409. Reread and reconcile through the library, preserve edits, and ask the user to
+resolve overlaps before another save. Never attach a newly fetched version to the old
+patch: that would bypass the protection. A deleted/recreated resource is a new identity.
 
-The ForwardAuth / TokenRequest / ServiceAccount-impersonation model is gone, as
-is the browser-asserted `/public/login` and the `OIDC_ENABLED` switch — the
-deployment can no longer be configured into trusting the browser. A test pins
-the absence of every removed endpoint. `auth-service/` was renamed `voter/` and
-the separate nginx frontend image no longer exists. oauth2-proxy was considered
-as the app's OIDC client; Voter owns that role itself.
+Use `ProjectionFull` for this integration. Projection may suppress invisible changes,
+so an observed version can legitimately be stale: handle that as a conflict/rebase,
+not a reason to remove the precondition. A narrow patch alone does not prevent lost
+updates to the same field or atomic array. The library's save guidance leaves optimistic
+concurrency to the host; Voter deliberately requires it.
 
-The design history is in Git.
+Prefer a receipt containing Kubernetes-save and commit-request status, with the normal
+watch echo updating the store. If the echo does not arrive, recover with a projected
+read. Any HTTP object adoption must preserve edits made during the request and reject
+regression behind newer stream state using tested library behavior. Save failure must
+leave the form and draft visible. Session expiry, disconnect, forbidden access and
+resource deletion are explicit states; a failed stream never masquerades as live.
+
+## Coffee and Git responsibilities
+
+Voter serves the SPA and backend in one image. Current coffee endpoints are
+`GET /public/storefront`, `POST /public/orders`, `GET /public/vouchers`,
+`GET,PATCH /public/coffeeconfig` and `GET /public/stream`. Pricing and voucher enforcement
+remain server-authoritative. Changing maximumUsage affects subsequent orders.
+
+Redemptions are currently in process memory: a restart resets counts and a second
+replica would enforce a different tally. Keep one replica until shared atomic
+persistence exists. A resource watch is neither order storage nor change history.
+The quiz path still contains retired ForwardAuth assumptions; unsupported flows are
+candidates for removal, not automatic restoration work.
+
+ConfigButler should own durable Git history and commit completion. The UI needs three
+separate facts: Kubernetes saved, CommitRequest accepted, Git commit observed. Current
+`committed: true` means only request creation. The demo cluster still lacks the
+CommitRequest CRD as of this review, so the commit payoff is not implemented there.
+
+## Release and deployment boundaries
+
+Room Pass will publish its own versioned image/manifests and maintain its own minimal
+OIDC fixture. Voter will test against those releases. Voter-specific CoffeeConfig and
+live-editor tests move out of Room Pass before its extraction is complete. Generic
+merge/transport regression suites live in krm-stream; application tests prove the
+integration, authorization and user-visible race handling.
+
+The live deployment is owned by Flux in the private `ConfigButler/k8s` repository:
+`external/k8s/k8s.koudijs.dev/2-gitops/voter-demo/`. Publish tested artifacts, update
+image references in Git, wait for Flux, then verify deployed digests and the browser
+journey. Roll back by reverting the Git change. Do not mutate live application
+workloads with kubectl; disposable fixtures use explicit local kubeconfigs.
+
+At the 2026-09-11 check, Flux was Ready at `2cb475d`, running Voter `sha-ee001d6`
+and Room Pass `sha-2a90ef2`. Source `2fecdd5` and the target architecture above are
+not deployed. [PLAN.md](PLAN.md) holds the remaining acceptance criteria and retained
+platform follow-up; design history belongs in Git.

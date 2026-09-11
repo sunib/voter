@@ -1,351 +1,250 @@
-# What is left
+# Plan: thin Voter, reusable libraries, independent Room Pass
 
-The single list of remaining work. [ARCHITECTURE.md](ARCHITECTURE.md) describes
-the system as it is; this describes the gap to calling it done.
+This is the implementation plan, not a claim that the target design is deployed.
+[ARCHITECTURE.md](ARCHITECTURE.md) defines the boundaries and target data flow.
+Updated **2026-09-11**, reviewing source at `2fecdd5`. This pass changes documentation
+only. Historical investigations remain in Git; this file keeps actionable work and
+operational facts that still matter.
 
-Last verified against the running `k8s.koudijs.dev` cluster and this source tree
-on **2026-09-10**. Anything not marked *verified* below was read from
-configuration, not observed live.
+## Outcome
 
-## Done means
+Voter should demonstrate a small application built on public components: a participant
+joins, orders coffee, encounters the depleted voucher, and an operator safely changes
+its configuration while other browsers update live. Kubernetes sees the person's
+identity; the UI distinguishes a Kubernetes save from an observed Git commit.
 
-An attendee scans a QR code, joins with a room code, orders a coffee, hits the
-depleted-voucher bug, an operator fixes the CoffeeConfig from their phone, and
-the change lands in Git — with the attendee's own name in the audit log and the
-operator's own name on the commit. An unrelated LinkedIn account can complete
-the same login and gets an understandable 403.
+Generic resource streaming, reconciliation and editor state belong in krm-stream.
+Room Pass becomes an independently released room-enrollment service integrated with
+Dex. Voter keeps coffee behavior, its application session, narrow authorized endpoints
+and presentation. Reducing code means deleting duplicate responsibilities, not moving
+an entire demo into a general-purpose package.
 
-Login is the only part of that sentence currently true.
+## Verified starting point
 
-## Verified live on 2026-09-10
-
-Recorded so the next session does not re-derive it.
-
-- All three control planes Ready; `/var/authentication-config.yaml` md5 identical
-  across `192.168.20.41/.42/.43` — the containment rules really are uniform.
-- Room-code login completes: `oidc: login ok … connector room-pass
-  groups=[demo:voter-audience]`.
-- The cluster matches Git (`voter:sha-0cde614`, `room-pass:sha-2a90ef2`), but
-  both are **behind `main`** — the metrics and browser-test work in `dd9cac4` is
-  not deployed.
-- Backend route probe: `/public/coffeeconfig` → 401 (exists, needs a session);
-  `/public/storefront`, `/public/orders`, `/public/admin/coffeeconfig` → 404.
-- `FluxInstance/flux` has been **Stalled** for ~20h. Every Kustomization and
-  HelmRelease is otherwise Ready, so nothing is silently un-reconciled *except*
-  Flux's own components.
-- 7 leftover `Participant` objects and ~71 `ContainerStatusUnknown` pod
-  tombstones from the reboots.
-- **Publishing an image requires CI.** A local `task image-voter PUSH=true`
-  builds fine but the push is denied: a `gh auth token` carries
-  `gist, read:org, repo, workflow` and no `write:packages`. `docker login
-  ghcr.io` still succeeds, so the failure appears only at push time.
-- **ConfigButler is not installed.** There is no `commitrequests.configbutler.ai`
-  CRD and no controller in any namespace, while Voter runs with
-  `CONFIGBUTLER_GIT_TARGET_NAME=voter-demo`. Every save therefore creates the
-  CoffeeConfig change and then fails to create the CommitRequest. See section 2.
-- The participant Role `voter-audience` matches
-  [docs/authorization.md](docs/authorization.md) exactly: `get,list,watch,patch,
-  update` on coffeeconfigs, `create` on quizsubmissions and commitrequests.
-  Confirmed with `kubectl auth can-i --as-group=demo:voter-audience`.
-- The live CoffeeConfig is `demo-coffee` with `vouchers: []` — the demo's
-  depletable TestNet voucher is not configured yet.
-
----
-
-## 1. Restore one complete application journey
-
-**This is the biggest gap and everything else is smaller.** The demo is a login
-with almost no app behind it.
-
-The frontend screens are kept deliberately — they are the restoration target,
-not dead weight. What is missing is the backend behind them.
-
-- [x] **Wire the editor to the endpoint that already worked.**
-      `/public/coffeeconfig` was ported but nothing called it; the SPA called
-      `/public/admin/coffeeconfig`, which 404s. It now calls the real path, and
-      every mutation carries the CSRF token the backend requires — it did not
-      before, so a save would have been a 403 even at the right path.
-- [x] **Port the storefront.** `GET /public/storefront?voucher=CODE` reads the
-      CoffeeConfig with the participant's own token and returns the shape the
-      order screen already expected.
-- [x] **Port orders.** `POST /public/orders` prices the basket and enforces the
-      voucher's `maximumUsage`, which is the bug the demo is built around: the
-      storefront keeps showing the discount, and the failure appears at submit.
-      The limit is read from the CoffeeConfig on every order, so raising it in
-      Git unblocks the next order with no restart. That behaviour is pinned by
-      a test.
-- [x] Keep credentials scoped per request; no fallback server writes. Tested
-      against a controlled upstream: the participant's own token is what goes on
-      the wire, `Impersonate-*`/`X-Remote-*` from the browser never do, and an
-      unusable token fails rather than falling back.
-- [x] **Restore the live watch**, via `ConfigButler/krm-stream` rather than
-      rebuilding the SSE plumbing. `GET /public/stream` mounts the gateway;
-      identity is the session cookie, the client is built per caller from that
-      caller's token, and the scope allowlist is deny-by-default. The storefront
-      and the editor both update live. Proven in two browsers: a change saved in
-      one appears in the other in ~1.4s with no reload, and a `kubectl patch`
-      reaches an open browser in ~0.6s.
-- [ ] **Let `LiveResourceStore` own the editor's draft.** Today the stream feeds
-      AdminScreen's hand-rolled `reconcileValue`, so there are two merge
-      implementations and the store's projected object is not shaped like the
-      REST response the old one expects — it returned something unusable and
-      blanked the form. That is guarded now, but the guard papers over the
-      design. AdminScreen's seam is already path-based (`getTextField`,
-      `updateField`, `fieldState`, `conflictFor`, `applyServerValue`) and maps
-      almost 1:1 onto `draft`/`setValue`/`isDirty`/`conflicts`/`takeTheirs`, so
-      adopting it deletes `reconcileValue` and the conflict bookkeeping outright.
-- [ ] Port the change history (`/public/admin/coffeeconfig/changes{,/stream}`),
-      which the stream does not replace.
-- [x] **Show real voucher usage in the editor.** `GET /public/vouchers` reports
-      this process's redemption counts, and the admin screen shows them beside
-      each `maximumUsage`. Without it the screen read "Used 0 / 1" while orders
-      were failing — the wrong diagnosis at the worst moment. The response
-      carries `scope: "process"` because the number is one replica's, since boot.
-- [ ] **Port the admin orders view** (`/public/admin/orders{,/debug,/stream}`).
-      Blocked on the persistence decision below: there is nothing to list while
-      orders exist only in memory.
-- [ ] **Port quiz forwarding**, then retire the ForwardAuth remnant in
-      `frontend/src/api/kube.ts` — the `X-Join-Code` header and the
-      direct-to-apiserver path belong to the deleted model, and `AnswerScreen`
-      still depends on them.
-- [ ] Preserve conditional writes and surface 409 conflicts in the editor. The
-      backend already passes a 409 through unchanged (there is a test), but the
-      editor sends `{spec}` with no `resourceVersion`, so nothing is actually
-      conditional yet — a concurrent edit silently wins.
-- [ ] **Decide order and voucher persistence.** Redemptions are currently
-      counted in process memory (`voter/coffee_vouchers.go`), which is honest
-      for one replica and wrong for two: each would keep its own tally and the
-      effective limit would double. A restart also forgives every redemption.
-      This must be settled before `replicas > 1`.
-- [ ] Decide whether the demo needs the quiz journey at all. Cutting it removes
-      most of what is left in this section.
-
-Route status after this pass:
-
-| Frontend calls | Backend |
+| Area | Evidence and remaining gap |
 | --- | --- |
-| `/public/coffeeconfig` (GET, PATCH) | **wired** |
-| `/public/storefront` | **ported** |
-| `/public/orders` | **ported** |
-| `/public/vouchers` | **new** — redemption counts for the editor |
-| `/public/stream` | **new** — krm-stream gateway, live CoffeeConfig |
-| `/public/storefront/watch` | removed from the screen; not ported |
-| `/public/admin/coffeeconfig{/watch,/changes,/changes/stream}` | not ported |
-| `/public/admin/orders{,/debug,/stream}` | not ported |
+| Source | `10f7e98` added krm-stream; `2fecdd5` added the real Voter browser fixture, CSP fix, error visibility and a merge guard. Working tree was clean at review start. |
+| Browser tests | Independently reran `task test-browser`: **7 passed in 4.5s**. Covers four room-auth cases, two live delivery cases and preservation of an independent scalar edit. |
+| Editor | Still uses `reconcileValue`, local dirty/conflict maps and whole-spec PATCH. The browser tests do **not** exercise krm-stream as the owner of user edits. |
+| Remaining review defects | Incorrect positional/structural array reconciliation; no conditional writes; recursive `refreshVoucherUsage`; no gap recovery or visible stream/session failure handling. |
+| Resource contract | REST CoffeeConfig metadata drops UID, frontend coffee metadata omits UID/resourceVersion, and the composable uses unchecked casts. The reported blank-form root cause is not proven by the guard. |
+| CI | Run `34571376541` for `2fecdd5`: browser, lint and devcontainer checks passed; unit tests and the overall run were still in progress at the final check. |
+| Deployment | Live Voter is `sha-ee001d6`; Room Pass is `sha-2a90ef2`. Flux `voter-demo` is Ready at platform revision `2cb475d85ee2c44a1741a24458d9e7da719c52e2`. Neither streaming nor the newest CSP fix is deployed. |
+| Git payoff | Rechecked: `commitrequests.configbutler.ai` CRD is absent. A Kubernetes save cannot currently produce the promised ConfigButler commit. |
 
-**Acceptance:** an attendee logs in, orders, and edits; an ungranted external
-account gets an understandable denial; the expected username appears in the
-audit log and in the Git output.
+The previous plan's claims that only login exists, the coffee routes return 404 and
+the configured voucher list is empty are obsolete. The platform manifest now seeds
+TESTNET with maximum usage 3. No authenticated production journey was rerun here.
 
-Where that stands: login, order and edit now exist and are covered by tests
-against a fake API server. The denial path is tested at the handler level
-(Kubernetes' 403 reaches the browser unchanged). Neither the audit-log name nor
-the Git output has been observed end to end in the cluster — the first needs a
-real login through the deployed build, the second needs section 2.
+## 1. Establish the public resource contract and library changes
 
-## 2. Make "saved" mean something honest
+Do this before replacing the editor. Reuse the installed API before proposing new APIs;
+contribute missing generic behavior upstream with tests, docs and a published release.
+The external checkout is a development workspace, not a production dependency.
 
-- [ ] **Install ConfigButler, or stop asking for commits.** Verified live: the
-      cluster has no `commitrequests.configbutler.ai` CRD and no controller, so
-      today *every* save fails its second step. Nothing is silently wrong — the
-      backend already reports partial success — but the demo's payoff does not
-      exist in this cluster.
-- [x] Surface the partial failure in the editor. The save result carries
-      `saved` and `committed` separately, and the screen now shows "Saved, but
-      not committed" with the reason instead of an unqualified success. Covered
-      by a frontend test.
-- [ ] `committed: true` still means a `CommitRequest` was *created*. Either
-      observe the resulting Git commit or change the wording to "submitted".
-      Three distinct states belong in the response: Kubernetes save,
-      CommitRequest accepted, Git commit observed.
+- [ ] Make stream, initial read and conflict reread use the same projected KRM shape:
+      GVK, namespace/name, **UID**, resourceVersion and preserved JSON value types.
+      Keep redaction information with the resource where relevant. Use
+      `gateway.Project`; avoid round-tripping editable objects through lossy coffee
+      DTOs. Defaults for display must not silently become user edits.
+- [ ] Reuse `LiveResourceStore`, segment-array `Path`, `regionPolicy`,
+      `readOnlyPolicy`, `withOpenAPIKeyedLists`, stream URL/transport helpers and
+      `gateway.ValidateMergePatch`. Configure Voter's editable region as `spec`.
+- [ ] Add generic connection lifecycle/recovery upstream: explicit state, bounded
+      retry with jitter, cancellation, fresh snapshot after a sequence gap, terminal
+      error delivery and a transport-closure signal. In 0.2.1 a gap calls
+      `EventSource.close()`; native automatic retry cannot repair that connection.
+      Keep identity selection and login navigation in the host.
+- [ ] Provide a small optional Vue adapter in the public krm-stream project if needed
+      to avoid copying store subscriptions/ref synchronization into each application.
+      Keep the core framework-independent; Vue is an optional peer dependency.
+- [ ] Exercise save/watch ordering upstream: duplicate echoes, a newer watch event
+      preceding an older HTTP result, local edits made during a save, convergence,
+      deletion and recreation under a new UID. Add only the missing store behavior;
+      do not implement a second reconciliation or version-ordering algorithm in Voter.
+- [ ] Document conditional-write integration upstream. The library is currently a
+      read library: it generates patches and validates projections but does not own
+      HTTP mutation endpoints, credentials or optimistic concurrency. Pure reusable
+      helpers may belong there; coffee routes and commit orchestration do not.
+- [ ] Pin and consume published npm/Go releases and lockfiles. No lasting `replace`,
+      copied library source or application-local fork. Add a small non-coffee example
+      for each new generic API so its public contract is independently useful.
 
-This matters more than its size suggests — the whole talk is "your change
-becomes a commit". Claiming it without proving it is the one thing a reviewer in
-the room will catch.
+Acceptance: library tests cover generic invariants; Voter can consume a released
+resource/connection adapter without knowing how reconciliation or recovery works.
 
-## 3. Prove the access policy rather than describing it
+## 2. Replace the editor and make writes conditional
 
-The containment argument lives in a *templated* CEL expression. It is a
-privilege boundary and it is currently only argued, not tested.
+- [ ] Make the library store the sole owner of server truth, draft, dirtiness and
+      conflicts. Wire fields through `setValue`, `isDirty`, `changes`, `conflicts`
+      and `takeTheirs`; treat values returned by the store as snapshots, not mutable
+      Vue models. Route add/remove operations through store APIs too.
+- [ ] Delete `reconcileValue`, `preserveOrConflict`, dirty/conflict bookkeeping,
+      duplicated deep equality/path mutation helpers and the unusable-merge guard.
+      Retain only presentation state such as text being entered into a comma-separated
+      field, reason text and highlight timing where the adapter does not own it.
+- [ ] Start with atomic products/vouchers arrays. Never merge by numeric index after
+      structure changes. Enable keyed merging only from an authoritative CRD schema
+      with validated unique stable keys (`sku`/`code`); define key edits as identity
+      changes. Generate/consume that schema instead of maintaining a second handwritten
+      list policy. Keyed merging still requires conditional writes: JSON merge patch
+      replaces the resulting array as a whole.
+- [ ] Use one initialization path: the stream snapshot seeds the store. A manual
+      refresh or recovery GET feeds the same store, never resets an active draft.
+      Coordinate delayed reads so they cannot roll back a newer snapshot.
+- [ ] Send `store.patch()` plus the **resourceVersion of the base used to produce
+      that patch**. Capture patch, base version and object identity together. Require
+      the precondition in the backend; never substitute a newer version onto an old
+      patch. Preserve Kubernetes 409 responses and enforce the fixed object scope.
+- [ ] On 409, read current state with the caller's token and reconcile through the
+      library. Preserve the draft and show conflicts for explicit resolution before
+      another save. Do not retry the stale payload automatically. Reject saving a
+      draft against a replacement UID or while the resource is missing/unsynchronized.
+- [ ] Validate allowed patch paths and projection with the library on the backend.
+      Only `spec` is user-editable; metadata.resourceVersion is a precondition, not
+      an editable field. Kubernetes remains the authorization/admission authority.
+- [ ] Prefer a save receipt plus the ordinary projected watch echo, avoiding another
+      object-adoption pipeline. Report Kubernetes saved immediately, with synchronization
+      pending until observed; recover a missing echo via the same projected read path.
+      If an object response is necessary, project it identically and use tested library
+      adoption. Do not clear edits made after request dispatch or regress newer state.
+- [ ] Disable submission of unresolved conflicts until the user explicitly chooses
+      local or server values. Show conflict state without hiding the form. The new
+      `v-else-if="loadError"` branch currently hides an existing draft on save errors;
+      keep initial-load failure separate from in-editor errors.
+- [ ] Replace recursive voucher refresh with `getVoucherUsage()`. Keep redemption
+      state separate from CoffeeConfig resource state and describe its process scope.
+- [ ] Render connecting/live/reconnecting/expired/forbidden/missing states in both
+      screens. Expired sessions need an application-owned re-login path: native
+      EventSource cannot read the wrapper's JSON 401 body. Preserve drafts across
+      re-login only for the same identity, scope and UID; never carry them to a
+      different user. Any temporary persistence excludes credentials and sensitive data.
+- [ ] Keep storefront presentation on a read-only library store; server order pricing
+      remains authoritative. Stop streams and subscriptions on unmount/logout.
+- [ ] Restrict the stream to the configured namespace and CoffeeConfig name server-side.
+      The current policy checks the resource type, not those exact values. Bound stream
+      lifetime by session expiry; document that RBAC withdrawal affects an existing
+      upstream watch when it reopens, rather than claiming instant revocation.
 
-- [ ] Render the actual platform authenticator and evaluate it per connector:
-      valid identity, missing/unknown connector, missing claims, a forged
-      operator email arriving from Room Pass, non-`demo:` groups and system
-      groups. Read the **rendered** output, not the template. Include the
-      transitional `room` id while it is still accepted.
-- [ ] Use a disposable API server to test real tokens and RBAC: room attendee,
-      unrelated GitHub/LinkedIn user, named owner, unauthenticated caller.
-      Assert an allowed CoffeeConfig patch and denied Secret reads, RBAC
-      changes, impersonation, deletion, and writes outside `voter`.
-- [ ] **Audit what `system:authenticated` grants**, now that a stranger with a
-      LinkedIn account can obtain a valid token from this issuer. "No named
-      grant" is not the same as no access.
-- [ ] Decide whether attendees may edit *every* CoffeeConfig in `voter` (the
-      current Role permits it), read other submissions, and submit to a closed
-      quiz. Enforce object and lifecycle limits with scoped RBAC or admission,
-      and test direct API calls as well as application requests.
-- [ ] Review the `linkedin:simon@configbutler.ai` **cluster-admin** binding,
-      which trusts LinkedIn's email verification for cluster-admin.
-- [ ] Before opening GitHub login to everyone, review every Dex client
-      independently. Replace oauth2-proxy's broad `emailDomains: ["gmail.com"]`
-      gate and Grafana's single-address JMESPath with the intended
-      allowed-groups expression once the operator team slug is settled (it is
-      the placeholder `koudijs-dev:the-specific-group` throughout the platform
-      repo). Three clients enforce one intent through three mechanisms; that
-      drifts.
+Acceptance: no custom merge remains in Voter, no unconditional CoffeeConfig save is
+accepted, and failures preserve the user's draft while clearly reporting the state.
 
-**Acceptance:** a connector × identity × operation matrix runs against rendered
-policy and real authorization. Login eligibility is never an implicit grant.
+## 3. Prove the integration before shipping
 
-## 4. Exercise the browser, not just Go HTTP clients
+Keep generic test matrices upstream and a focused set of Voter boundary tests here.
+Extend the existing disposable browser fixture rather than introducing another stack.
 
-A Go client cannot reproduce how a browser sends `Origin` — which is exactly why
-the `Referrer-Policy: no-referrer` outage reached production invisibly.
+- [ ] Library: scalar convergence/conflict; clean remote array append/delete; local
+      array edits with unchanged server; reorder; deletion/type change; missing/duplicate
+      list keys; snapshot gap; deletion/recreation; save/echo ordering.
+- [ ] Backend with a real disposable API server: missing/stale resourceVersion,
+      conflicting concurrent PATCH, scope denial, participant credentials, projection
+      and allowed fields. Assert a real 409; fake clients alone cannot prove it.
+- [ ] Browser: two users edit the same field; independent edits; edit product A while
+      the server reorders products; lose a stream while typing; reconnect and resnapshot;
+      session expiry/re-login; resource deletion; save rejection without losing the form.
+      Delay a watch event deliberately to prove the save race is closed.
+- [ ] Keep the seven existing browser cases, and fail relevant tests on unexpected
+      page errors such as recursion. Confirm current CI before calling the feature done.
+- [ ] Build each image once in CI and load those exact artifacts into k3d; publish or
+      promote those same artifacts. Keep slow browser execution in a separate job, but
+      require its success for a release candidate. Avoid the current duplicate image
+      builds and add runner disk preparation/bounded bringup.
 
-- [x] Chromium tests for the Room Pass + Dex fixture: enrollment, stable return
-      identity, invalid code, CSRF, cookie flags, closed enrollment. Found and
-      fixed the cross-origin form-redirect CSP bug. They pass locally in ~2s.
-- [x] **Make a cold e2e bringup possible at all.** It had not been since
-      `29041e4`: the fixture authenticator was invalid YAML (unquoted `message:`
-      values containing `": "`) *and* missing the `claims.email_verified`
-      reference kube-apiserver requires before a username may be derived from
-      `claims.email`. The apiserver exited, `k3d --wait` waited forever, and it
-      read as a slow cluster — which is why the Chromium suite never completed
-      in CI. Both fixed by mirroring the platform authenticator, plus two
-      guards: the rendered config is parsed before the cluster is created, and
-      `--timeout 180s` bounds the wait. Measured from scratch: **bringup 50s,
-      browser tests 1.9s.**
-- [x] **Stop a slow check from blocking releases.** The browser step lived in
-      the `test` job and `images` needs `test`, so a bringup that ran long meant
-      *no image was published at all*. It is now its own job.
-- [ ] Confirm the browser job is green in CI (it passes locally from scratch;
-      the first CI run with the fix is the proof).
-- [ ] **Adopt the gitops-reverser build-once pattern.** The measurement that
-      was missing now exists: putting Voter into the e2e fixture added a full
-      Go + npm image build to every bringup, on top of the two already there
-      (`room-pass:dev`, `room-pass-demo-client:dev`). Locally that is cheap
-      because the layer cache is warm; on a cold CI runner it is not, and the
-      `images` job builds the very same Voter image again in parallel. Their
-      `e2e` job builds each image once in a `build` job, uploads it as an
-      artifact, and `docker load`s it into k3d — `IMAGE_DELIVERY_MODE: load`.
-      That is the change to make, and it is now justified by a number rather
-      than by taste.
-- [ ] Free runner disk before the browser job, as their `e2e` job does. Disk
-      sat at 90% during this work, and k3d node volumes plus three image builds
-      is exactly the profile that hits the kubelet eviction threshold.
-- [ ] Both `voter/Dockerfile` and `room-pass/Dockerfile` declare
-      `# syntax=docker/dockerfile:1`, so every cold build fetches that frontend
-      from Docker Hub. One bringup already failed on a DNS blip doing it. Pin
-      the digest or drop the directive.
-- [x] Operational metrics with bounded labels and scrape-time handoff gauges.
-- [ ] **Browser-driven login through the real Voter app**, not only the fixture:
-      browser Origin behaviour, returning enrollment, logout, expiry.
-- [ ] State/nonce mismatch, wrong issuer/audience/signature, and successful
-      callback replay against a controlled issuer through the real callback.
-- [ ] Demonstrate that stopping a Room blocks new handoff while an issued token
-      stays usable until expiry unless its authorization is removed.
-- [ ] Preserve unsaved input across re-login; stop and reconnect streams cleanly.
-- [ ] Get a disposable-cluster browser smoke test into CI. `task test-e2e` is
-      not a CI gate today and drives the flow with a Go client.
-- [x] Give the frontend a unit-test runner. `task test` now runs vitest before
-      the type-check. The first suite covers the API client, where the bugs are
-      not type errors: a request to a path the backend no longer serves, or a
-      mutation missing its CSRF header, compiles and builds perfectly. Both of
-      those were real, and both are now pinned.
-- [ ] Extend frontend tests past the API client to the screens themselves
-      (component tests need a DOM environment; only `vitest` and the node
-      environment are installed today).
+## 4. Extract Room Pass as a public project soon
 
-Worth a look while here: `voter/oidc.go:372` still sets `Referrer-Policy:
-no-referrer`, and Voter's CSRF check *rejects* `null` Origin — the same pairing
-that broke Room Pass. It is currently harmless (the SPA document is served by
-the static handler, which does not set the header, so its fetches carry a real
-Origin), but a browser test is what would keep it that way.
+This is a separate deliverable, not dependent on completing the coffee demo. Start by
+removing Voter test/build coupling; retain the existing protocol during extraction.
 
-## 5. Platform and operational follow-up
+**Recommended name: Room Pass**, described as “room-code sign-in for applications,
+powered by Dex.” Room Pass provides enrollment and a trusted authentication assertion;
+Dex provides OAuth 2.0/OIDC protocol endpoints and signed tokens. `room-oauth` would
+suggest a standalone authorization server that the project does not implement.
+A future native OIDC provider is a separate product decision, not a prerequisite.
 
-Items in the private `ConfigButler/k8s` checkout, not this repository.
+- [ ] Extract `room-pass/` with its useful history into a public repository under the
+      chosen owner; update the Go module/import path, independent CI, image publishing,
+      versioned CRDs/manifests, license/attribution, contribution and security docs.
+      Audit the exported history for private fixture data before publication.
+- [ ] Move Voter/CoffeeConfig/browser-live tests out of the Room Pass component suite
+      into Voter's integration suite. Keep Room Pass's minimal independent OIDC example
+      and room-auth/browser, envtest, handoff, race and load tests in its own project.
+      Neither build may require the other's checkout or parent Taskfile/devcontainer.
+- [ ] Make Voter consume a released Room Pass image/manifests in its fixture. Its
+      runtime integration is through Dex/OIDC, not Go imports from Room Pass. Remove
+      the in-tree source after the external release and consumer smoke tests pass.
+- [ ] Separate demo policy from the component: `demo:` group validation and
+      `@demo.invalid` identity formatting are current assumptions. Define an
+      operator-controlled allowed group namespace/allowlist with a restrictive default,
+      immutable identity settings and synthetic attribution semantics. Do not simply
+      remove validation or let room authors choose privileged groups.
+- [ ] Preserve existing `roompass.configbutler.ai/v1alpha1` objects, UIDs, cookie keys,
+      connector ID `room-pass`, subject construction and audience-group behavior in
+      the first extraction release. Repository/image naming must not trigger identity
+      migration. Version any later protocol or CRD change explicitly.
+- [ ] Publish a non-Voter example that completes room-code login to an ordinary OIDC
+      app without that app knowing Kubernetes. Kubernetes remains Room Pass's storage
+      prerequisite for this release; database independence and multiple active rooms
+      are separate future features.
+- [ ] Document one Room/one replica, persistent cookie keys, enrollment/issued-token
+      lifetime differences, unverified display names and trusted-proxy deployment.
+      Pin/test Dex compatibility and every callback alias. Keep state/nonce/PKCE and
+      token verification in established OIDC implementations.
+- [ ] Prove upgrade with existing enrollment and rollback via pinned image/manifests.
+      Extract first; add HA, new identity backends or native token issuance separately.
 
-- [ ] **Unstall the FluxInstance.** Root cause found: flux-operator emits a
-      JSON-patch at `/spec/versions/1/…` of the Receiver and Alert CRDs, gated
-      on `VersionInfo.Minor <= 8`. The cluster runs flux-operator **0.48.0**,
-      which predates that gate, while `distribution.version: "2.x"` floated to
-      **v2.9.5**, where those CRDs no longer have a second version. Fix: bump
-      `inputs.version` in `2-gitops/clusters/course-cluster/operator.yaml` from
-      `0.48.0` toward `0.59.0` (the version in `external/flux-operator`, which
-      has the gate), or pin `distribution.version` to `2.8.x` as a stopgap. A
-      floating distribution against a pinned operator is the underlying defect.
-- [ ] **Deploy current `main`.** Both images are behind HEAD, so the metrics
-      listener and the CSP fix are not running. Bump the tags in
-      `2-gitops/voter-demo/{app,room-pass}.yaml`.
-- [ ] **Remove the bare-email operator subjects** at
-      `2-gitops/auth/rbac/humans-rbac.yaml:59` and `:81`. They were kept so the
-      reboot could not lock anyone out. Confirm an OIDC `kubectl auth whoami`
-      reports `github:simonkoudijs@gmail.com` first — a `kubectl` run with the
-      admin client cert reports `admin` and proves nothing here.
-- [ ] **Finish the `room` → `room-pass` rename.** Every *functional* place is
-      already `room-pass` (verified live: Dex connector `id: room-pass` with no
-      `room` connector remaining, Traefik matching
-      `Path(/callback/room-pass) || PathPrefix(/room-pass)`, and both
-      `OIDC_CONNECTOR_ID` and `CONNECTOR_ID` set to `room-pass`). What is left:
-      - `legacyConnectorIds: ["room"]` at `1-talos/values.yaml:112`. The
-        rendered authenticator on the nodes still accepts `'room'` in both the
-        validation and the containment rule, for an id nothing can issue any
-        more. Removing it needs a rolling reboot, so batch it with the next
-        authenticator change; roll one node at a time and re-check the md5
-        across all three.
-      - `2-gitops/auth/authentication-config.reference.yaml:39,44,51` still
-        reads `['github', 'room']` and has no `linkedin` branch at all. It is a
-        hand-maintained approximation of a privilege boundary that no longer
-        matches the rendered one — delete it, or generate it from the template.
-      - Comments naming the old path: `2-gitops/auth/dex/networkpolicy.yaml:5,8,22`,
-        `2-gitops/voter-demo/README.md:19,25`, and
-        `2-gitops/voter-demo/room-pass.yaml:94,97`. One actively misdirects —
-        `2-gitops/auth/dex/ingressroute.yaml:14` warns "do not add a rule
-        matching `/callback/room`", which is no longer the path that needs
-        protecting.
-- [ ] Verify the platform-owned manifests against this code: rendered routes,
-      identities, permissions, and the new metrics Service port.
-- [ ] Record source revision, image digest, deployment revision and rollback
-      steps, so a demo-day failure has a known way back.
+Acceptance: a new user can clone/build/test/deploy Room Pass without Voter, authenticate
+an unrelated OIDC application through Dex, and upgrade without changing identities.
 
-## 6. Tidying, none of it urgent
+## 5. Complete the demo and deploy through GitOps
 
-- [ ] Delete the 7 leftover `Participant` objects from testing (via Git; the
-      namespace is Flux-owned).
-- [ ] Clear ~71 `ContainerStatusUnknown` pod tombstones left by the reboots.
-- [ ] `web-preview-pr-13` is in `ImagePullBackOff` and its Kustomization is
-      failing. Unrelated to this demo, but it is noise in every status check.
-- [ ] `Room`'s `Ends` print column is `type=date` at
-      `room-pass/api/v1alpha1/types.go:93`, which kubectl renders as an *age* —
-      so a future `endsAt` always shows `<invalid>`. Should be `type=string`.
-- [ ] The join page placeholder is `BCD-FGH`, implying a dashed 7-character
-      code, but real codes are 6 undashed characters. Dashes are stripped
-      server-side, so it is cosmetic — but it has already misled one person.
-- [ ] Consider whether the demo needs the `/answer` quiz flow at all, or whether
-      the coffee journey alone carries the talk. Cutting it would remove most of
-      section 1's remaining work.
+- [ ] Install/configure ConfigButler through `external/k8s` and provision its Git target.
+      Represent Kubernetes save, CommitRequest acceptance and observed Git commit as
+      separate states. `committed: true` must no longer mean merely request creation.
+      Show the resulting commit reference and verify actor attribution end to end.
+- [ ] Use ConfigButler's public APIs for durable change history and commit observation;
+      a krm-stream watch is current state, not an audit/history database. General
+      commit-controller behavior belongs in that project, not Voter.
+- [ ] Keep the demo explicitly single-replica/process-scoped for orders and voucher
+      counts for now. Before promising durable orders or enabling replicas > 1, choose
+      shared persistence with atomic redemption enforcement. Do not build the admin
+      order history on transient counters or put coffee persistence in krm-stream.
+- [ ] Proposed scope reduction: remove the broken quiz/ForwardAuth UI and unsupported
+      admin-order/history affordances from the demo's active navigation. Port only if
+      they become an explicit requirement; do not retain dead routes as obligations.
+- [ ] Publish tested images, then change
+      `external/k8s/k8s.koudijs.dev/2-gitops/voter-demo/{app,room-pass}.yaml` in Git.
+      No direct live workload mutation. Verify Flux revision, ready pods, image digests
+      and the authenticated browser journey; record a Git revert as the rollback.
+      Do not deploy the known-unsafe editor merely because its image exists.
 
-## Traps worth not rediscovering
+## 6. Retained platform work
 
-Three things that each cost a working session.
+These are unresolved items from the previous plan, not newly verified cluster facts.
+They belong in the platform repository and should move to its tracked backlog when
+implementation starts. Paths below are relative to `external/k8s/k8s.koudijs.dev/`.
 
-**Dex only emits `federated_claims` for the `federated:id` scope.** The entire
-connector-prefix design rests on that claim. A client that omits the scope gets
-a token with no connector and is now rejected outright. Dex v2.44.0 does not
-advertise the scope in its discovery document; that omission is cosmetic.
+- [ ] Test rendered authenticator connector/claim containment, including the transitional
+      `room` connector. Exercise attendee, unrelated external identity and named operator
+      against real RBAC; audit additive `system:authenticated` grants and object scope.
+- [ ] Review the named LinkedIn cluster-admin binding, placeholder GitHub team grants,
+      oauth2-proxy email-domain policy, Grafana rules and all shared-Dex clients.
+      Remove bare-email operator bindings only after verifying prefixed OIDC identity.
+- [ ] Recheck the previously stalled FluxInstance. Prior diagnosis: operator 0.48.0
+      against floating Flux 2.9.5 CRD shape; review a compatible pinned operator/
+      distribution pair in `2-gitops/clusters/course-cluster/operator.yaml`.
+      A Ready application Kustomization does not prove the FluxInstance is healthy.
+- [ ] Finish legacy `room` acceptance removal in `1-talos/values.yaml` and the rendered
+      authenticator; generate or remove the stale authentication reference YAML. Batch
+      authenticator rollout safely, one control-plane node at a time.
+- [ ] Verify routes, Dex network isolation and metrics Service ports. Recheck leftover
+      Participants, failed preview workloads and pod tombstones before cleanup; old
+      counts are not current inventories. Use the appropriate platform workflow.
+- [ ] Fix Room's future-date print column and clarify join-code display formatting in
+      the extracted component. Revisit Dockerfile frontend pinning in CI hardening.
 
-**`Referrer-Policy: no-referrer` makes browsers send `Origin: null` on form
-POSTs.** curl implements no referrer policy and neither does a Go HTTP client,
-so the entire test suite passed while every real browser was rejected. Suspect
-this whenever a form works under curl and fails in a browser.
-
-**`talm template --offline` silently drops networking.** The render loses
-`LinkConfig` and `Layer2VIPConfig` and randomises the hostname; applying it to
-three control planes would have taken the cluster off the network with no API
-left to recover through. The actual fix was dropping `-i`, which belongs to
-maintenance-mode bringup. Always diff a fresh render against the config on disk.
-
-Also: Dex reads connector credentials from `envFrom` at pod start, so
-`podAnnotations.configbutler.ai/secrets-revision` must be bumped whenever
-`dex-secrets.yaml` changes, or the new value is silently ignored.
+Operational reminders: request Dex `federated:id` wherever connector containment is
+required; test browser Origin/CSP across the full redirect chain; preserve the
+[cross-origin regression](room-pass/docs/csp-form-action.md). Dex credentials loaded
+through `envFrom` need a pod rollout after changes. Prior `talm template --offline`
+rendering dropped networking: inspect a fresh render before any Talos application.
