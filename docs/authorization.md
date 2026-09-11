@@ -1,7 +1,10 @@
 # Who may do what?
 
 Reviewed 2026-09-10 against application source and the local external platform
-checkout. These are configuration findings, not a fresh audit of the live cluster.
+checkout, and the platform rows re-checked against the **live cluster on
+2026-09-11** with `kubectl auth can-i --as`. Impersonation establishes what a
+username/group combination may do; it does not prove a real provider token
+carries those claims. The application rows remain configuration findings.
 
 ## Three separate questions
 
@@ -21,8 +24,10 @@ in the login URL. A successful Dex login can still produce a Kubernetes 403.
 | --- | --- | --- |
 | No valid app cookie | No app session | CoffeeConfig handler returns 401 |
 | Room attendee, `demo:<sub>` in `demo:voter-audience` | Valid room code/enrollment and active Room at handoff | Demo Role in `voter` |
-| Ordinary `linkedin:<email>` | LinkedIn connector is open | No named grant by default; shared authenticated-user grants still apply |
-| Ordinary `github:<email>` | Currently restricted to `koudijs-dev` organization | Matching user/group grants only; no automatic demo membership |
+| Ordinary `linkedin:<email>` | LinkedIn connector is open to any LinkedIn account | Verified live: nothing beyond `system:basic-user` and discovery. Secrets, pods, namespaces, Rooms and nodes all denied |
+| Ordinary `github:<email>` | Restricted to the `koudijs-dev` organization | Matching user/group grants only; no automatic demo membership |
+| `koudijs-dev:the-specific-group` (cohort) | GitHub connector, org team | Deployer Role in `simon`: pods, Services, Ingresses, IngressRoutes, middlewares. The group is a placeholder no real team maps to, so this is latent, not reachable |
+| `github-actions:ConfigButler/k8s` (CI) | GitHub Actions OIDC, repository claim only | `get`/`list` on nodes. The former Flux patch grant was removed 2026-09-11 |
 | `github:simonkoudijs@gmail.com` | GitHub connector | Named cluster-admin and Flux Web admin |
 | `linkedin:simon@configbutler.ai` | LinkedIn connector | Named cluster-admin and Flux Web admin |
 
@@ -30,8 +35,28 @@ Source files in the external platform checkout:
 `2-gitops/voter-demo/participant-rbac.yaml`,
 `2-gitops/auth/rbac/humans-rbac.yaml`, and
 `1-talos/templates/_authentication-config.tpl`.
-The named LinkedIn grant is broader than just Flux UI access. Bare-email operator
-subjects and legacy connector acceptance also remain as migration leftovers.
+The named LinkedIn grant is broader than just Flux UI access. The pre-migration
+bare-email operator subjects are **gone** as of 2026-09-11; both named operator
+bindings now list only the prefixed `github:` and `linkedin:` usernames.
+
+**Logging in is not the same gate everywhere.** Kubernetes is the strict one: the
+connector prefix decides the username namespace and an unbound prefix gets
+nothing. The web front ends each decide for themselves, so audit them separately:
+
+| Gate | Who gets in |
+| --- | --- |
+| Kubernetes API | Prefixed username must match a binding; ordinary LinkedIn and GitHub identities match none |
+| Grafana | `role_attribute_strict` with a single Admin mapping for the owner's email; everyone else is denied rather than silently a Viewer |
+| oauth2-proxy (Prometheus, Alertmanager, podinfo, `p<N>` participant apps) | An explicit two-address allowlist as of 2026-09-11 |
+
+oauth2-proxy previously gated on `email_domains = ["gmail.com"]`, which any
+LinkedIn account with a verified Gmail address satisfied. It now uses
+`authenticatedEmailsFile`; the domain list is emptied, because oauth2-proxy ORs
+the two and the chart default `["*"]` means allow-all. Group membership could not
+express this: no `koudijs-dev` team means "operator" — they are all cohorts — and
+the LinkedIn connector emits no groups, which would have locked out
+`linkedin:simon@configbutler.ai`. Cohort members must be added to that allowlist
+to reach their own `p<N>` app URL.
 
 The demo Role grants these operations throughout the `voter` namespace:
 
@@ -42,20 +67,36 @@ The demo Role grants these operations throughout the `voter` namespace:
 | QuizSessions | get, list, watch |
 | QuizSubmissions | create, get, list, watch |
 
+The CommitRequest CRD was absent when this was first written, leaving that row
+dormant. It was installed 2026-09-11 and gitops-reverser is running, so the grant
+is **live**: `create commitrequests.configbutler.ai -n voter` now returns `yes`
+for an audience identity.
+
 QuizSubmissions are create-only for participants: this Role grants neither update
 nor patch on them, and Voter exposes no editing endpoint. Broader additive grants or
 administrator access are separate; the CRD does not enforce immutable spec fields.
 
-This Role does not grant Secrets, RBAC changes, impersonation or deletion. It is
-not limited to one named CoffeeConfig and it permits reading other submissions.
+This Role does not grant Secrets, RBAC changes, impersonation or deletion
+(`delete quizsubmissions` is denied). It is not limited to one named CoffeeConfig
+and it permits reading other submissions.
+
+**There is no bound on how much an audience token may write.** The `voter`
+namespace has no ResourceQuota and no LimitRange, and the cluster has no
+ValidatingAdmissionPolicy at all, so nothing limits QuizSubmission object count
+or checks that a submission refers to a real session. `simon` has a
+`participant-quota`; `voter` does not.
+
 Voter's current handler addresses one configured CoffeeConfig, but callers with
 tokens can call Kubernetes directly within their RBAC grants.
 
 Opening GitHub login to everybody is compatible with granting only the owner
-extra rights. It is not implemented in this pass. First verify all clients on the
-shared issuer: oauth2-proxy currently uses a broad gmail domain gate; Grafana and
-Flux Web have their own rules. No matching explicit grant does not mean literally
-zero Kubernetes access: audit shared bindings such as `system:authenticated`.
+extra rights. It is not implemented in this pass. It now depends only on the Dex
+connector's `orgs` restriction, since the three front-end gates above were each
+narrowed to identity. No matching explicit grant does not mean literally zero
+Kubernetes access, so shared bindings were audited: the only ClusterRoleBindings
+naming `system:authenticated` are the stock `system:basic-user`,
+`system:discovery` and `system:public-info-viewer`, which is what an unbound
+prefix resolves to.
 
 ## Situations and expected behavior
 
