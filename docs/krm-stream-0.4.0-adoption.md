@@ -66,7 +66,7 @@ The stalled-peer test opens `/public/stream` on a raw socket and never reads; th
 `padBytes` knob so events fill the socket buffer at test speed. Every one of the three was
 negative-controlled by breaking its link and confirming that test — and only that test — fails.
 
-## Phase 3 — take the balanced lifecycle observations
+## Phase 3 — take the balanced lifecycle observations — **DONE**
 
 0.4.0 adds `ObservationStreamOpened`/`Closed`, `ObservationSharedSubscriptionOpened`/`Closed`
 and `ObservationHTTPTransportRejected`, each guaranteed to open before it closes.
@@ -76,22 +76,30 @@ and `ObservationHTTPTransportRejected`, each guaranteed to open before it closes
   The `sync.Once` guarding double-`Stop` goes with them.
 - Extend `streamMetrics.Observe` to the new kinds; `makeStreamRuntime` no longer wraps the backend.
 
-**One judgment call.** `voter_stream_upstream_watches` today counts *physical* API-server watch
-handles, which is what the `observedBackend` wrapper bought. The new observations count *logical*
-shared subscriptions; upstream states plainly that none of them measure physical watches. Two ways:
+**Decided: keep the counter, drop the gauge.** `voter_stream_upstream_watches` counted *physical*
+API-server watch handles, which the `observedWatcher` wrapper bought by decrementing on `Stop()` --
+correctness coupled to `sharedScope.pump`'s internal teardown. The new observations count *logical*
+lifetimes; upstream states plainly that none of them measure physical watches, so they are not a
+replacement for it.
 
-1. *Recommended.* Export `voter_stream_logical_streams` and `voter_stream_shared_subscriptions`
-   from the observations and drop the physical gauge, keeping the physical-watch claim where it is
-   already proven honestly — `apiserver_longrunning_requests` in the rehearsal test. This is the
-   upstream stance and deletes the most code.
-2. Keep `observedBackend` purely for the physical gauge. Costs ~27 lines and keeps a wrapper whose
-   correctness depends on `sharedScope.pump`'s internal `defer watcher.Stop()` behavior.
+`voter_stream_upstream_watch_starts_total` is, and needs no coupling: a monotonic counter incremented
+only where a watch is opened, with no `Stop()` and no `sync.Once`. Staying at 1 while subscribers
+climb to 200 is the production evidence that one watch serves every viewer. `observedWatcher` is
+deleted and `observedBackend` keeps only that increment.
 
-Either way [docs/shared-streams.md](shared-streams.md) needs its metrics section updated, and the
-`metrics.watches` assertions in [participant_stream_test.go](../voter/participant_stream_test.go)
-(lines 215, 231, 260, 267) need to move to whichever gauge survives.
+Exported now: `voter_stream_subscribers` (host: HTTP occupancy, counted from handler entry so it
+includes identity resolution), `voter_stream_logical_streams` and `voter_stream_shared_subscriptions`
+(library observations), `voter_stream_upstream_watch_starts_total`, `voter_stream_transport_rejected_total`,
+plus the existing resync/overflow/review-failure counters. The gap between `subscribers` and
+`logical_streams` is the requests currently resolving identity -- where a 200-viewer opening burst
+shows first.
 
-## Phase 4 — flatten the principal
+[docs/shared-streams.md](shared-streams.md) has the updated metrics table. The `metrics.watches`
+assertions moved to `watchStarts` plus the balanced logical gauges. One trap: `stream_rehearsal_test.go`
+reads metrics by *string* name, so its three references to the removed gauge compiled and vetted
+cleanly and would only have failed when the 200-attendee rehearsal was actually run. They are fixed.
+
+## Phase 4 — flatten the principal — **DONE**
 
 Upstream's example makes `kube.Subject` itself the principal, resolved once in `Principal`.
 Voter instead carries a `streamPrincipal` holding the session, resolves the subject lazily under a
@@ -101,26 +109,33 @@ Voter's ordering exists for a reason worth keeping: `TestStreamPinsNamespaceName
 proves a bogus scope costs no SelfSubjectReview. Upstream's `Principal` runs before scope validation,
 so copying it verbatim would let a session burn an SSR per bad-scope request.
 
-**Stop using `gateway.Handler`.** `Gateway` is a plain exported struct with exported fields, and
-0.4.0's `ServeStreamProjection` owns headers, bounded delivery, heartbeats and cleanup. `Handler` is
-just `Principal` → `ScopeFromQuery` → `Scopes.Validate` → `ServeStreamProjection` wrapped in
-callbacks, and its fixed ordering is the only thing forcing Voter's identity work into a `Principal`
-callback. Constructing `&gateway.Gateway{...}` and calling `ServeStreamProjection` directly makes the
-route read as plain statements in the order Voter wants them:
+**Voter drives `Gateway` directly.** `Handler` is `Principal` -> `ScopeFromQuery` -> `Scopes.Validate`
+-> `ServeStreamProjection` in a fixed order, and that order is the whole problem: identity is resolved
+in `Principal`, before the scope has been validated, so a request naming a resource this endpoint
+never serves still costs a SelfSubjectReview. Moving the scope check up into `Principal` fixes the
+wasted call but breaks something else -- `Handler` deliberately masks `Principal` errors as
+`FORBIDDEN "not authenticated"`, so an unallowlisted resource stops reporting `SCOPE_INVALID`.
+`TestStreamRefusesAnUnallowlistedResource` catches exactly this.
+
+Both properties survive if Voter owns the sequence and lets the library frame the answer:
 
 ```go
-scope, err := gateway.ScopeFromQuery(r.URL.Query())   // 1. parse
-// 2. pin to the configured CoffeeConfig, and run scopePolicy.Validate as the second lock
-subject, err := resolveSubject(ctx, participantClient) // 3. only now spend an SSR
-g.ServeStreamProjection(w, r, subject, scope, gateway.ProjectionFull)
+scope, err := gateway.ScopeFromQuery(r.URL.Query())  // 1. parse
+if err == nil { err = scopePolicy.Validate(scope) }  // 2. which KIND may stream at all
+if err == nil { err = pinned.check(scope) }          // 3. WHICH ONE
+var principal gateway.Principal = refusal{err}       // carries a decided refusal
+if err == nil { principal = resolveParticipantSubject(...) }  // 4. only now, one SSR
+g.ServeStreamProjection(w, r, principal, scope, gateway.ProjectionFull)
 ```
 
-Note `ScopePolicy` stays a `Handler` concept, so Voter calls `Validate` itself — keeping the
-"two locks" property its comment already describes, now visibly rather than as a config field.
+`refusal` is a five-line principal that `Auth` recognizes and returns verbatim. Because
+`ScopePolicy.Validate` returns a `*StreamError` and the gateway classifies terminal errors with
+`errors.As`, the code survives the trip: an unallowlisted resource still reads `SCOPE_INVALID`. That
+matters because 0.4.0 exports no way to write SSE headers by hand -- `WriteSSEHeaders` was removed
+precisely because `ServeStream` owns them -- so hand-rolling a refusal would mean re-duplicating the
+framing the release just consolidated. Routing refusals back through the gateway avoids that.
 
-An earlier draft of this plan kept `Handler` and smuggled `ScopeFromQuery` into the `Principal`
-callback to get the same ordering. That was a workaround for an entry point Voter does not have to
-use. Taking `Gateway` directly deletes:
+Taking `Gateway` directly deletes:
 
 - the `streamPrincipal` type and its `subjectMu` (~10 lines),
 - `resolveSubject`'s lazy-init dance, replaced by upstream's `subject.go` shape (~12 lines net),

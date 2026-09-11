@@ -221,7 +221,8 @@ func TestSharedStreamExpiryAndDisconnectIsolation(t *testing.T) {
 	if _, err := io.Copy(io.Discard, short.Body); err != nil {
 		t.Fatal(err)
 	}
-	if f.runtime.metrics.watches.Load() != 1 {
+	awaitStreamCondition(t, func() bool { return f.runtime.metrics.subscriptions.Load() == 1 })
+	if f.watches.Load() != 1 || f.runtime.metrics.watchStarts.Load() != 1 {
 		t.Fatal("expiry stopped another subscriber's watch")
 	}
 	line, err := reader.ReadString('\n')
@@ -237,7 +238,13 @@ func TestSharedStreamExpiryAndDisconnectIsolation(t *testing.T) {
 		t.Fatalf("expired reconnect status %d", response.StatusCode)
 	}
 	_ = long.Body.Close()
-	awaitStreamCondition(t, func() bool { return f.runtime.metrics.watches.Load() == 0 && f.runtime.metrics.subscribers.Load() == 0 })
+	awaitStreamCondition(t, func() bool {
+		return f.runtime.metrics.subscriptions.Load() == 0 && f.runtime.metrics.streams.Load() == 0 && f.runtime.metrics.subscribers.Load() == 0
+	})
+	// Two subscribers, one physical watch: the shared-stream property itself.
+	if f.watches.Load() != 1 || f.runtime.metrics.watchStarts.Load() != 1 {
+		t.Fatalf("two subscribers opened %d upstream watches", f.runtime.metrics.watchStarts.Load())
+	}
 	if f.identities.Load() != 2 {
 		t.Fatalf("identity should be resolved once per subscription: %d", f.identities.Load())
 	}
@@ -266,14 +273,16 @@ func TestSharedStreamWarmCacheDenialAndRevocation(t *testing.T) {
 			if _, err := io.Copy(io.Discard, revoke.Body); err != nil {
 				t.Fatalf("revoked stream not closed: %v", err)
 			}
-			if f.runtime.metrics.watches.Load() != 1 || f.watches.Load() != 1 {
+			if f.watches.Load() != 1 || f.runtime.metrics.watchStarts.Load() != 1 {
 				t.Fatal("revocation disturbed shared watch")
 			}
 			if f.runtime.metrics.reviewFailures.Load() < 2 {
 				t.Fatal("missing failure metrics")
 			}
 			_ = warm.Body.Close()
-			awaitStreamCondition(t, func() bool { return f.runtime.metrics.watches.Load() == 0 })
+			awaitStreamCondition(t, func() bool {
+				return f.runtime.metrics.subscriptions.Load() == 0 && f.runtime.metrics.streams.Load() == 0
+			})
 		})
 	}
 }

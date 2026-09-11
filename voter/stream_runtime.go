@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -81,11 +80,11 @@ func makeStreamRuntime(backend gateway.Backend, typed kubernetes.Interface) *str
 	return &streamRuntime{
 		backend: gateway.NewSharedBackendWithOptions(&observedBackend{Backend: backend, metrics: metrics}, gateway.SharedOptions{Observer: metrics}),
 		authorizer: kube.SubjectAccessReviewAuthorizer(typed, func(p gateway.Principal) (kube.Subject, error) {
-			principal, ok := p.(*streamPrincipal)
+			subject, ok := p.(kube.Subject)
 			if !ok {
 				return kube.Subject{}, fmt.Errorf("missing Kubernetes identity")
 			}
-			return principal.kubernetesSubject()
+			return subject, nil
 		}),
 		metrics:                 metrics,
 		reauthorizationInterval: 30 * time.Second,
@@ -94,16 +93,39 @@ func makeStreamRuntime(backend gateway.Backend, typed kubernetes.Interface) *str
 }
 
 type streamMetrics struct {
-	subscribers    atomic.Int64
-	watches        atomic.Int64
-	watchStarts    atomic.Int64
-	resyncs        atomic.Int64
-	overflows      atomic.Int64
-	reviewFailures atomic.Int64
+	// subscribers is Voter's own: HTTP handler occupancy, which includes the
+	// identity resolution the library never sees. Upstream observations start
+	// later, so this stays host instrumentation.
+	subscribers atomic.Int64
+	// streams and subscriptions come from balanced library observations. They
+	// count logical lifetimes, never physical API-server watches.
+	streams       atomic.Int64
+	subscriptions atomic.Int64
+	// watchStarts is the one physical measurement, and deliberately monotonic:
+	// a counter needs no Stop() and so is not coupled to the shared backend's
+	// internal teardown. It staying flat while subscribers climbs is the
+	// production evidence that one watch is serving every viewer.
+	watchStarts       atomic.Int64
+	resyncs           atomic.Int64
+	overflows         atomic.Int64
+	transportRejected atomic.Int64
+	reviewFailures    atomic.Int64
 }
 
+// Observe runs synchronously on the stream or shared-watch goroutine, sometimes
+// under shared locks: counters only, and unknown kinds are ignored on purpose.
 func (m *streamMetrics) Observe(o gateway.Observation) {
 	switch o.Kind {
+	case gateway.ObservationStreamOpened:
+		m.streams.Add(1)
+	case gateway.ObservationStreamClosed:
+		m.streams.Add(-1)
+	case gateway.ObservationSharedSubscriptionOpened:
+		m.subscriptions.Add(1)
+	case gateway.ObservationSharedSubscriptionClosed:
+		m.subscriptions.Add(-1)
+	case gateway.ObservationHTTPTransportRejected:
+		m.transportRejected.Add(1)
 	case gateway.ObservationConsumerResync:
 		m.resyncs.Add(1)
 	case gateway.ObservationSharedOverflow:
@@ -111,12 +133,26 @@ func (m *streamMetrics) Observe(o gateway.Observation) {
 	}
 }
 
+// No identity, scope or resource names become labels.
 func (m *streamMetrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-	_, _ = fmt.Fprintf(w, "voter_stream_subscribers %d\nvoter_stream_upstream_watches %d\nvoter_stream_upstream_watch_starts_total %d\nvoter_stream_resyncs_total %d\nvoter_stream_overflows_total %d\nvoter_stream_access_review_failures_total %d\n",
-		m.subscribers.Load(), m.watches.Load(), m.watchStarts.Load(), m.resyncs.Load(), m.overflows.Load(), m.reviewFailures.Load())
+	_, _ = fmt.Fprintf(w, `voter_stream_subscribers %d
+voter_stream_logical_streams %d
+voter_stream_shared_subscriptions %d
+voter_stream_upstream_watch_starts_total %d
+voter_stream_resyncs_total %d
+voter_stream_overflows_total %d
+voter_stream_transport_rejected_total %d
+voter_stream_access_review_failures_total %d
+`,
+		m.subscribers.Load(), m.streams.Load(), m.subscriptions.Load(), m.watchStarts.Load(),
+		m.resyncs.Load(), m.overflows.Load(), m.transportRejected.Load(), m.reviewFailures.Load())
 }
 
+// observedBackend counts physical watch openings and nothing else. It wraps no
+// watcher: the gauge that needed one depended on the shared backend's internal
+// teardown, and a monotonic counter answers "is one watch serving everyone?"
+// without that coupling.
 type observedBackend struct {
 	gateway.Backend
 	metrics *streamMetrics
@@ -127,20 +163,6 @@ func (b *observedBackend) Watch(ctx context.Context, scope gateway.Scope) (gatew
 	if err != nil {
 		return nil, err
 	}
-	b.metrics.watches.Add(1)
 	b.metrics.watchStarts.Add(1)
-	return &observedWatcher{Watcher: w, metrics: b.metrics}, nil
-}
-
-type observedWatcher struct {
-	gateway.Watcher
-	metrics *streamMetrics
-	once    sync.Once
-}
-
-// In pinned gateway 0.3.0, sharedScope.pump defers watcher.Stop on every
-// exit. This wrapper is only used underneath SharedBackend. Replace it with
-// upstream lifecycle observations when that API is released.
-func (w *observedWatcher) Stop() {
-	w.once.Do(func() { w.Watcher.Stop(); w.metrics.watches.Add(-1) })
+	return w, nil
 }

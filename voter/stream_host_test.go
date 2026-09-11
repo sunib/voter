@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"sync"
 	"testing"
 	"time"
 
@@ -102,34 +101,6 @@ func TestMetricsAreOnlyServedOnTheDedicatedHandler(t *testing.T) {
 	}
 }
 
-func TestStreamIdentityResolutionIsSafeAcrossConcurrentCallers(t *testing.T) {
-	f := newSharedStreamFixture(t)
-	principal := &streamPrincipal{session: participantSession{IDToken: "concurrent"}}
-	deps := handlerDeps{cfg: f.cfg}
-	var wg sync.WaitGroup
-	for range 20 {
-		wg.Go(func() {
-			if err := principal.resolveSubject(t.Context(), deps); err != nil {
-				t.Error(err)
-				return
-			}
-			subject, err := principal.kubernetesSubject()
-			if err != nil || subject.User != "resolved:concurrent" {
-				t.Errorf("incorrect subject: %v", err)
-			}
-		})
-	}
-	wg.Wait()
-	if f.identities.Load() != 1 {
-		t.Fatalf("resolved identity %d times", f.identities.Load())
-	}
-}
-
-// The fixture shortens both of these so tests run quickly, which means no
-// behavioral test can notice if the production default is dropped. Assert the
-// values the process actually starts with. Together with the bounded-delivery
-// and revocation tests -- which prove these fields reach the library -- this
-// covers the whole chain from constructor to enforcement.
 func TestStreamRuntimeProductionDefaults(t *testing.T) {
 	runtime := makeStreamRuntime(nil, nil)
 	if runtime.writeTimeout != 5*time.Second {

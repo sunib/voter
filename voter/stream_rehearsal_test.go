@@ -269,7 +269,7 @@ func TestFixtureSharedStreamRehearsal(t *testing.T) {
 	started := time.Now()
 	openBatch(0, count)
 	t.Logf("%d independently authenticated Kubernetes identities synced through ingress in %s", count, time.Since(started))
-	if metric("voter_stream_subscribers") != count || metric("voter_stream_upstream_watches") != 1 {
+	if metric("voter_stream_subscribers") != count || metric("voter_stream_shared_subscriptions") != count || metric("voter_stream_upstream_watch_starts_total") != 1 {
 		t.Fatal("sharing metrics disagree with 200:1")
 	}
 	if got := apiWatches() - baselineWatches; got != 1 {
@@ -346,7 +346,7 @@ func TestFixtureSharedStreamRehearsal(t *testing.T) {
 		t.Fatal("withdrawal exceeded 60s")
 	}
 	t.Logf("one of 200 grants withdrawn and stream closed in %s", time.Since(started))
-	if metric("voter_stream_subscribers") != 199 || metric("voter_stream_upstream_watches") != 1 {
+	if metric("voter_stream_subscribers") != 199 || metric("voter_stream_shared_subscriptions") != 199 || metric("voter_stream_upstream_watch_starts_total") != 1 {
 		t.Fatal("withdrawal disturbed other viewers")
 	}
 	for _, s := range streams[1:] {
@@ -367,7 +367,7 @@ func TestFixtureSharedStreamRehearsal(t *testing.T) {
 		<-s.done
 	}
 	awaitStreamCondition(t, func() bool {
-		return metric("voter_stream_subscribers") == 0 && metric("voter_stream_upstream_watches") == 0
+		return metric("voter_stream_subscribers") == 0 && metric("voter_stream_shared_subscriptions") == 0 && metric("voter_stream_logical_streams") == 0
 	})
 	if apiWatches() != baselineWatches {
 		t.Fatal("API watch not released after final disconnect")

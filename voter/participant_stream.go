@@ -5,9 +5,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"net/http"
-	"sync"
+	"slices"
 	"time"
 
 	"github.com/ConfigButler/krm-stream/gateway"
@@ -17,16 +16,31 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// streamPrincipal is what the gateway carries around as "who is calling".
-//
-// It holds the session rather than a copy of its fields so the token cannot
-// drift out of sync with the identity it belongs to: whoever the principal
-// says this is, the client below is built from that same session's token.
-type streamPrincipal struct {
-	session   participantSession
-	subject   *kube.Subject
-	subjectMu sync.Mutex
+// scopePolicy denies by default and narrows on purpose. The audience's RBAC
+// already stops them reading Secrets, but a scope allowlist means a mistake in
+// RBAC is not immediately also a streaming mistake. Two locks.
+var scopePolicy = gateway.ScopePolicy{
+	// The single-cluster host that never names a target.
+	Targets: []string{""},
+	Resources: []gateway.GroupResource{
+		{
+			Group:    "examples.configbutler.ai",
+			Resource: "coffeeconfigs",
+			Scope:    gateway.ResourceScopeNamespaced,
+		},
+	},
 }
+
+// refusal carries an already-decided refusal to the gateway as a principal.
+//
+// Voter needs to check the scope BEFORE spending a SelfSubjectReview on it, but
+// it also wants the library to frame the answer -- SSE headers, sequencing and
+// the terminal event are the library's job, and 0.4.0 exports no way to write
+// them by hand. Handing the gateway a principal that authorizes to this error
+// gets both: no Kubernetes call for a scope that was never going to be served,
+// and a terminal event whose code still distinguishes an unallowlisted resource
+// from a forbidden one.
+type refusal struct{ err error }
 
 func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 	cfg := deps.cfg
@@ -34,33 +48,16 @@ func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 	if streams == nil {
 		panic("participant stream handlers require a stream runtime")
 	}
+	pinned := coffeeConfigScope{namespace: deps.defaultNS, name: cfg.CoffeeConfigName}
 
-	handler := gateway.Handler(gateway.Options{
-		// Identity comes from the signed session cookie and nowhere else. The
-		// gateway never trusts browser identity headers.
-		Principal: func(r *http.Request) (gateway.Principal, error) {
-			s, ok := getParticipantSession(r, cfg, sessionCookieCodec, time.Now())
-			if !ok {
-				return nil, errors.New("no participant session")
-			}
-			return &streamPrincipal{session: s}, nil
-		},
-
-		Authorizer: gateway.AuthorizerFunc(func(ctx context.Context, p gateway.Principal, scope gateway.Scope) error {
-			if err := (participantWatchAuthorizer{namespace: deps.defaultNS, name: cfg.CoffeeConfigName}).Authorize(ctx, p, scope); err != nil {
-				return err
+	g := &gateway.Gateway{
+		Auth: gateway.AuthorizerFunc(func(ctx context.Context, p gateway.Principal, scope gateway.Scope) error {
+			if r, ok := p.(refusal); ok {
+				return r.err
 			}
 			// Bound initial checks as well as the library's timed rechecks.
 			ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
-			principal, ok := p.(*streamPrincipal)
-			if !ok {
-				return gateway.Forbidden("not authenticated")
-			}
-			if err := principal.resolveSubject(ctx, deps); err != nil {
-				streams.metrics.reviewFailures.Add(1)
-				return err
-			}
 			err := streams.authorizer.Authorize(ctx, p, scope)
 			if err != nil {
 				streams.metrics.reviewFailures.Add(1)
@@ -70,31 +67,15 @@ func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 		Clients: func(_ context.Context, _ string, _ gateway.Principal) (gateway.Backend, error) {
 			return streams.backend, nil
 		},
+		Projection: gateway.ProjectionFull,
+		Observer:   streams.metrics,
 		// The library owns bounded delivery: it deadlines each write plus flush,
 		// refuses a transport that cannot support that before a stream opens, and
 		// poisons the sink on failure so a queued heartbeat cannot revive it.
 		WriteTimeout:            streams.writeTimeout,
 		ReauthorizationInterval: streams.reauthorizationInterval,
 		ReauthorizationTimeout:  5 * time.Second,
-		Observer:                streams.metrics,
-
-		// Deny by default, and narrow on purpose. The audience's RBAC already
-		// stops them reading Secrets, but a scope allowlist means a mistake in
-		// RBAC is not immediately also a streaming mistake. Two locks.
-		Scopes: gateway.ScopePolicy{
-			// The single-cluster host that never names a target.
-			Targets: []string{""},
-			Resources: []gateway.GroupResource{
-				{
-					Group:    "examples.configbutler.ai",
-					Resource: "coffeeconfigs",
-					Scope:    gateway.ResourceScopeNamespaced,
-				},
-			},
-		},
-
-		Projection: gateway.ProjectionFull,
-	})
+	}
 
 	// requireParticipant gives the 401-with-loginUrl shape the SPA already
 	// understands, so an expired session on a stream looks like an expired
@@ -104,68 +85,87 @@ func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		// Counted from here, not from the stream: the difference between this
+		// and voter_stream_logical_streams is the requests currently resolving
+		// identity, which is where a 200-viewer opening burst shows up first.
+		streams.metrics.subscribers.Add(1)
+		defer streams.metrics.subscribers.Add(-1)
+
 		deadline := time.Unix(s.ExpiresAt, 0)
 		if s.TokenExpiry > 0 && time.Unix(s.TokenExpiry, 0).Before(deadline) {
 			deadline = time.Unix(s.TokenExpiry, 0)
 		}
 		ctx, cancel := context.WithDeadline(r.Context(), deadline)
 		defer cancel()
-		streams.metrics.subscribers.Add(1)
-		defer streams.metrics.subscribers.Add(-1)
-		handler.ServeHTTP(w, r.WithContext(ctx))
+
+		// The order below is the point of doing this by hand: every cheap check
+		// that can refuse the request runs before the one Kubernetes call that
+		// identity costs. A scope this endpoint never serves is answered without
+		// touching the API server at all.
+		scope, err := gateway.ScopeFromQuery(r.URL.Query())
+		if err == nil {
+			err = scopePolicy.Validate(scope)
+		}
+		if err == nil {
+			err = pinned.check(scope)
+		}
+		if err == nil && s.IDToken == "" {
+			err = gateway.Forbidden("no participant credential")
+		}
+
+		// Identity comes from the signed session cookie and nowhere else; the
+		// gateway never sees browser identity headers. Once resolved it is fixed
+		// for this subscription, and every disclosure is still access-reviewed.
+		var principal gateway.Principal = refusal{err}
+		if err == nil {
+			identify, done := context.WithTimeout(ctx, 5*time.Second)
+			subject, resolveErr := resolveParticipantSubject(identify, deps, s.IDToken)
+			done()
+			if resolveErr != nil {
+				streams.metrics.reviewFailures.Add(1)
+				principal = refusal{resolveErr}
+			} else {
+				principal = subject
+			}
+		}
+
+		g.ServeStreamProjection(w, r.WithContext(ctx), principal, scope, gateway.ProjectionFull)
 	}))
 }
 
-// Scope restriction precedes identity resolution and access review.
-type participantWatchAuthorizer struct{ namespace, name string }
+// coffeeConfigScope pins the one object this stream serves. scopePolicy above
+// says which KIND may be streamed at all; this says WHICH ONE.
+type coffeeConfigScope struct{ namespace, name string }
 
-func (a participantWatchAuthorizer) Authorize(_ context.Context, p gateway.Principal, scope gateway.Scope) error {
-	principal, ok := p.(*streamPrincipal)
-	if !ok {
-		return gateway.Forbidden("not authenticated")
-	}
-	if principal.session.IDToken == "" {
-		return gateway.Forbidden("no participant credential")
-	}
+func (a coffeeConfigScope) check(scope gateway.Scope) error {
 	if scope.Namespace != a.namespace || scope.Name != a.name || scope.Version != "v1alpha1" {
 		return gateway.Forbidden("stream is restricted to the configured CoffeeConfig")
 	}
 	return nil
 }
 
-// Serialize identity initialization ourselves instead of relying on gateway call
-// ordering. Once resolved, this subscription's identity remains fixed.
-func (p *streamPrincipal) resolveSubject(ctx context.Context, deps handlerDeps) error {
-	p.subjectMu.Lock()
-	defer p.subjectMu.Unlock()
-	if p.subject == nil {
-		clients, err := deps.participantClientsFor(p.session.IDToken)
-		if err != nil {
-			return err
-		}
-		review, err := clients.typed.AuthenticationV1().SelfSubjectReviews().Create(ctx, &authenticationv1.SelfSubjectReview{}, metav1.CreateOptions{})
-		if err != nil {
-			return err
-		}
-		info := review.Status.UserInfo
-		if info.Username == "" {
-			return gateway.Forbidden("missing Kubernetes identity")
-		}
-		subject := &kube.Subject{User: info.Username, Groups: info.Groups, UID: info.UID, Extra: map[string]authorizationv1.ExtraValue{}}
+// The client here MUST authenticate as the participant. Using the shared
+// service-account client would resolve the service account instead, and every
+// subscriber would then be authorized as Voter itself.
+func resolveParticipantSubject(ctx context.Context, deps handlerDeps, idToken string) (kube.Subject, error) {
+	clients, err := deps.participantClientsFor(idToken)
+	if err != nil {
+		return kube.Subject{}, err
+	}
+	review, err := clients.typed.AuthenticationV1().SelfSubjectReviews().Create(ctx, &authenticationv1.SelfSubjectReview{}, metav1.CreateOptions{})
+	if err != nil {
+		return kube.Subject{}, err
+	}
+	info := review.Status.UserInfo
+	if info.Username == "" {
+		return kube.Subject{}, gateway.Forbidden("missing Kubernetes identity")
+	}
+	subject := kube.Subject{User: info.Username, UID: info.UID, Groups: slices.Clone(info.Groups)}
+	if info.Extra != nil {
+		subject.Extra = make(map[string]authorizationv1.ExtraValue, len(info.Extra))
 		for key, values := range info.Extra {
-			subject.Extra[key] = authorizationv1.ExtraValue(values)
+			subject.Extra[key] = slices.Clone(authorizationv1.ExtraValue(values))
 		}
-		p.subject = subject
 	}
-
-	return nil
-}
-
-func (p *streamPrincipal) kubernetesSubject() (kube.Subject, error) {
-	p.subjectMu.Lock()
-	defer p.subjectMu.Unlock()
-	if p.subject == nil {
-		return kube.Subject{}, errors.New("missing Kubernetes identity")
-	}
-	return *p.subject, nil
+	return subject, nil
 }

@@ -47,14 +47,25 @@ Tests query it via the authenticated Kubernetes pod proxy.
 
 | Metric | Meaning |
 | --- | --- |
-| `voter_stream_subscribers` | Active SSE requests, including requests still authorizing |
-| `voter_stream_upstream_watches` | Active upstream backend watch handles |
+| `voter_stream_subscribers` | Active SSE requests, counted from entry: includes requests still resolving identity |
+| `voter_stream_logical_streams` | Library stream lifetimes, opened after authorization begins |
+| `voter_stream_shared_subscriptions` | Attachments to the shared watch, including warm-cache joins |
 | `voter_stream_upstream_watch_starts_total` | Upstream backend openings, including recycling |
 | `voter_stream_resyncs_total` | Library consumer resynchronizations |
 | `voter_stream_overflows_total` | Library shared-subscriber queue overflows |
+| `voter_stream_transport_rejected_total` | Requests refused because the transport could not bound delivery |
 | `voter_stream_access_review_failures_total` | Failed identity resolution or authorization checks, including denials/timeouts |
 
-Backend watch handles are not a substitute for API-server evidence. The rehearsal
+The active-watch-handle gauge is gone as of krm-stream 0.4.0. Its value came from a
+Voter wrapper whose decrement depended on the shared backend's internal teardown, and
+the library's lifecycle observations deliberately measure logical lifetimes rather than
+physical watches. `voter_stream_upstream_watch_starts_total` replaces it and needs no
+such coupling: it is monotonic, incremented only where a watch is opened. Staying flat
+while `voter_stream_subscribers` climbs is the production evidence that one watch serves
+every viewer. The difference between `voter_stream_subscribers` and
+`voter_stream_logical_streams` is the requests currently resolving identity.
+
+Watch openings are not a substitute for API-server evidence. The rehearsal
 also checks the change in Kubernetes `apiserver_longrunning_requests` for CoffeeConfigs.
 A browser reconnect normally gets a new snapshot without opening another upstream
 watch. At 200 subscribers the periodic checks budget about 13.3 SARs/second, plus
