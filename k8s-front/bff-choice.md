@@ -1,10 +1,24 @@
 # Choosing a universal or domain-specific BFF
 
-Status: decision aid, 2026-09-11. The name `k8s-front` is chosen; adopting it in Voter
-is not. This document complements the [service proposal](README.md) and incorporates
-review feedback checked against the current backend and platform manifests.
+Use this guide to decide whether a browser application should use native Kubernetes APIs,
+a domain-specific backend, or both. It accompanies the [k8s-front service design](README.md).
+The examples illustrate design choices; k8s-front does not implement their domain rules.
 
-## The decision to make
+## Choose the domain API and the browser access layer
+
+k8s-front supports domains deliberately designed around the Kubernetes Resource Model
+(KRM). Choosing its generic transport is separate from deciding whether KRM is the right
+domain API. Establish both before committing to the architecture.
+
+| Domain API choice | What it means | What must be established |
+| --- | --- | --- |
+| Expose an existing Kubernetes model | Keep current resources and let clients use their native API | Existing persistence and permissions must already be safe without narrow handlers |
+| Design the domain in KRM | Make CRDs, request/intent semantics, status and domain operators the supported public contract | Explicit lifecycles, trusted identities, enforcement, concurrency and operational ownership |
+| Design a domain HTTP API | Express commands and read views through a service, using Kubernetes or another store internally | Service authorization, validation, stable outcomes and failure handling |
+
+These choices are distinct from universal versus domain-specific transport. A universal
+BFF can serve a purpose-built KRM domain with substantial domain logic behind it. A
+domain-specific BFF can also preserve Kubernetes resource shapes.
 
 Decide per capability, not once for the entire application. A Kubernetes object editor
 and an anonymous quiz result screen have different contracts even if they share storage.
@@ -15,37 +29,84 @@ and an anonymous quiz result screen have different contracts even if they share 
 | Domain-specific BFF | Application handlers express actions, validate inputs and return suitable views; responses can still be Kubernetes-shaped | Workflows, privacy and error handling differ materially from native CRUD | Per-application handlers and integration tests; shared infrastructure can be duplicated |
 | Hybrid | Generic access for approved resources; domain endpoints for commands and restricted views | Resource editing and business workflows coexist | Two access paths need an explicit policy boundary, identity contract and operational ownership |
 
-**Recommendation:** pursue k8s-front as reusable infrastructure, retain the present
-Voter service for the talk, and consider a hybrid CoffeeConfig pilot afterwards.
-Keep quiz domain operations until a deliberate admission/privacy redesign proves worthwhile.
-This is a recommendation, not a migration approval. Universal transport can be valuable
-without becoming the right public API for every feature.
+Choose universal transport when the exposed resource API already expresses the intended
+permissions and operations. Choose a domain BFF when a service expresses the product's
+commands and read views more directly. Combine them when different features need different
+contracts. Neither choice removes the need for domain logic.
 
-## What the feedback changes
+## Design the resource lifecycle
 
-[QuizSession reads](../voter/participant_quiz.go) already return Kubernetes objects and
-lists. [CoffeeConfig reads](../voter/participant_coffee.go) already return the library's
-projected resource. [The stream host](../voter/participant_stream.go) already supplies
-all four library integration seams and denies scopes by default. Reuse is the extraction
-opportunity; claiming that these reads currently require domain DTO translation is wrong.
+A useful resource contract expresses domain concepts, not just database rows with Kubernetes
+metadata. For a quiz, one possible design is:
 
-The current [encrypted session cookie](../voter/session_cookie.go) already keeps usable
-tokens out of JavaScript. Opaque sessions add revocation and refresh management, with a
-shared-store cost. Moving auth/transport files out of Voter reduces its local code but
-not necessarily total maintained code. The review's approximate line counts are useful
-orientation, not a measured savings estimate; include the new proxy, sessions, deployment,
-policies, controllers and tests when measuring the complete system.
+| Resource or field | Intended meaning | Design obligation |
+| --- | --- | --- |
+| QuizSession intent and status | The desired round lifecycle and the operator's observed readiness/closure | Specify when a round actually stops accepting work |
+| QuizSubmission spec | An immutable request containing answers and a round reference | Establish trusted submitter identity and any rules required before storage |
+| QuizSubmission status | Pending processing, accepted or rejected, with stable reasons | Define terminal decisions, retries and failure separately; users cannot forge outcomes |
+| QuizResults | A read model of accepted submissions suitable for the audience | Specify read grants, update lag and counting each accepted submission once |
 
-Most urgently, the checked-in [audience Role](../external/k8s/k8s.koudijs.dev/2-gitops/voter-demo/participant-rbac.yaml)
-already grants shared QuizSubmission `get/list/watch/create`. The browser normally reaches
-those permissions through narrow handlers. Exposing generic submission routes makes
-handler-only constraints bypassable immediately, independently of frontend migration.
-Other credential paths can already bypass them; this is not cluster-wide enforcement.
-Default-deny exposure policy is required before routing the new service.
+In this example, a successful create acknowledges persistence. The UI must then distinguish pending processing from a
+successful domain outcome. Missing status is not success; a controller outage is not a
+business rejection. A useful status contract identifies which intent/revision was processed
+and which conditions or decisions are authoritative, including terminality and correction.
+
+Enable and authorize the CRD status subresource so participants cannot write controller-owned
+outcomes. Status is a separately writable part of the resource, not automatically a private
+read view; use separate resources/grants where disclosure differs. Kubernetes documents
+[CRD status behavior](https://kubernetes.io/docs/tasks/extend-kubernetes/custom-resources/custom-resource-definitions/#status-subresource).
+
+This model lets browsers and automation share a domain API and observe durable work through
+restarts. It also makes eventual processing visible to the user and makes the domain team
+responsible for reconciliation and API evolution. Those are deliberate product choices.
+
+### Assign ownership
+
+Here, a **domain operator** means software that manages the domain through Kubernetes
+controllers, potentially packaged with admission. A **platform operator** is the person
+or team running it. The [Kubernetes operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/)
+provides a place for domain expertise; it does not supply that expertise automatically.
+
+| Responsibility | Owner |
+| --- | --- |
+| Define identity, uniqueness, acceptance, privacy and lifecycle rules | Domain/API designers |
+| Implement admission, canonical keys, arbitration and retry-safe reconciliation | Domain operator developers |
+| Install policies/controllers, maintain availability, audit grants and manage upgrades | Platform team, with domain-team support |
+| Explain pending, rejected, failed and completed outcomes | Frontend team using the domain contract |
+| Login and allowlisted native API/stream transport | k8s-front maintainers |
+
+The domain operator implements the guarantees assigned to it. They must be
+implemented by the right mechanism, not handed to an asynchronous reconciliation loop
+and assumed solved. Domain and Kubernetes expertise must be available to design, review
+and operate the complete contract; a generic proxy cannot compensate for their absence.
+
+## Evaluate reuse and exposure
+
+A generic service can consolidate login, credentials and resource transport across
+applications. It does not necessarily remove DTOs: a domain BFF can already return
+Kubernetes-shaped objects. Count all maintained components when evaluating savings,
+including session storage, deployment, policies, controllers and tests.
+
+Server-side sessions add revocation and refresh management, but require available shared
+storage across replicas. An encrypted HttpOnly cookie can already keep bearer credentials
+unreadable by JavaScript. Compare the required session lifecycle and operational cost,
+rather than treating opaque sessions as the only way to keep tokens out of frontend code.
+
+Enabling generic routes can expose more behavior than the old application, even without
+changing RBAC. For example, a user's create grant may previously have been reachable only
+through a handler that validates answers and assigns a unique name. Raw create access
+allows other bodies and names unless admission enforces those constraints. A raw list
+route can disclose records previously presented only as aggregate results.
+
+Require default-deny policy on raw APIs and streams. Review effective permissions and
+enforcement before enabling each route; frontend migration order does not protect an
+already exposed API. Controller-based acceptance is an alternative only when the resource
+contract explicitly permits pending or rejected requests to be stored.
 
 ## Where native Kubernetes APIs fit poorly
 
-These are tradeoffs for browser products, not reasons to avoid Kubernetes as infrastructure.
+These are tradeoffs for browser products, including domains deliberately designed in KRM.
+Good CRDs and status contracts can make them manageable, but do not remove them.
 
 | Property | Consequence for a frontend/product | Possible response and its cost |
 | --- | --- | --- |
@@ -54,22 +115,23 @@ These are tradeoffs for browser products, not reasons to avoid Kubernetes as inf
 | Object-oriented concurrency | UID, resourceVersion, patch types, arrays and apply ownership become client concerns | Reuse editor primitives, but still test races and translate failures into understandable choices |
 | No general multi-object transaction endpoint | Saving configuration and requesting a Git commit can partially succeed; reading a round then creating a submission is not atomic | Explicit partial-success UX, command/controller protocol or domain orchestration; a BFF alone does not create a transaction either |
 | List/watch rather than reporting queries | Joins, anonymous aggregation and result-specific projections require client work or another component | A domain endpoint or controller-maintained read model; account for aggregate lag and privileged reads |
-| Infrastructure schema as client contract | API groups, versions, namespaces and CRD changes affect browser releases | Versioned domain API when product stability matters more than transparent resource access |
+| Resource schema as client contract | API groups, versions, namespaces and CRD changes affect browser releases | Treat CRDs as a versioned domain API with compatibility obligations, or provide a domain HTTP API to decouple clients |
 | Control-plane operations | Many browser watches, large lists and high write volume consume cluster capacity | Bound scopes, pagination, sharing and load tests; compare a database/service for high-volume records |
 | Kubernetes operational lifecycle | RBAC, CRDs, admission availability and controller rollout become product dependencies | Accept this when the platform is already owned and useful; include it in support and deployment cost |
 
 Kubernetes documents its native [API semantics](https://kubernetes.io/docs/reference/using-api/api-concepts/).
 Our inference is that those semantics suit resource-management interfaces especially well;
-they do not automatically make an end-user workflow simpler.
+they also support domains built around durable intent and observable processing. Neither
+fit automatically makes an end-user workflow simpler.
 
-## Quiz invariants: concrete alternatives
+## Example: a quiz with one submission per participant
 
-| Requirement | Current domain handler | Native API design must supply |
+| Requirement | Domain BFF implementation | Native API design must supply |
 | --- | --- | --- |
 | Correct round and questions | Reads the round, checks live state and submitted UID/version, validates answers | Trusted round lookup or controlled policy parameters, schema/answer validation and an explicit close-race contract |
-| One submission per identity per round | Server chooses SHA-256 name from round UID and OIDC subject; atomic create rejects duplicates | An enforced deterministic key, not a name suggested by frontend code |
+| One submission per identity per round | Server derives a canonical name from round UID and trusted identity; atomic create rejects duplicates | An enforced deterministic key, not a name suggested by frontend code |
 | Trusted attribution | Session supplies identity; backend chooses namespace, labels and timestamp | Admission/controller verification or generation of trusted fields; browser metadata is untrusted |
-| No participant changes | No update/patch/delete route; checked audience Role grants none of those verbs | Audit all additive grants and define admission rules and administrator exceptions as needed; prevent delete/recreate bypass |
+| No participant changes | No update/patch/delete route; other credential paths must also be restricted | Audit all additive grants and define admission rules and administrator exceptions as needed; prevent delete/recreate bypass |
 | Private result presentation | Aggregates submissions, omitting object metadata | Narrow raw reads, provide authorized aggregates or isolate each participant's records |
 | Unknown create outcome | Stable server-derived name prevents a second stored vote | Stable enforced identity key plus a safe way to inspect/reconcile outcome; no automatic POST replay |
 
@@ -77,21 +139,47 @@ Omitting metadata is not a promise of complete anonymity: free-text answers can 
 people and Kubernetes administrators retain broader visibility. Specify the intended
 privacy boundary before selecting either implementation.
 
+### Three different “only once” guarantees
+
+| Guarantee | Required mechanism | What is insufficient |
+| --- | --- | --- |
+| At most one stored submission per enrolled identity and round | Trusted identity-to-key mapping, enforced canonical namespace/name, atomic create and retention/deletion rules | A controller that later marks additional stored objects rejected |
+| At most one accepted submission, allowing several request objects | A durable decision record per identity/round, atomic winner selection and recovery that preserves that decision | Two workers independently checking for an accepted request and then setting their own status |
+| At most one external effect, such as a payment or redemption | An idempotent destination or transactional/deduplication protocol spanning retries and crash recovery | A successful status update, a single controller replica or ordinary leader election alone |
+
+At-most-once is also not a promise of eventual success. Define how pending work recovers
+and how a caller discovers an outcome after losing a response. “One person” here means
+one trusted enrolled identity; multiple enrollments by the same human require a separate
+identity/eligibility policy. Neither Kubernetes nor a deterministic object name proves
+physical-person uniqueness.
+
+A domain operator could accept multiple immutable requests, use an atomic canonical
+acceptance record to select one, and reconcile each request's status from that durable
+record. It must never reselect a winner after a crash or count pending/rejected requests.
+This is a viable alternative if the requirement is one counted answer. It does not meet
+a requirement that a second request object must never exist. Changing that requirement
+needs a deliberate product decision, and corresponding API/UX changes.
+
+The stronger storage guarantee still belongs at the creation boundary: admission/policy
+and API-server atomic create, possibly using namespaces provisioned by an operator.
+A later cleanup loop cannot retroactively prevent storage or disclosure. The
+webhook and namespace options below retain this distinction.
+
 ### Option A: admission webhook with a shared namespace
 
-A webhook can implement the existing hash derivation, check identity and round content,
+A webhook can derive a canonical name using a hash, check identity and round content,
 and reject alternate names. A mutating webhook could supply trusted fields; validating
 admission must enforce the resulting contract. Kubernetes supplies authenticated request
-identity, but the existing code hashes an OIDC subject while admission sees Kubernetes
-user information. Define a stable mapping; do not assume the strings are interchangeable.
+identity. If a naming scheme uses an OIDC subject while admission sees Kubernetes user
+information, define a stable mapping; do not assume the strings are interchangeable.
 
 Keep the uniqueness guarantee in the atomic creation of one canonical object. A webhook
 that merely lists existing submissions and rejects a duplicate can admit two concurrent
 requests before either is persisted. Avoid side-effecting reservations during admission.
 A read of the round in a webhook likewise does not atomically lock it until submission
 persistence. Specify whether voting must be open at validation time or whether a stronger
-close boundary needs a coordinated command-processing design. The existing BFF's read-then-
-create sequence has the same cross-object race.
+close boundary needs a coordinated command-processing design. A domain BFF that reads the round and
+then creates a submission has the same cross-object race.
 
 This is domain code moved to the Kubernetes write boundary, where it can protect all
 clients. It does not eliminate domain code. Budget for webhook certificates, permissions,
@@ -111,8 +199,8 @@ lookup facility. Round-dependent checks need a trusted, explicitly bound source 
 plan for its updates and absence. See [ValidatingAdmissionPolicy](https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/).
 
 The documented Kubernetes [CEL libraries](https://kubernetes.io/docs/reference/using-api/cel/)
-do not provide a SHA-256 primitive reproducing Voter's naming algorithm. Do not call
-that a mechanical policy migration. A redesigned key could combine a trusted, stable,
+do not provide a SHA-256 primitive for a hash-derived naming scheme. Such a scheme
+therefore needs a different implementation or key design. A key could combine a trusted, stable,
 name-safe participant identifier and round UID, then admission validates the relationship.
 Simply concatenating an arbitrary username is insufficient: length, disallowed characters,
 collisions after normalization and identity changes must be addressed. Kubernetes has
@@ -152,26 +240,27 @@ Choose this when personal workspaces already make sense for the product. Creatin
 namespace, binding, identity mapping and aggregate controller solely to express one quiz
 submission is a strong candidate for feeling *gekunsteld*.
 
-### Results cutover applies to every native-write option
+### Protect results and individual submissions
 
 For a shared namespace, remove audience raw submission reads, including watch, and expose
 a separately authorized aggregate. A controller may read submissions under an explicit
 service identity; participants must not forge aggregate contents or status. Define lag,
 round UID scoping, rebuild/deduplication and text disclosure rules.
 
-The current result handler reads using the participant token. Narrowing grants immediately
-would break it. Ship the replacement read model and client route before, or atomically with,
-that RBAC change. In a personal-namespace design, allow only each person's own raw reads
+If an existing result handler reads using the participant token, narrowing grants also
+breaks that handler. Ship the replacement read model and client route before, or atomically
+with, that RBAC change. In a personal-namespace design, allow only each person's own raw reads
 and aggregate reads; audit other grants too. Admission cannot substitute for this cutover.
 
-## When does the design become “gekunsteld”?
+## Compare complexity and product fit
 
 Moving rules into Kubernetes is natural when they protect several clients, represent
-long-lived platform resources and fit existing operational ownership. It becomes forced
+durable domain intent or observable lifecycles, and fit existing operational ownership.
+That includes business resources; they do not have to be infrastructure resources. It becomes forced
 when most resources, namespaces and controllers exist to reconstruct one UI command and
 its result, with little independent value.
 
-Use this review before choosing:
+Evaluate each candidate against the same requirements:
 
 1. State the user operation and every invariant, including privacy and concurrency.
 2. Identify where each invariant holds if the browser sends arbitrary allowed API calls.
@@ -179,24 +268,35 @@ Use this review before choosing:
 3. Count the full implementation: frontend glue, handlers, policies, webhook/controller
    code, manifests, session storage, test fixtures and on-call dependencies.
 4. Describe failure handling: expired login, lost create response, round closure, failed
-   webhook, lagging aggregate and partial Git request. Compare the user experience.
-5. Name the second real consumer of the reusable layer. If none exists yet, justify the
+   webhook, lagging aggregate and partially completed workflow. Compare the user experience.
+5. Confirm who has both the domain knowledge and Kubernetes expertise to maintain
+   the API, admission, reconciliation, version compatibility and failure recovery.
+6. Name the second real consumer of the reusable layer. If none exists yet, justify the
    work as product development rather than immediate application simplification.
 
 Prefer a universal BFF when resource operations already match intended permissions and
 native semantics, and reuse outweighs the operational overhead. Prefer a domain BFF
-when commands, restricted views or transaction-like workflows dominate. Prefer a hybrid
+when immediate commands, restricted queries or transaction-like workflows are more clearly
+expressed by a service. An asynchronous command with a useful durable lifecycle can still
+be a good KRM resource; adding status alone is not evidence that it is. Prefer a hybrid
 when these answers differ by feature. Do not decide by endpoint count alone.
 
-## Decision record to complete before adoption
+## Record the adoption decision
 
-| Question | Proposed Voter position | Evidence still needed |
+Complete this table for the application being designed. Reject an option if its required
+guarantees lack an implementation and owner, even if its transport is simpler.
+
+| Decision | What to record | Evidence |
 | --- | --- | --- |
-| Scope | CoffeeConfig pilot; quiz, orders and Git orchestration stay domain-owned | Enumerated routes, restrictions and equivalent behavior tests |
-| Reuse | Independent k8s-front module/service | An unrelated CRD and second frontend using it without backend changes |
-| Enforcement | Default-deny both raw API and streams | Bypass tests, effective RBAC review and any required admission tests before routing |
-| Quiz redesign | Deferred; compare webhook, declarative policy and personal namespaces if revisited | Prototype canonical naming, concurrent creates, close race and read privacy |
-| Session model | Opaque sessions for the reusable product, not an urgent demo change | Store ownership, restart/replica/logout tests and acceptable availability cost |
-| Delivery | Keep current talk deployment; prioritize shared-stream capacity work | 200-attendee acceptance evidence and an explicit later cutover decision |
+| Domain contract | Existing resource API, deliberately designed KRM domain, domain HTTP API or a combination | Resource/command definitions, lifecycle and compatibility policy |
+| Access scope | Exact raw API, stream and domain routes | Effective grants, exposure policy and bypass tests |
+| Uniqueness | Stored-object, accepted-outcome or external-effect guarantee; identity scope and retention | Concurrent requests, forged identities, deletion/recreation and crash-recovery tests |
+| Read privacy | Who can read raw records, status and aggregates | Read grants, disclosure tests and migration dependencies |
+| Processing | Admission rules, controller decisions, retry behavior and partial-success handling | Failure tests and user-visible outcomes |
+| Expertise | Domain, controller/admission, frontend and platform owners | Review coverage and operational support plan |
+| Reuse | Applications and clients benefiting from the common layer | A second consumer without application-specific gateway code |
+| Operations | Session storage, controllers/webhooks, upgrades and capacity targets | Load/failure tests and full-system maintenance estimate |
 
-No application, RBAC, admission or deployment changes are made by this document.
+A good KRM design gives several clients a durable, observable domain API. A good domain
+BFF gives clients a clear command and query contract. Select the design that meets the
+product's guarantees with a system the team can reliably build and operate.
