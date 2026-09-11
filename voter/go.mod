@@ -3,8 +3,8 @@ module github.com/sunib/voter/voter
 go 1.27.1
 
 require (
-	github.com/ConfigButler/krm-stream/gateway v0.3.0
-	github.com/ConfigButler/krm-stream/gateway/kube v0.3.0
+	github.com/ConfigButler/krm-stream/gateway v0.4.0
+	github.com/ConfigButler/krm-stream/gateway/kube v0.4.0
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/gorilla/securecookie v1.1.2
 	github.com/kelseyhightower/envconfig v1.4.0
