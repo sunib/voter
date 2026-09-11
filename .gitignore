@@ -7,3 +7,4 @@ external/
 
 # Task's fingerprint cache (task --status / sources: checksums).
 .task/
+*.ignore.*
