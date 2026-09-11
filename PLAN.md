@@ -78,11 +78,24 @@ not dead weight. What is missing is the backend behind them.
       against a controlled upstream: the participant's own token is what goes on
       the wire, `Impersonate-*`/`X-Remote-*` from the browser never do, and an
       unusable token fails rather than falling back.
-- [ ] **Port the editor's live watch and change history**
-      (`/public/admin/coffeeconfig/{watch,changes,changes/stream}`). Both were
-      SSE on the deleted session. The screens now re-read on demand instead of
-      pretending to be live, and `applyIncomingConfig` — the conflict machinery
-      the watch fed — is deliberately kept for when it returns.
+- [x] **Restore the live watch**, via `ConfigButler/krm-stream` rather than
+      rebuilding the SSE plumbing. `GET /public/stream` mounts the gateway;
+      identity is the session cookie, the client is built per caller from that
+      caller's token, and the scope allowlist is deny-by-default. The storefront
+      and the editor both update live. Proven in two browsers: a change saved in
+      one appears in the other in ~1.4s with no reload, and a `kubectl patch`
+      reaches an open browser in ~0.6s.
+- [ ] **Let `LiveResourceStore` own the editor's draft.** Today the stream feeds
+      AdminScreen's hand-rolled `reconcileValue`, so there are two merge
+      implementations and the store's projected object is not shaped like the
+      REST response the old one expects — it returned something unusable and
+      blanked the form. That is guarded now, but the guard papers over the
+      design. AdminScreen's seam is already path-based (`getTextField`,
+      `updateField`, `fieldState`, `conflictFor`, `applyServerValue`) and maps
+      almost 1:1 onto `draft`/`setValue`/`isDirty`/`conflicts`/`takeTheirs`, so
+      adopting it deletes `reconcileValue` and the conflict bookkeeping outright.
+- [ ] Port the change history (`/public/admin/coffeeconfig/changes{,/stream}`),
+      which the stream does not replace.
 - [x] **Show real voucher usage in the editor.** `GET /public/vouchers` reports
       this process's redemption counts, and the admin screen shows them beside
       each `maximumUsage`. Without it the screen read "Used 0 / 1" while orders
@@ -115,6 +128,7 @@ Route status after this pass:
 | `/public/storefront` | **ported** |
 | `/public/orders` | **ported** |
 | `/public/vouchers` | **new** — redemption counts for the editor |
+| `/public/stream` | **new** — krm-stream gateway, live CoffeeConfig |
 | `/public/storefront/watch` | removed from the screen; not ported |
 | `/public/admin/coffeeconfig{/watch,/changes,/changes/stream}` | not ported |
 | `/public/admin/orders{,/debug,/stream}` | not ported |
@@ -206,11 +220,23 @@ the `Referrer-Policy: no-referrer` outage reached production invisibly.
       *no image was published at all*. It is now its own job.
 - [ ] Confirm the browser job is green in CI (it passes locally from scratch;
       the first CI run with the fix is the proof).
-- [ ] Consider the gitops-reverser optimisations if CI proves slower than local:
-      build the room-pass image once and deliver it as an artifact rather than
-      `docker build`-ing twice inside every bringup, free runner disk before
-      e2e, and run the bringup with `--network host`. At 50s locally none of
-      this is obviously needed — measure before adding it.
+- [ ] **Adopt the gitops-reverser build-once pattern.** The measurement that
+      was missing now exists: putting Voter into the e2e fixture added a full
+      Go + npm image build to every bringup, on top of the two already there
+      (`room-pass:dev`, `room-pass-demo-client:dev`). Locally that is cheap
+      because the layer cache is warm; on a cold CI runner it is not, and the
+      `images` job builds the very same Voter image again in parallel. Their
+      `e2e` job builds each image once in a `build` job, uploads it as an
+      artifact, and `docker load`s it into k3d — `IMAGE_DELIVERY_MODE: load`.
+      That is the change to make, and it is now justified by a number rather
+      than by taste.
+- [ ] Free runner disk before the browser job, as their `e2e` job does. Disk
+      sat at 90% during this work, and k3d node volumes plus three image builds
+      is exactly the profile that hits the kubelet eviction threshold.
+- [ ] Both `voter/Dockerfile` and `room-pass/Dockerfile` declare
+      `# syntax=docker/dockerfile:1`, so every cold build fetches that frontend
+      from Docker Hub. One bringup already failed on a DNS blip doing it. Pin
+      the digest or drop the directive.
 - [x] Operational metrics with bounded labels and scrape-time handoff gauges.
 - [ ] **Browser-driven login through the real Voter app**, not only the fixture:
       browser Origin behaviour, returning enrollment, logout, expiry.

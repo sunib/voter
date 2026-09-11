@@ -44,7 +44,11 @@ spec:
             - name: DEX_UPSTREAM
               value: http://dex:5556
             - name: ALLOWED_RETURN_URLS
-              value: https://demo.roompass.test:18443/app/
+              # Two entries: the minimal demo client, and the real Voter app.
+              # A Room may only name a return URL that already appears here --
+              # Ready() refuses otherwise -- so this list is the platform half
+              # of that pair and cannot be widened from a Room.
+              value: https://demo.roompass.test:18443/app/,https://app.roompass.test:18443/
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

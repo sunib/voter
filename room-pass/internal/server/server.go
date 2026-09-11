@@ -53,8 +53,11 @@ type transaction struct {
 	Session                     *session
 }
 type Server struct {
-	metrics       *metrics
-	cfg           Config
+	metrics *metrics
+	cfg     Config
+	// formAction is the CSP form-action source list, computed once at startup.
+	// See formActionSources for why it is not just 'self' plus the issuer.
+	formAction    string
 	db            client.Client
 	cookies       *securecookie.SecureCookie
 	proxy         *httputil.ReverseProxy
@@ -109,7 +112,7 @@ func New(cfg Config, db client.Client) (*Server, error) {
 			return nil, errors.New("invalid return URL")
 		}
 	}
-	s := &Server{cfg: cfg, db: db, cookies: securecookie.New(cfg.HashKey, cfg.BlockKey).MaxAge(int(cfg.CookieLifetime.Seconds())), proxy: httputil.NewSingleHostReverseProxy(upstream), transactions: map[string]*transaction{}, joins: rate.NewLimiter(cfg.JoinRate, cfg.JoinBurst), starts: rate.NewLimiter(cfg.HandoffRate, cfg.HandoffBurst), now: time.Now}
+	s := &Server{cfg: cfg, formAction: formActionSources(cfg), db: db, cookies: securecookie.New(cfg.HashKey, cfg.BlockKey).MaxAge(int(cfg.CookieLifetime.Seconds())), proxy: httputil.NewSingleHostReverseProxy(upstream), transactions: map[string]*transaction{}, joins: rate.NewLimiter(cfg.JoinRate, cfg.JoinBurst), starts: rate.NewLimiter(cfg.HandoffRate, cfg.HandoffBurst), now: time.Now}
 	s.proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, e error) {
 		if s.metrics != nil {
 			s.metrics.upstreamErrors.Inc()
@@ -225,9 +228,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// third party -- which is what no-referrer was here to protect.
 	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	// Chromium applies form-action to redirect destinations as well. The join
-	// POST must be allowed to continue to the configured issuer origin.
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self'; form-action 'self' "+s.cfg.IssuerOrigin+"; frame-ancestors 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self'; form-action "+s.formAction+"; frame-ancestors 'none'")
 	// Never trust client identity or forwarded routing information, even on Dex aliases.
 	for k := range r.Header {
 		low := strings.ToLower(k)
@@ -354,6 +355,53 @@ func (s *Server) csrfReason(r *http.Request) string {
 		return "csrf-mismatch"
 	}
 	return ""
+}
+
+// formActionSources builds the CSP form-action list for the join form.
+//
+// Chromium applies form-action to every hop of a redirect chain, not only to
+// the form's immediate target, and the join POST is the start of a chain that
+// crosses three origins before it finishes:
+//
+//	POST /join            the join origin       -- 'self'
+//	 303 /room-pass/complete  the issuer origin  -- IssuerOrigin
+//	 302 /auth/callback    the APPLICATION origin
+//
+// The third one is the one that is easy to forget, because in the common
+// deployment it is invisible: when the application and the join form are served
+// from the same host -- which is how Traefik routes /join on voter.koudijs.dev
+// today -- the application origin IS 'self' and the list looks complete while
+// silently depending on that coincidence.
+//
+// Put the application on its own host and every browser login breaks with a CSP
+// error, while curl and any Go HTTP client sail through, because neither
+// enforces CSP. That is the same shape as the Referrer-Policy/Origin bug this
+// service already shipped once.
+//
+// The allowed return URLs are exactly the applications Room Pass is willing to
+// send a participant back to, so their origins are exactly the origins that must
+// be permitted here. Deriving the list from them means adding an application is
+// one configuration change rather than two, and there is no way to do half of it.
+func formActionSources(cfg Config) string {
+	sources := []string{"'self'"}
+	seen := map[string]bool{}
+	add := func(raw string) {
+		u, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return
+		}
+		origin := u.Scheme + "://" + u.Host
+		if seen[origin] {
+			return
+		}
+		seen[origin] = true
+		sources = append(sources, origin)
+	}
+	add(cfg.IssuerOrigin)
+	for _, raw := range cfg.AllowedReturns {
+		add(raw)
+	}
+	return strings.Join(sources, " ")
 }
 
 // logReject records why a request was turned away. The join flow has a dozen

@@ -259,12 +259,22 @@ function applyIncomingConfig(config: CoffeeConfig) {
     return
   }
 
-  draftConfig.value = reconcileValue(
+  const merged = reconcileValue(
     '',
     draftConfig.value,
     serverConfig.value,
     incoming,
-  ) as CoffeeConfig
+  )
+  // Never blank the editor because a merge produced something unusable. An
+  // undefined draft removes the whole form from the DOM, which reads as "the
+  // page broke" rather than "one update could not be merged" -- and it throws
+  // away whatever the person had typed. Keep the current draft and take the
+  // server object; the next event reconciles from a known-good base.
+  if (merged === null || typeof merged !== 'object') {
+    serverConfig.value = incoming
+    return
+  }
+  draftConfig.value = merged as CoffeeConfig
   serverConfig.value = incoming
 }
 
@@ -674,11 +684,21 @@ onBeforeUnmount(() => {
       <h2>Loading admin state…</h2>
     </section>
 
+    <!-- Outside the draftConfig branch on purpose. When the CONFIG ITSELF
+         fails to load there is no draft, so an error panel nested inside that
+         branch renders nothing at all and the screen just looks empty. That
+         cost real time to diagnose once: a 401 from Kubernetes showed up as a
+         page with a heading and no form. -->
+    <section v-else-if="loadError" class="panel panel--danger">
+      <h2>Admin request failed</h2>
+      <p>{{ loadError }}</p>
+      <p class="metadata-copy">
+        The coffee config could not be read with your identity. If this says
+        Unauthorized or Forbidden, that is Kubernetes answering, not the app.
+      </p>
+    </section>
+
     <template v-else-if="draftConfig">
-      <section v-if="loadError" class="panel panel--danger">
-        <h2>Admin request failed</h2>
-        <p>{{ loadError }}</p>
-      </section>
 
       <section v-if="commitNotice" class="panel panel--warning">
         <h2>Saved, but not committed</h2>

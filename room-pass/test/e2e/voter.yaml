@@ -1,0 +1,169 @@
+# Voter in the local fixture.
+#
+# The demo-client next door proves that Room Pass can complete an OIDC login.
+# This proves the thing the audience actually sees: the real application, with
+# the real session cookie, streaming a real Kubernetes object to more than one
+# browser at once.
+#
+# It gets its own host rather than a path prefix on the demo host: the SPA uses
+# history routing from /, and its session cookie is a __Host- cookie, so a
+# stripped prefix would break both in ways that look like application bugs.
+#
+# The CoffeeConfig CRD is in coffeeconfig-crd.yaml and must be established first.
+apiVersion: examples.configbutler.ai/v1alpha1
+kind: CoffeeConfig
+metadata:
+  name: demo-coffee
+  namespace: room-pass
+spec:
+  shopName: Fixture Coffee
+  bannerText: Edit this menu
+  currency: EUR
+  products:
+    - sku: coffee-flat-white
+      name: Flat White
+      priceCents: 395
+      description: Double shot with silky milk
+      enabled: true
+    - sku: coffee-espresso
+      name: Espresso
+      priceCents: 275
+      description: Small, strong, and fast
+      enabled: true
+  vouchers:
+    - code: TESTNET
+      enabled: true
+      discountType: percentage
+      discountValue: 100
+      maximumUsage: 3
+      displayMessage: TestNet coffee is on us
+---
+# The audience group the fixture's Room assigns. Participants read and patch the
+# CoffeeConfig with their OWN token, so this Role is what the stream and the
+# editor are actually bounded by -- if it were missing, every browser here would
+# get a 403 and the test would say so.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: voter-audience
+  namespace: room-pass
+rules:
+  - apiGroups: [examples.configbutler.ai]
+    resources: [coffeeconfigs]
+    verbs: [get, list, watch, patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: voter-audience
+  namespace: room-pass
+subjects:
+  - kind: Group
+    name: demo:room-pass-test
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: voter-audience
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: voter
+  namespace: room-pass
+spec:
+  selector:
+    app: voter
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: voter
+  namespace: room-pass
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: voter
+  template:
+    metadata:
+      labels:
+        app: voter
+    spec:
+      containers:
+        - name: voter
+          image: voter:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: OIDC_ISSUER_URL
+              value: https://login.roompass.test:18443
+            - name: OIDC_CLIENT_ID
+              value: voter-fixture
+            - name: OIDC_CLIENT_SECRET
+              value: voter-fixture-secret
+            - name: OIDC_REDIRECT_URL
+              value: https://app.roompass.test:18443/auth/callback
+            - name: OIDC_CONNECTOR_ID
+              value: room-pass
+            - name: APP_ORIGIN
+              value: https://app.roompass.test:18443
+            - name: KUBERNETES_NAMESPACE
+              value: room-pass
+            - name: COFFEE_CONFIG_NAME
+              value: demo-coffee
+            # No ConfigButler in the fixture, so the save-message side effect is
+            # switched off rather than left to fail on every write and make the
+            # test read a partial success as a failure.
+            - name: CONFIGBUTLER_GIT_TARGET_NAME
+              value: ''
+            # Fixed so a restart does not sign the test's browsers out
+            # mid-assertion. Fixture-only values; nothing here is a secret.
+            - name: APP_COOKIE_HASH_KEY
+              value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+            - name: APP_COOKIE_BLOCK_KEY
+              value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+            # The fixture's TLS is self-signed, and the issuer is reached over
+            # the published host port. Trust that one CA explicitly rather than
+            # disabling verification -- there is no switch for that, by design.
+            - name: SSL_CERT_FILE
+              value: /etc/issuer-ca/ca.crt
+          volumeMounts:
+            - name: issuer-ca
+              mountPath: /etc/issuer-ca
+              readOnly: true
+      volumes:
+        - name: issuer-ca
+          configMap:
+            name: issuer-ca
+---
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: voter
+  namespace: room-pass
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  ingressClassName: traefik
+  tls:
+    - secretName: local-tls
+      hosts: [app.roompass.test]
+  rules:
+    - host: app.roompass.test
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: voter
+                port:
+                  number: 8080

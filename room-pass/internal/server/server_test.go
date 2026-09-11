@@ -383,3 +383,80 @@ func TestIdentityRequiresCurrentEnrollment(t *testing.T) {
 		})
 	}
 }
+
+// The join POST is the start of a redirect chain that crosses three origins,
+// and Chromium checks form-action against every hop. A source list that covers
+// only the first two works perfectly until the application is moved to its own
+// host, and then every browser login fails while curl and the Go test client --
+// neither of which enforces CSP -- keep passing.
+func TestFormActionCoversTheApplicationOrigin(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		issuer  string
+		returns []string
+		want    []string
+		absent  []string
+	}{
+		{
+			name:    "application on its own host is permitted",
+			issuer:  "https://login.example",
+			returns: []string{"https://app.example/"},
+			want:    []string{"'self'", "https://login.example", "https://app.example"},
+		},
+		{
+			name:    "the common deployment, where the app shares the join origin",
+			issuer:  "https://dex.example",
+			returns: []string{"https://voter.example/"},
+			want:    []string{"'self'", "https://dex.example", "https://voter.example"},
+		},
+		{
+			name:   "several applications each get their origin",
+			issuer: "https://login.example",
+			returns: []string{
+				"https://one.example/app/",
+				"https://two.example/",
+				"https://one.example/other/",
+			},
+			want: []string{"https://one.example", "https://two.example"},
+		},
+		{
+			name:    "a path never reaches the source list",
+			issuer:  "https://login.example",
+			returns: []string{"https://app.example/deep/path/"},
+			want:    []string{"https://app.example"},
+			absent:  []string{"https://app.example/deep/path/", "/deep/"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := formActionSources(Config{IssuerOrigin: tc.issuer, AllowedReturns: tc.returns})
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("form-action %q is missing %q", got, want)
+				}
+			}
+			for _, absent := range tc.absent {
+				if strings.Contains(got, absent) {
+					t.Errorf("form-action %q leaked %q; only origins belong here", got, absent)
+				}
+			}
+			// A duplicate is harmless but signals the de-duplication broke,
+			// and this header is sent on every join render.
+			if n := strings.Count(got, "'self'"); n != 1 {
+				t.Errorf("form-action %q contains 'self' %d times", got, n)
+			}
+		})
+	}
+}
+
+func TestFormActionIgnoresUnusableReturnEntries(t *testing.T) {
+	// Config validation already rejects these at startup; this pins that a
+	// malformed entry can never widen the header to something like "://" or an
+	// empty source, which browsers parse unpredictably.
+	got := formActionSources(Config{
+		IssuerOrigin:   "https://login.example",
+		AllowedReturns: []string{"", "   ", "not-a-url", "/relative/only"},
+	})
+	if got != "'self' https://login.example" {
+		t.Fatalf("form-action = %q, want only 'self' and the issuer", got)
+	}
+}

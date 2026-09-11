@@ -21,6 +21,13 @@ data:
         redirectURIs:
           - https://demo.roompass.test:18443/app/callback
           - /device/callback
+      # The real application, so the fixture can exercise the Voter session and
+      # its live stream rather than only the minimal demo client.
+      - id: voter-fixture
+        name: Voter fixture
+        secret: voter-fixture-secret
+        redirectURIs:
+          - https://app.roompass.test:18443/auth/callback
     connectors:
       - type: authproxy
         id: room-pass
