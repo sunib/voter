@@ -54,7 +54,7 @@ const names = [];
  *
  *  Each caller gets its own display name so the cleanup below can tell the
  *  contexts apart, and so a failure names which browser was which. */
-async function signIn(browser, label) {
+async function signIn(browser, label, prepare = async () => {}) {
   const displayName = `Stream ${label} ${Date.now()}`;
   names.push(displayName);
 
@@ -63,6 +63,10 @@ async function signIn(browser, label) {
     viewport: { width: 1280, height: 900 },
   });
   const page = await context.newPage();
+  page.on("pageerror", (error) => {
+    throw error;
+  });
+  await prepare(page);
 
   // CSP violations are reported ONLY on the browser console -- not in a
   // response status, not in a server log. A blocked form submission looks
@@ -229,6 +233,59 @@ test("an unsaved edit survives a concurrent change to a different field", async 
     // ...and the unsaved edit is still there. Replacing state wholesale on
     // every event is exactly what would lose it.
     await expect(banner).toHaveValue(typed);
+  } finally {
+    await editor.context.close();
+  }
+});
+
+
+test("a rejected save keeps the editor and unsaved input visible", async ({ browser }) => {
+  const editor = await signIn(browser, "rejected-save");
+  try {
+    await editor.page.route("**/public/coffeeconfig", async (route) => {
+      if (route.request().method() !== "PATCH") return route.continue();
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Configuration changed; refresh and try again." }),
+      });
+    });
+    await bannerText(editor.page).fill("Keep this unsaved edit");
+    await editor.page.getByRole("button", { name: /^Save \d+ Change/ }).click();
+    await expect(editor.page.getByRole("alert")).toContainText("Configuration changed");
+    await expect(bannerText(editor.page)).toHaveValue("Keep this unsaved edit");
+    await expect(shopName(editor.page)).toBeVisible();
+  } finally {
+    await editor.context.close();
+  }
+});
+
+test("usage read failures do not block the editor and a live update retries them", async ({ browser }) => {
+  let usageAvailable = false;
+  let successfulReads = 0;
+  const editor = await signIn(browser, "usage-recovery", async (page) => {
+    await page.route("**/public/vouchers", async (route) => {
+      if (!usageAvailable) {
+        await route.fulfill({ status: 503, body: "Usage unavailable" });
+        return;
+      }
+      successfulReads++;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ voucherUsage: { testnet: 2 }, scope: "process" }),
+      });
+    });
+  });
+  try {
+    await expect(editor.page.getByRole("status")).toContainText("Counts may be out of date");
+    await bannerText(editor.page).fill("Preserve this while refreshing usage");
+    usageAvailable = true;
+    kube("-n", "room-pass", "patch", "coffeeconfig", "demo-coffee", "--type=merge", "-p",
+      JSON.stringify({ spec: { shopName: `Usage refresh ${Date.now()}` } }));
+    await expect.poll(() => successfulReads).toBeGreaterThan(0);
+    await expect(editor.page.getByText("Voucher usage unavailable", { exact: true })).toHaveCount(0);
+    await expect(bannerText(editor.page)).toHaveValue("Preserve this while refreshing usage");
+    await expect(editor.page.getByText(/Used 2/)).toBeVisible();
   } finally {
     await editor.context.close();
   }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -208,4 +209,65 @@ func TestConcurrentRequestsKeepTheirOwnCredentials(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+// The editor needs the same lossless projected resource on REST reads and
+// transitional save responses as on the stream, not a coffee business DTO.
+func TestCoffeeEditorPreservesProjectedResource(t *testing.T) {
+	cfg := authorizationFixture(t)
+	const resource = `{
+		"apiVersion":"examples.configbutler.ai/v1alpha1", "kind":"CoffeeConfig",
+		"metadata":{"name":"testnet","namespace":"voter","uid":"coffee-uid","resourceVersion":"42",
+			"annotations":{"example.com/note":"keep","kubectl.kubernetes.io/last-applied-configuration":"remove"},
+			"managedFields":[{"manager":"test"}]},
+		"spec":{"products":[{"sku":"free","enabled":false,"priceCents":0}],"vouchers":[],
+			"bannerText":"","extension":{"nullable":null,"empty":{},"enabled":false},
+			"mail":{"apiKeySecretRef":{"name":"mail-key","key":"token"}}},
+		"status":{"ready":false}
+	}`
+	const expected = `{
+		"apiVersion":"examples.configbutler.ai/v1alpha1", "kind":"CoffeeConfig",
+		"metadata":{"name":"testnet","namespace":"voter","uid":"coffee-uid","resourceVersion":"42",
+			"annotations":{"example.com/note":"keep"}},
+		"spec":{"products":[{"sku":"free","enabled":false,"priceCents":0}],"vouchers":[],
+			"bannerText":"","extension":{"nullable":null,"empty":{},"enabled":false},
+			"mail":{"apiKeySecretRef":{"name":"mail-key","key":"token"}}},
+		"status":{"ready":false}
+	}`
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer participant-token" {
+			t.Error("resource read/write did not use the participant token")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(resource))
+	}))
+	defer upstream.Close()
+	cfg.KubernetesAPIServer = upstream.URL
+	cfg.ConfigButlerGitTargetName = ""
+	mux := http.NewServeMux()
+	registerParticipantCoffeeHandlers(mux, handlerDeps{cfg: cfg, defaultNS: "voter"})
+	var want any
+	if err := json.Unmarshal([]byte(expected), &want); err != nil {
+		t.Fatal(err)
+	}
+	for _, method := range []string{http.MethodGet, http.MethodPatch} {
+		t.Run(method, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, authorizedRequest(t, cfg, method, "participant-token"))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			var got map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			var object any = got
+			if method == http.MethodPatch {
+				object = got["config"]
+			}
+			if !reflect.DeepEqual(object, want) {
+				t.Fatalf("editor resource lost data or exposed removed metadata:\n%s", rec.Body.String())
+			}
+		})
+	}
 }

@@ -203,7 +203,7 @@ describe('the save result', () => {
 
     await expect(
       submitOrder({ items: [{ sku: 'coffee-espresso', quantity: 1 }] }),
-    ).rejects.toMatchObject({ status: 403 })
+    ).rejects.toMatchObject({ status: 403, message: 'coffeeconfigs is forbidden' })
   })
 })
 

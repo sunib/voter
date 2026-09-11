@@ -1,4 +1,6 @@
 export type KubeObjectMeta = {
+  uid?: string
+  resourceVersion?: string
   name?: string
   namespace?: string
   generation?: number

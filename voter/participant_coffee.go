@@ -18,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ConfigButler/krm-stream/gateway"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -51,12 +53,10 @@ func registerParticipantCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 				writeParticipantKubeError(w, err)
 				return
 			}
-			cc, err := toCoffeeConfig(obj)
-			if err != nil {
-				http.Error(w, "coffee config could not be read", http.StatusInternalServerError)
-				return
-			}
-			writeJSON(w, http.StatusOK, cc)
+			// Keep the same resource shape as the stream. Business DTOs omit
+			// unknown fields and zero values and cannot serve as an edit base.
+			projected, _ := gateway.Project(gateway.ProjectionFull, obj.Object)
+			writeJSON(w, http.StatusOK, projected)
 
 		case http.MethodPatch:
 			patch, err := io.ReadAll(io.LimitReader(r.Body, maxPatchBytes+1))
@@ -86,17 +86,15 @@ func registerParticipantCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 				writeParticipantKubeError(w, err)
 				return
 			}
-			cc, convErr := toCoffeeConfig(updated)
-			if convErr != nil {
-				http.Error(w, "coffee config could not be read back", http.StatusInternalServerError)
-				return
-			}
+			// Transitional response for the existing editor. The store migration
+			// will replace this object with a receipt and the normal watch echo.
+			projected, _ := gateway.Project(gateway.ProjectionFull, updated.Object)
 
 			// The CoffeeConfig write and the CommitRequest are two separate
 			// Kubernetes operations. If the second fails, the first still
 			// happened -- so report PARTIAL success rather than pretending the
 			// pair was atomic or that nothing occurred.
-			response := map[string]any{"config": cc, "saved": true}
+			response := map[string]any{"config": projected, "saved": true}
 
 			if target := strings.TrimSpace(cfg.ConfigButlerGitTargetName); target != "" {
 				crNS := strings.TrimSpace(cfg.ConfigButlerCommitRequestNamespace)

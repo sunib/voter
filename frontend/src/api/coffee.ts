@@ -40,11 +40,15 @@ export type ApiError = Error & {
 }
 
 function createApiError(status: number, body: unknown): ApiError {
+  const details = body as { message?: unknown; error?: unknown } | null
   const message =
     typeof body === 'string'
       ? body
-      : ((body as { message?: string } | undefined)?.message ??
-        `Request failed (${status})`)
+      : typeof details?.message === 'string'
+        ? details.message
+        : typeof details?.error === 'string'
+          ? details.error
+          : `Request failed (${status})`
   const err = new Error(message) as ApiError
   err.status = status
   err.body = body

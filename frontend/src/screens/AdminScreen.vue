@@ -32,6 +32,7 @@ const changeReason = ref('')
 const serverConfig = ref<CoffeeConfig | null>(null)
 const draftConfig = ref<CoffeeConfig | null>(null)
 const voucherUsage = ref<Record<string, number>>({})
+const voucherUsageError = ref('')
 const dirtyPaths = ref<Record<string, true>>({})
 const flashedPaths = ref<Record<string, true>>({})
 const conflicts = ref<Record<string, FieldConflict>>({})
@@ -79,12 +80,9 @@ async function loadAdminState() {
   loading.value = true
   loadError.value = ''
   try {
-    const [config, usage] = await Promise.all([
-      getAdminCoffeeConfig(),
-      getVoucherUsage(),
-    ])
+    const config = await getAdminCoffeeConfig()
     resetConfigState(config)
-    voucherUsage.value = usage.voucherUsage
+    await refreshVoucherUsage()
   } catch (error) {
     loadError.value = (error as ApiError).message
   } finally {
@@ -144,21 +142,21 @@ if (live) {
 
 async function refreshVoucherUsage() {
   try {
-    await refreshVoucherUsage()
+    const usage = await getVoucherUsage()
+    voucherUsage.value = usage.voucherUsage
+    voucherUsageError.value = ''
   } catch {
-    // A usage read failing must not blank the editor; the previous count is
-    // still the best thing we know.
+    voucherUsageError.value =
+      'Voucher usage could not be refreshed. Counts may be out of date.'
   }
 }
 
 async function refreshFromServer() {
   try {
-    const [config, usage] = await Promise.all([
-      getAdminCoffeeConfig(),
-      getVoucherUsage(),
-    ])
+    const config = await getAdminCoffeeConfig()
     applyIncomingConfig(config)
-    voucherUsage.value = usage.voucherUsage
+    loadError.value = ''
+    await refreshVoucherUsage()
   } catch (error) {
     loadError.value = (error as ApiError).message
   }
@@ -689,7 +687,7 @@ onBeforeUnmount(() => {
          branch renders nothing at all and the screen just looks empty. That
          cost real time to diagnose once: a 401 from Kubernetes showed up as a
          page with a heading and no form. -->
-    <section v-else-if="loadError" class="panel panel--danger">
+    <section v-else-if="loadError && !draftConfig" class="panel panel--danger">
       <h2>Admin request failed</h2>
       <p>{{ loadError }}</p>
       <p class="metadata-copy">
@@ -699,6 +697,14 @@ onBeforeUnmount(() => {
     </section>
 
     <template v-else-if="draftConfig">
+      <section v-if="loadError" class="panel panel--danger" role="alert">
+        <h2>Admin request failed</h2>
+        <p>{{ loadError }}</p>
+      </section>
+      <section v-if="voucherUsageError" class="panel panel--warning" role="status">
+        <h2>Voucher usage unavailable</h2>
+        <p>{{ voucherUsageError }}</p>
+      </section>
 
       <section v-if="commitNotice" class="panel panel--warning">
         <h2>Saved, but not committed</h2>
