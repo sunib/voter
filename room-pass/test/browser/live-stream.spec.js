@@ -344,15 +344,31 @@ test("overlapping edits require an explicit conflict choice", async ({ browser }
 
 test("shared watches isolate RBAC withdrawal and deny access to a warm cache", async ({ browser }) => {
   test.setTimeout(75000);
+  const pod = JSON.parse(kube("-n", "room-pass", "get", "pods", "-l", "app=voter", "-o", "json")).items[0].metadata.name;
+  const metrics = () => kube("get", "--raw", `/api/v1/namespaces/room-pass/pods/${pod}:9090/proxy/metrics`);
+  // Physical watch openings are a monotonic COUNTER for the life of the process,
+  // not a gauge: the shared backend tears its upstream down internally, so a
+  // gauge would have had to couple to that, while counting starts answers "is
+  // one watch serving everyone?" without it.
+  //
+  // Which means this test cannot assert an absolute 1. Every earlier test in
+  // this file has already opened watches -- the counter is well into double
+  // figures by the time we arrive -- so asserting 1 only ever passed when this
+  // test ran first, and failed the moment the whole file ran. The claim being
+  // made is a DELTA: these two subscribers cause exactly one NEW upstream watch.
+  const watchStarts = () => {
+    const m = /voter_stream_upstream_watch_starts_total (\d+)/.exec(metrics());
+    if (!m) throw new Error("voter_stream_upstream_watch_starts_total is not exported");
+    return Number(m[1]);
+  };
+  const baseline = watchStarts();
   const retained = await signIn(browser, "retained-access");
   const withdrawn = await signIn(browser, "withdrawn-access");
   const binding = JSON.parse(kube("-n", "room-pass", "get", "rolebinding", "voter-audience", "-o", "json"));
-  const pod = JSON.parse(kube("-n", "room-pass", "get", "pods", "-l", "app=voter", "-o", "json")).items[0].metadata.name;
-  const metrics = () => kube("get", "--raw", `/api/v1/namespaces/room-pass/pods/${pod}:9090/proxy/metrics`);
   try {
     expect(await retained.page.evaluate(async () => (await fetch("/metrics")).status)).toBe(404);
     await expect.poll(metrics).toContain("voter_stream_subscribers 2\n");
-    await expect.poll(metrics).toContain("voter_stream_upstream_watches 1\n");
+    await expect.poll(watchStarts).toBe(baseline + 1);
     await shopName(withdrawn.page).fill("Keep this unsaved draft");
     const identity = await retained.page.evaluate(async () => (await fetch("/auth/session")).json());
     expect(identity.username).toBeTruthy();
@@ -364,7 +380,11 @@ test("shared watches isolate RBAC withdrawal and deny access to a warm cache", a
     expect(Date.now() - started).toBeLessThan(60000);
     await expect(shopName(withdrawn.page)).toHaveValue("Keep this unsaved draft");
     await expect.poll(metrics).toContain("voter_stream_subscribers 1\n");
-    await expect.poll(metrics).toContain("voter_stream_upstream_watches 1\n");
+    // Unchanged, not "eventually one": withdrawing a subscriber must not have
+    // torn the shared upstream down and reopened it, or the surviving
+    // subscriber's cache was never warm -- which is the thing this test is
+    // named after. A counter states that plainly; the gauge never could.
+    expect(watchStarts()).toBe(baseline + 1);
     const frames = await withdrawn.page.evaluate(async () => (await fetch("/public/stream?group=examples.configbutler.ai&version=v1alpha1&resource=coffeeconfigs&namespace=room-pass&name=demo-coffee")).text());
     expect(frames).toContain('"terminal":true');
     expect(frames).not.toContain('"object"');
