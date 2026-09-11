@@ -24,6 +24,9 @@ type streamRuntime struct {
 	authorizer              gateway.Authorizer
 	metrics                 *streamMetrics
 	reauthorizationInterval time.Duration
+	// writeTimeout bounds each downstream write plus flush. A field rather than a
+	// literal so tests can shorten it, exactly as reauthorizationInterval is.
+	writeTimeout time.Duration
 }
 
 // Configure a single cluster for both shared and participant clients. Only TLS
@@ -86,6 +89,7 @@ func makeStreamRuntime(backend gateway.Backend, typed kubernetes.Interface) *str
 		}),
 		metrics:                 metrics,
 		reauthorizationInterval: 30 * time.Second,
+		writeTimeout:            5 * time.Second,
 	}
 }
 
@@ -140,30 +144,3 @@ type observedWatcher struct {
 func (w *observedWatcher) Stop() {
 	w.once.Do(func() { w.Watcher.Stop(); w.metrics.watches.Add(-1) })
 }
-
-// Bound each write AND flush, including heartbeat writes. A blocked browser
-// must not hold a subscriber beyond the authorization/expiry budget.
-type streamResponseWriter struct {
-	http.ResponseWriter
-	cancel context.CancelFunc
-}
-
-func (w streamResponseWriter) Write(p []byte) (int, error) {
-	if err := http.NewResponseController(w.ResponseWriter).SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		return 0, err
-	}
-	return w.ResponseWriter.Write(p)
-}
-func (w streamResponseWriter) Flush() {
-	c := http.NewResponseController(w.ResponseWriter)
-	err := c.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	if err == nil {
-		err = c.Flush()
-	}
-	// 0.3.0's sink has a void Flush callback. Cancel the request immediately
-	// on failure until the library can propagate flush errors itself.
-	if err != nil && w.cancel != nil {
-		w.cancel()
-	}
-}
-func (w streamResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }

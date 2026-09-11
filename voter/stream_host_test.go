@@ -1,10 +1,8 @@
 package main
 
 import (
-	"context"
 	"crypto/x509"
 	"encoding/pem"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -127,17 +125,17 @@ func TestStreamIdentityResolutionIsSafeAcrossConcurrentCallers(t *testing.T) {
 	}
 }
 
-type failingFlushWriter struct{ *httptest.ResponseRecorder }
-
-func (w failingFlushWriter) SetWriteDeadline(_ time.Time) error { return nil }
-func (w failingFlushWriter) FlushError() error                  { return errors.New("flush failed") }
-
-func TestStreamFlushFailureCancelsWithoutWaitingForAnotherWrite(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	writer := streamResponseWriter{ResponseWriter: failingFlushWriter{httptest.NewRecorder()}, cancel: cancel}
-	writer.Flush()
-	if ctx.Err() == nil {
-		t.Fatal("flush failure did not cancel the subscription")
+// The fixture shortens both of these so tests run quickly, which means no
+// behavioral test can notice if the production default is dropped. Assert the
+// values the process actually starts with. Together with the bounded-delivery
+// and revocation tests -- which prove these fields reach the library -- this
+// covers the whole chain from constructor to enforcement.
+func TestStreamRuntimeProductionDefaults(t *testing.T) {
+	runtime := makeStreamRuntime(nil, nil)
+	if runtime.writeTimeout != 5*time.Second {
+		t.Errorf("write timeout is %v, want 5s: a blocked browser must not pin a subscriber", runtime.writeTimeout)
+	}
+	if runtime.reauthorizationInterval != 30*time.Second {
+		t.Errorf("reauthorization interval is %v, want 30s: zero disables timed revocation checks", runtime.reauthorizationInterval)
 	}
 }

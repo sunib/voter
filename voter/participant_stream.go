@@ -70,6 +70,10 @@ func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 		Clients: func(_ context.Context, _ string, _ gateway.Principal) (gateway.Backend, error) {
 			return streams.backend, nil
 		},
+		// The library owns bounded delivery: it deadlines each write plus flush,
+		// refuses a transport that cannot support that before a stream opens, and
+		// poisons the sink on failure so a queued heartbeat cannot revive it.
+		WriteTimeout:            streams.writeTimeout,
 		ReauthorizationInterval: streams.reauthorizationInterval,
 		ReauthorizationTimeout:  5 * time.Second,
 		Observer:                streams.metrics,
@@ -108,13 +112,7 @@ func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 		defer cancel()
 		streams.metrics.subscribers.Add(1)
 		defer streams.metrics.subscribers.Add(-1)
-		// Refuse transports that cannot bound blocked writes.
-		if err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
-			http.Error(w, "stream transport requires write deadlines", http.StatusInternalServerError)
-			return
-		}
-		defer func() { _ = http.NewResponseController(w).SetWriteDeadline(time.Time{}) }()
-		handler.ServeHTTP(streamResponseWriter{ResponseWriter: w, cancel: cancel}, r.WithContext(ctx))
+		handler.ServeHTTP(w, r.WithContext(ctx))
 	}))
 }
 

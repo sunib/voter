@@ -24,7 +24,10 @@ The earlier session/token expiry bounds each subscription. SAR rechecks detect
 RBAC changes for the captured subject; they do not refresh IdP group membership or
 issued token claims. See [revocation timing](authorization.md#revocation-timing-and-the-cached-subject). Disconnecting one viewer
 leaves the shared watch running for the others; the last departure releases it.
-Individual HTTP writes and flushes have five-second deadlines; a flush failure cancels the request immediately. Library bounded queues,
+Bounded HTTP delivery is the library's since krm-stream 0.4.0: `WriteTimeout` deadlines
+each write plus flush, refuses a transport that cannot support that before a stream
+opens, and poisons the sink on failure so a queued heartbeat cannot revive it. A
+participant that stops reading is released within five seconds. Library bounded queues,
 fan-out, cached snapshots and overflow recovery are reused without a Voter event queue.
 
 Service-account RBAC is limited to list/watch of `demo-coffee` and creating
@@ -162,7 +165,7 @@ Review disposition:
 | Watch counter cleanup | Verified the actual pinned 0.3.0 module's deferred `Stop`; retain this scoped wrapper until upstream observations ship. |
 | Unchecked principal assertion | Checked directly at the point of use. |
 | Subject synchronization | Initialization and reads now use a host-owned mutex; concurrent resolution is tested. |
-| Discarded flush failures | Cancel immediately on failure; full sink/error propagation remains requested upstream. |
+| Discarded flush failures | Resolved upstream in 0.4.0: `WriteTimeout` owns the deadline and the sink propagates flush errors. The Voter response-writer wrapper is deleted. |
 | Named list/watch on production version | Still a promotion gate; fixture verification is not substituted for it. |
 | Resource limits and rollout | Both manifests already have matching limits, including platform HEAD before this change. Recreate/reconnect testing remains a production gate. |
 | Orphaned UI files | Removed both screens and their unused API, EventSource, type and formatting helpers; retain redirects for old URLs. |

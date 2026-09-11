@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ConfigButler/krm-stream/gateway"
 	"github.com/ConfigButler/krm-stream/gateway/kube"
 	authenticationv1 "k8s.io/api/authentication/v1"
 	authorizationv1 "k8s.io/api/authorization/v1"
@@ -32,6 +33,9 @@ type sharedStreamFixture struct {
 	identities atomic.Int64
 	mu         sync.Mutex
 	denied     map[string]string
+	// padBytes inflates each watch event so a client that never reads fills the
+	// socket buffer in a test-sized amount of time. Set before opening a stream.
+	padBytes int
 }
 
 func newSharedStreamFixture(t *testing.T) *sharedStreamFixture {
@@ -104,7 +108,7 @@ func newSharedStreamFixture(t *testing.T) *sharedStreamFixture {
 				case <-r.Context().Done():
 					return
 				case now := <-ticker.C:
-					_, err := fmt.Fprintf(w, `{"type":"MODIFIED","object":{"apiVersion":"examples.configbutler.ai/v1alpha1","kind":"CoffeeConfig","metadata":{"name":"testnet","namespace":"voter","uid":"coffee-uid","resourceVersion":"%d"},"spec":{"shopName":"Fixture %d"}}}`+"\n", now.UnixNano(), now.UnixNano())
+					_, err := fmt.Fprintf(w, `{"type":"MODIFIED","object":{"apiVersion":"examples.configbutler.ai/v1alpha1","kind":"CoffeeConfig","metadata":{"name":"testnet","namespace":"voter","uid":"coffee-uid","resourceVersion":"%d"},"spec":{"shopName":"Fixture %d","pad":"%s"}}}`+"\n", now.UnixNano(), now.UnixNano(), strings.Repeat("p", f.padBytes))
 					if err != nil {
 						return
 					}
@@ -127,6 +131,7 @@ func newSharedStreamFixture(t *testing.T) *sharedStreamFixture {
 	}
 	f.runtime = makeStreamRuntime(kube.NewBackend(dyn), typed)
 	f.runtime.reauthorizationInterval = 40 * time.Millisecond
+	f.runtime.writeTimeout = 300 * time.Millisecond
 	mux := http.NewServeMux()
 	registerParticipantStreamHandlers(mux, handlerDeps{cfg: f.cfg, defaultNS: "voter", streams: f.runtime})
 	f.server = httptest.NewServer(mux)
@@ -177,7 +182,11 @@ func awaitSynced(t *testing.T, r *http.Response) *bufio.Reader {
 }
 func awaitStreamCondition(t *testing.T, condition func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	awaitStreamConditionWithin(t, 3*time.Second, condition)
+}
+func awaitStreamConditionWithin(t *testing.T, budget time.Duration, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(budget)
 	for !condition() {
 		if time.Now().After(deadline) {
 			t.Fatal("stream condition timed out")
@@ -281,28 +290,74 @@ func TestSharedStreamIdentityFailureDeniesBeforeWatch(t *testing.T) {
 	}
 }
 
-func TestStreamWriteDeadlineReleasesBlockedClient(t *testing.T) {
-	result := make(chan error, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, err := (streamResponseWriter{ResponseWriter: w}).Write(make([]byte, 16*1024*1024))
-		result <- err
+// The library bounds each write plus flush and refuses a transport that cannot
+// support that. What stays Voter's to prove is that Voter's OWN middleware chain
+// still exposes those capabilities to it: a wrapper added around the stream route
+// that forgets Unwrap would disable bounded delivery silently. A ResponseRecorder
+// cannot establish this -- it must be a real server writer behind the real chain.
+func TestStreamRouteChainSupportsBoundedDelivery(t *testing.T) {
+	cfg := authorizationFixture(t)
+	checked := make(chan error, 1)
+	probe := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		checked <- gateway.CheckHTTPStreaming(w)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/public/stream", requireParticipant(cfg, func(w http.ResponseWriter, r *http.Request, _ participantSession) {
+		probe.ServeHTTP(w, r)
 	}))
+	server := httptest.NewServer(mux)
 	defer server.Close()
-	conn, err := net.DialTimeout("tcp", strings.TrimPrefix(server.URL, "http://"), time.Second)
+
+	rec := httptest.NewRecorder()
+	if err := setParticipantSession(rec, cfg, sessionCookieCodec, participantSession{IDToken: "probe-token", Subject: "probe", TokenExpiry: time.Now().Add(time.Hour).Unix()}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/public/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range rec.Result().Cookies() {
+		req.AddCookie(c)
+	}
+	response, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("probe never ran: status %d", response.StatusCode)
+	}
+	if err := <-checked; err != nil {
+		t.Fatalf("stream route cannot bound delivery: %v", err)
+	}
+}
+
+// A browser that stops reading must not pin a subscriber. The bound is the
+// library's WriteTimeout now rather than a Voter response-writer wrapper, so this
+// proves the option is actually wired: without it the subscriber stays forever.
+func TestStreamReleasesSubscriberThatStopsReading(t *testing.T) {
+	f := newSharedStreamFixture(t)
+	f.padBytes = 256 * 1024
+
+	rec := httptest.NewRecorder()
+	if err := setParticipantSession(rec, f.cfg, sessionCookieCodec, participantSession{IDToken: "stalled", Subject: "stalled", TokenExpiry: time.Now().Add(time.Hour).Unix()}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	conn, err := net.DialTimeout("tcp", strings.TrimPrefix(f.server.URL, "http://"), 2*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	if _, err = io.WriteString(conn, "GET / HTTP/1.1\r\nHost: fixture\r\n\r\n"); err != nil {
+
+	request := "GET /public/stream?group=examples.configbutler.ai&resource=coffeeconfigs&" + streamQuery + " HTTP/1.1\r\nHost: fixture\r\n"
+	for _, c := range rec.Result().Cookies() {
+		request += "Cookie: " + c.Name + "=" + c.Value + "\r\n"
+	}
+	if _, err = io.WriteString(conn, request+"\r\n"); err != nil {
 		t.Fatal(err)
 	}
-	// Deliberately never read the response; the server must release the writer.
-	select {
-	case err = <-result:
-		if err == nil {
-			t.Fatal("write unexpectedly fit without a consumer")
-		}
-	case <-time.After(7 * time.Second):
-		t.Fatal("blocked SSE writer exceeded its deadline")
-	}
+	// Deliberately never read the response body.
+	awaitStreamConditionWithin(t, 5*time.Second, func() bool { return f.runtime.metrics.subscribers.Load() == 1 })
+	awaitStreamConditionWithin(t, 5*time.Second, func() bool { return f.runtime.metrics.subscribers.Load() == 0 })
 }
