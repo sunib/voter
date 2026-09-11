@@ -269,7 +269,7 @@ func TestFixtureSharedStreamRehearsal(t *testing.T) {
 	started := time.Now()
 	openBatch(0, count)
 	t.Logf("%d independently authenticated Kubernetes identities synced through ingress in %s", count, time.Since(started))
-	if metric("voter_stream_subscribers") != count || metric("voter_stream_shared_subscriptions") != count || metric("voter_stream_upstream_watch_starts_total") != 1 {
+	if metric("voter_stream_subscribers") != count || metric("voter_stream_shared_subscriptions") != count {
 		t.Fatal("sharing metrics disagree with 200:1")
 	}
 	if got := apiWatches() - baselineWatches; got != 1 {
@@ -322,15 +322,18 @@ func TestFixtureSharedStreamRehearsal(t *testing.T) {
 	}
 	t.Logf("initial snapshot plus one update: %d SSE bytes across 200 viewers", bytes)
 	// Reconnect 50 concurrently while the other subscribers keep the same upstream.
-	starts := metric("voter_stream_upstream_watch_starts_total")
+	// Against the API SERVER's own count, not a number Voter reports about
+	// itself. That is the whole claim of a shared watch, so it should be
+	// measured at the only place that cannot be mistaken about it.
+	watchesBeforeReconnect := apiWatches()
 	for i := range 50 {
 		_ = streams[i].body.Close()
 		<-streams[i].done
 	}
 	started = time.Now()
 	openBatch(0, 50)
-	if metric("voter_stream_upstream_watch_starts_total") != starts {
-		t.Fatal("reconnect burst reopened upstream watch")
+	if got := apiWatches(); got != watchesBeforeReconnect {
+		t.Fatalf("reconnect burst changed upstream watches: %v -> %v", watchesBeforeReconnect, got)
 	}
 	t.Logf("50 reconnects resnapshotted in %s without reopening upstream", time.Since(started))
 	// Remove just one identity's grant from an already-warm scope.
@@ -346,8 +349,11 @@ func TestFixtureSharedStreamRehearsal(t *testing.T) {
 		t.Fatal("withdrawal exceeded 60s")
 	}
 	t.Logf("one of 200 grants withdrawn and stream closed in %s", time.Since(started))
-	if metric("voter_stream_subscribers") != 199 || metric("voter_stream_shared_subscriptions") != 199 || metric("voter_stream_upstream_watch_starts_total") != 1 {
+	if metric("voter_stream_subscribers") != 199 || metric("voter_stream_shared_subscriptions") != 199 {
 		t.Fatal("withdrawal disturbed other viewers")
+	}
+	if got := apiWatches() - baselineWatches; got != 1 {
+		t.Fatalf("withdrawal changed the upstream watch count: %v, want 1", got)
 	}
 	for _, s := range streams[1:] {
 		select {

@@ -50,23 +50,34 @@ Tests query it via the authenticated Kubernetes pod proxy.
 | `voter_stream_subscribers` | Active SSE requests, counted from entry: includes requests still resolving identity |
 | `voter_stream_logical_streams` | Library stream lifetimes, opened after authorization begins |
 | `voter_stream_shared_subscriptions` | Attachments to the shared watch, including warm-cache joins |
-| `voter_stream_upstream_watch_starts_total` | Upstream backend openings, including recycling |
 | `voter_stream_resyncs_total` | Library consumer resynchronizations |
 | `voter_stream_overflows_total` | Library shared-subscriber queue overflows |
 | `voter_stream_transport_rejected_total` | Requests refused because the transport could not bound delivery |
 | `voter_stream_access_review_failures_total` | Failed identity resolution or authorization checks, including denials/timeouts |
 
-The active-watch-handle gauge is gone as of krm-stream 0.4.0. Its value came from a
-Voter wrapper whose decrement depended on the shared backend's internal teardown, and
-the library's lifecycle observations deliberately measure logical lifetimes rather than
-physical watches. `voter_stream_upstream_watch_starts_total` replaces it and needs no
-such coupling: it is monotonic, incremented only where a watch is opened. Staying flat
-while `voter_stream_subscribers` climbs is the production evidence that one watch serves
-every viewer. The difference between `voter_stream_subscribers` and
-`voter_stream_logical_streams` is the requests currently resolving identity.
+**Every metric here comes from the library's own observations, or from Voter's own
+HTTP handler. None of them counts physical API-server watches, and Voter no longer
+tries to.**
 
-Watch openings are not a substitute for API-server evidence. The rehearsal
-also checks the change in Kubernetes `apiserver_longrunning_requests` for CoffeeConfigs.
+It did, twice. First an active-watch-handle gauge, whose decrement depended on the
+shared backend's internal teardown; then, when krm-stream 0.4.0 made that coupling
+untenable, a monotonic `voter_stream_upstream_watch_starts_total` fed by a wrapper
+around the backend. Both were Voter making a claim about the library by watching it
+through a keyhole, and the second had a sharp edge: a process-lifetime counter reads
+differently depending on what ran before it, so a test asserting `1` passed alone and
+failed in a suite.
+
+The claim did not need re-proving. krm-stream's own tests assert that N subscribers
+open one upstream watch, and the 200-identity rehearsal checks it against the only
+authority that cannot be mistaken -- the change in Kubernetes
+`apiserver_longrunning_requests` for CoffeeConfigs. So the wrapper is deleted and
+nothing replaced it.
+
+What is left says exactly what it knows: `voter_stream_shared_subscriptions` staying
+equal to `voter_stream_subscribers` while both climb is the production evidence that
+viewers are attaching to a shared scope rather than each opening their own. The
+difference between `voter_stream_subscribers` and `voter_stream_logical_streams` is the
+requests currently resolving identity.
 A browser reconnect normally gets a new snapshot without opening another upstream
 watch. At 200 subscribers the periodic checks budget about 13.3 SARs/second, plus
 opening and snapshot-cycle bursts; the service-account client allows 100 QPS/400 burst.

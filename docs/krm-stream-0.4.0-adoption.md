@@ -76,28 +76,45 @@ and `ObservationHTTPTransportRejected`, each guaranteed to open before it closes
   The `sync.Once` guarding double-`Stop` goes with them.
 - Extend `streamMetrics.Observe` to the new kinds; `makeStreamRuntime` no longer wraps the backend.
 
-**Decided: keep the counter, drop the gauge.** `voter_stream_upstream_watches` counted *physical*
+**Decided, then reversed: drop both. Voter measures no physical watches at all.**
+
+The first decision was to keep a counter. `voter_stream_upstream_watches` counted *physical*
 API-server watch handles, which the `observedWatcher` wrapper bought by decrementing on `Stop()` --
 correctness coupled to `sharedScope.pump`'s internal teardown. The new observations count *logical*
-lifetimes; upstream states plainly that none of them measure physical watches, so they are not a
-replacement for it.
+lifetimes; upstream states plainly that none of them measure physical watches. So
+`voter_stream_upstream_watch_starts_total` was introduced instead: monotonic, incremented only where
+a watch is opened, no `Stop()` and no `sync.Once`.
 
-`voter_stream_upstream_watch_starts_total` is, and needs no coupling: a monotonic counter incremented
-only where a watch is opened, with no `Stop()` and no `sync.Once`. Staying at 1 while subscribers
-climb to 200 is the production evidence that one watch serves every viewer. `observedWatcher` is
-deleted and `observedBackend` keeps only that increment.
+That kept a wrapper around the backend to feed one number, and the number had a sharp edge. A
+counter accumulates for the life of the process, so "is it 1?" is only answerable if you know what
+ran before. The browser assertion passed when its test ran alone and failed the moment the file ran
+in order -- a failure about test ordering wearing the costume of a streaming bug.
+
+The deeper problem is that the claim was Voter's to make in the first place. "One watch serves
+everyone" is the library's invariant, and krm-stream's own tests assert it. Voter also checks it
+where it cannot be fudged: the 200-identity rehearsal reads the change in Kubernetes
+`apiserver_longrunning_requests` for CoffeeConfigs, which is the API server's own count, not a
+number Voter reports about itself. A third, weaker, self-reported measurement added nothing but a
+wrapper and a footgun.
+
+So `observedWatcher` and `observedBackend` are both deleted, `makeStreamRuntime` passes the backend
+straight to `NewSharedBackendWithOptions`, and every exported metric now comes from the library's
+observations or from Voter's own handler. The Go tests that asserted one physical watch keep doing
+so through the fake backend's own counter, which is the honest place for it.
 
 Exported now: `voter_stream_subscribers` (host: HTTP occupancy, counted from handler entry so it
 includes identity resolution), `voter_stream_logical_streams` and `voter_stream_shared_subscriptions`
-(library observations), `voter_stream_upstream_watch_starts_total`, `voter_stream_transport_rejected_total`,
+(library observations), `voter_stream_transport_rejected_total`,
 plus the existing resync/overflow/review-failure counters. The gap between `subscribers` and
 `logical_streams` is the requests currently resolving identity -- where a 200-viewer opening burst
 shows first.
 
 [docs/shared-streams.md](shared-streams.md) has the updated metrics table. The `metrics.watches`
-assertions moved to `watchStarts` plus the balanced logical gauges. One trap: `stream_rehearsal_test.go`
-reads metrics by *string* name, so its three references to the removed gauge compiled and vetted
-cleanly and would only have failed when the 200-attendee rehearsal was actually run. They are fixed.
+assertions now rest on the balanced logical gauges, the fake backend's own counter, and
+`apiserver_longrunning_requests`. One trap worth keeping in mind: `stream_rehearsal_test.go` reads
+metrics by *string* name, so a reference to a removed metric compiles and vets cleanly and only
+fails when the 200-attendee rehearsal is actually run. Grep for the metric name after any change
+to the exported set.
 
 ## Phase 4 — flatten the principal — **DONE**
 

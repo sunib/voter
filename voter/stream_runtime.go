@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -78,7 +77,7 @@ func newStreamRuntime(appConfig *config) (*streamRuntime, error) {
 func makeStreamRuntime(backend gateway.Backend, typed kubernetes.Interface) *streamRuntime {
 	metrics := &streamMetrics{}
 	return &streamRuntime{
-		backend: gateway.NewSharedBackendWithOptions(&observedBackend{Backend: backend, metrics: metrics}, gateway.SharedOptions{Observer: metrics}),
+		backend: gateway.NewSharedBackendWithOptions(backend, gateway.SharedOptions{Observer: metrics}),
 		authorizer: kube.SubjectAccessReviewAuthorizer(typed, func(p gateway.Principal) (kube.Subject, error) {
 			subject, ok := p.(kube.Subject)
 			if !ok {
@@ -98,14 +97,13 @@ type streamMetrics struct {
 	// later, so this stays host instrumentation.
 	subscribers atomic.Int64
 	// streams and subscriptions come from balanced library observations. They
-	// count logical lifetimes, never physical API-server watches.
-	streams       atomic.Int64
-	subscriptions atomic.Int64
-	// watchStarts is the one physical measurement, and deliberately monotonic:
-	// a counter needs no Stop() and so is not coupled to the shared backend's
-	// internal teardown. It staying flat while subscribers climbs is the
-	// production evidence that one watch is serving every viewer.
-	watchStarts       atomic.Int64
+	// count logical lifetimes, never physical API-server watches -- nothing
+	// here does. Voter used to wrap the backend to count watch openings itself,
+	// which is a claim about the library made by its caller; the library's own
+	// tests already make it, and the rehearsal checks it against the truth,
+	// `apiserver_longrunning_requests` on the API server. So the wrapper went.
+	streams           atomic.Int64
+	subscriptions     atomic.Int64
 	resyncs           atomic.Int64
 	overflows         atomic.Int64
 	transportRejected atomic.Int64
@@ -139,30 +137,11 @@ func (m *streamMetrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	_, _ = fmt.Fprintf(w, `voter_stream_subscribers %d
 voter_stream_logical_streams %d
 voter_stream_shared_subscriptions %d
-voter_stream_upstream_watch_starts_total %d
 voter_stream_resyncs_total %d
 voter_stream_overflows_total %d
 voter_stream_transport_rejected_total %d
 voter_stream_access_review_failures_total %d
 `,
-		m.subscribers.Load(), m.streams.Load(), m.subscriptions.Load(), m.watchStarts.Load(),
+		m.subscribers.Load(), m.streams.Load(), m.subscriptions.Load(),
 		m.resyncs.Load(), m.overflows.Load(), m.transportRejected.Load(), m.reviewFailures.Load())
-}
-
-// observedBackend counts physical watch openings and nothing else. It wraps no
-// watcher: the gauge that needed one depended on the shared backend's internal
-// teardown, and a monotonic counter answers "is one watch serving everyone?"
-// without that coupling.
-type observedBackend struct {
-	gateway.Backend
-	metrics *streamMetrics
-}
-
-func (b *observedBackend) Watch(ctx context.Context, scope gateway.Scope) (gateway.Watcher, error) {
-	w, err := b.Backend.Watch(ctx, scope)
-	if err != nil {
-		return nil, err
-	}
-	b.metrics.watchStarts.Add(1)
-	return w, nil
 }
