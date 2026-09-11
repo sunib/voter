@@ -2,9 +2,9 @@
 
 Voter is a coffee demo consuming public infrastructure components. Room Pass is an
 independent enrollment service being prepared for extraction. krm-stream owns generic
-live-resource behavior. This document separates the implementation at `2fecdd5`
+live-resource behavior. This document separates the implementation at `d7d38ba`
 (reviewed **2026-09-11**) from the target in [PLAN.md](PLAN.md). The first implementation
-increment now preserves projected REST resources and fixes editor error/usage handling;
+increment is deployed and preserves projected REST resources and fixes editor error/usage handling;
 the store migration and shared streaming below remain target behavior.
 
 ## Ownership
@@ -137,8 +137,8 @@ sharing support alone is not evidence that the deployed system meets the capacit
 
 The storefront renders live objects, but AdminScreen takes `live.server` into its old
 `reconcileValue` and maintains a separate draft/dirty/conflict state. This is the main
-architectural defect. The seven passing browser tests prove delivery and one benign
-merge case; they do not prove safe concurrent editing. The new blank-draft guard is
+architectural defect. The nine passing browser tests prove delivery, one benign merge case and
+error/usage recovery; they do not prove safe concurrent editing. The new blank-draft guard is
 not a substitute for a typed resource contract or a tested merge.
 
 The target has one state owner and one write path:
@@ -252,7 +252,15 @@ image references in Git, wait for Flux, then verify deployed digests and the bro
 journey. Roll back by reverting the Git change. Do not mutate live application
 workloads with kubectl; disposable fixtures use explicit local kubeconfigs.
 
-At the 2026-09-11 check, Flux was Ready at `2cb475d`, running Voter `sha-ee001d6`
-and Room Pass `sha-2a90ef2`. Source `2fecdd5` and the target architecture above are
-not deployed. [PLAN.md](PLAN.md) holds the remaining acceptance criteria and retained
-platform follow-up; design history belongs in Git.
+On **2026-09-11**, CI for `d7d38ba` passed all jobs, including browser tests and both
+image publications. GitOps commit `5d3d176772587193571d557f93547839478a4b6b` deployed
+Voter and Room Pass `sha-d7d38ba` with explicit digest pins. Flux `voter-demo` is Ready
+at that revision; both running pod image IDs match the published artifacts.
+The public build-info endpoint reports `d7d38ba` with a clean build, and a Chromium
+smoke check reached the Room Pass enrollment form through the public application.
+The user also confirmed the deployed app works. Authenticated editing was exercised
+in the disposable fixture; the production smoke test stopped at login.
+
+The library-store migration, conditional saves and shared streaming described above
+are still target behavior. [PLAN.md](PLAN.md) records release digests, rollback,
+remaining acceptance criteria and platform follow-up. Design history belongs in Git.

@@ -2,9 +2,9 @@
 
 This is the implementation plan, not a claim that the target design is deployed.
 [ARCHITECTURE.md](ARCHITECTURE.md) defines the boundaries and target data flow.
-Updated **2026-09-11**, reviewing source at `2fecdd5`. This pass changes documentation
-only. Historical investigations remain in Git; this file keeps actionable work and
-operational facts that still matter.
+Updated **2026-09-11** for deployed application revision `d7d38ba` and GitOps
+revision `5d3d176`. Historical investigations remain in Git; this file keeps actionable
+work and operational facts that still matter.
 
 ## Outcome
 
@@ -23,7 +23,8 @@ an entire demo into a general-purpose package.
 
 ## First implementation increment
 
-Implemented on 2026-09-11 while the upstream krm-stream improvements are in progress:
+Implemented and deployed as `d7d38ba` on 2026-09-11 while the upstream krm-stream
+improvements are in progress:
 
 - [x] REST editor reads use `gateway.Project(ProjectionFull)` directly, preserving UID,
       resourceVersion, unknown fields and explicit false/zero/empty/null values. The
@@ -41,24 +42,31 @@ All **9 browser tests passed in 6.0s** against the rebuilt image in the disposab
 fixture after clearing local disk pressure and restoring its issuer DNS aliases.
 
 The library-store migration, receipt-only saves, conditional writes and shared streaming
-remain outstanding. This increment does not claim concurrency safety or production deployment.
+remain outstanding. The deployed increment does not yet provide safe concurrent editing
+or the planned shared-watch capacity for 200 attendees.
 
-## Verified starting point (before this increment)
+## Verified release and current gaps
 
 | Area | Evidence and remaining gap |
 | --- | --- |
-| Source | `10f7e98` added krm-stream; `2fecdd5` added the real Voter browser fixture, CSP fix, error visibility and a merge guard. Working tree was clean at review start. |
-| Browser tests | Independently reran `task test-browser`: **7 passed in 4.5s**. Covers four room-auth cases, two live delivery cases and preservation of an independent scalar edit. |
-| Editor | Still uses `reconcileValue`, local dirty/conflict maps and whole-spec PATCH. The browser tests do **not** exercise krm-stream as the owner of user edits. |
-| Remaining review defects | Incorrect positional/structural array reconciliation; no conditional writes; recursive `refreshVoucherUsage`; no gap recovery or visible stream/session failure handling. |
-| Resource contract | REST CoffeeConfig metadata drops UID, frontend coffee metadata omits UID/resourceVersion, and the composable uses unchecked casts. The reported blank-form root cause is not proven by the guard. |
-| CI | Run `34571376541` for `2fecdd5`: browser, lint and devcontainer checks passed; unit tests and the overall run were still in progress at the final check. |
-| Deployment | Live Voter is `sha-ee001d6`; Room Pass is `sha-2a90ef2`. Flux `voter-demo` is Ready at platform revision `2cb475d85ee2c44a1741a24458d9e7da719c52e2`. Neither streaming nor the newest CSP fix is deployed. |
-| Git payoff | Rechecked: `commitrequests.configbutler.ai` CRD is absent. A Kubernetes save cannot currently produce the promised ConfigButler commit. |
+| CI | [Run 34575594811](https://github.com/sunib/voter/actions/runs/34575594811) for `d7d38ba` passed all jobs: unit tests, lint, browser login, devcontainer checks and both image builds. |
+| Deployment | GitOps commit `5d3d176772587193571d557f93547839478a4b6b` is pushed to `ConfigButler/k8s` main. Flux `voter-demo` is Ready at that exact revision; both deployments completed rollout. |
+| Running versions | Voter and Room Pass both run `sha-d7d38ba`, pinned by digest. Running pod image IDs match the published digests recorded below. |
+| Production checks | Public `/public/build-info` reports `gitCommit: d7d38ba`, `gitDirty: 0`. Chromium reached the Room Pass enrollment form through `/admin` and Dex. The user subsequently confirmed the deployed app works; no stronger claim about tested workflows is inferred. |
+| Editor | Still uses `reconcileValue`, local dirty/conflict maps and whole-spec PATCH. Array reconciliation, conditional writes and library ownership of the draft remain open. |
+| Stream | Live updates are deployed, but sharing, managed gap recovery and complete stream/session failure handling remain open. |
+| Resource contract | REST reads and transitional save responses now use the library projection. Runtime typing, common store initialization and conflict recovery still need the planned migration. |
+| Git payoff | At the latest CRD check, `commitrequests.configbutler.ai` was absent. Neither an observed Git commit nor end-to-end actor attribution has been verified. |
 
-The previous plan's claims that only login exists, the coffee routes return 404 and
-the configured voucher list is empty are obsolete. The platform manifest now seeds
-TESTNET with maximum usage 3. No authenticated production journey was rerun here.
+Pinned release artifacts:
+
+- Voter: `sha256:c6dd9cfe0903fb169c599907ac5b385fd53956952bdd55f70de6e3f1af233659`.
+- Room Pass: `sha256:7e1690adb4e304c600afbed2e1f529b98dc727bd5c1bb5f14b2356d5287b8cee`.
+
+Rollback: revert GitOps commit `5d3d176` in `ConfigButler/k8s`, push and let Flux
+reconcile. That restores Voter `sha-ee001d6` and Room Pass `sha-2a90ef2`.
+All workload changes for this rollout came from Git; Flux reconciliation was triggered
+to apply the committed revision without waiting for its interval.
 
 ## 1. Establish the public resource contract and library changes
 
@@ -322,11 +330,14 @@ an unrelated OIDC application through Dex, and upgrade without changing identiti
 - [ ] Proposed scope reduction: remove the broken quiz/ForwardAuth UI and unsupported
       admin-order/history affordances from the demo's active navigation. Port only if
       they become an explicit requirement; do not retain dead routes as obligations.
-- [ ] Publish tested images, then change
+- [x] Deploy the first tested increment (`d7d38ba`) through GitOps (`5d3d176`);
+      verify Flux revision, ready pods, pinned digests and the public login path.
+- [ ] For the completed refactor, publish tested images, then change
       `external/k8s/k8s.koudijs.dev/2-gitops/voter-demo/{app,room-pass}.yaml` in Git.
       No direct live workload mutation. Verify Flux revision, ready pods, image digests
       and the authenticated browser journey; record a Git revert as the rollback.
-      Do not deploy the known-unsafe editor merely because its image exists.
+      Require the concurrency and 200-attendee acceptance tests before presenting the
+      completed refactor as ready for the event; the current rollout is an intermediate build.
 
 ## 6. Retained platform work
 
