@@ -5,6 +5,8 @@ import OrderScreen from './screens/OrderScreen.vue'
 import AdminScreen from './screens/AdminScreen.vue'
 import AdminCommitsScreen from './screens/AdminCommitsScreen.vue'
 import AdminOrdersScreen from './screens/AdminOrdersScreen.vue'
+import RoundsScreen from './screens/RoundsScreen.vue'
+import VoteResultsScreen from './screens/VoteResultsScreen.vue'
 import AnswerScreen from './screens/AnswerScreen.vue'
 import LoginScreen from './screens/LoginScreen.vue'
 import ThanksScreen from './screens/ThanksScreen.vue'
@@ -12,6 +14,8 @@ import ThanksScreen from './screens/ThanksScreen.vue'
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/vote', name: 'vote', component: RoundsScreen },
+    { path: '/answer/:session/results', name: 'vote-results', component: VoteResultsScreen, props: true },
     {
       path: '/login',
       name: 'login',

@@ -1,0 +1,24 @@
+# Choose a NEW metadata.name for each demo round; do not edit questions once
+# voting starts. Open/close by changing state through the GitOps repository.
+apiVersion: examples.configbutler.ai/v1alpha1
+kind: QuizSession
+metadata:
+  name: demo-round-1
+  namespace: voter
+spec:
+  title: How do you change Kubernetes configuration today?
+  state: live
+  questions:
+    - id: approach
+      title: Which approach do you use most?
+      type: singleChoice
+      required: true
+      choices:
+        - GitOps
+        - kubectl or a cluster UI
+        - A mix of both
+        - I am still exploring
+    - id: feedback
+      title: What would make configuration changes easier for you?
+      type: freeText
+      placeholder: Optional — your answer will be visible to the room

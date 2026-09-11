@@ -1,6 +1,6 @@
 # Architecture
 
-Voter is a coffee demo consuming public infrastructure components. Room Pass is an
+Voter is a coffee and voting demo consuming public infrastructure components. Room Pass is an
 independent enrollment service being prepared for extraction. krm-stream owns generic
 live-resource behavior. This document separates the implementation at `d7d38ba`
 (reviewed **2026-09-11**) from the target in [PLAN.md](PLAN.md). The first implementation
@@ -11,8 +11,8 @@ the store migration and shared streaming below remain target behavior.
 
 | Component | Owns | Boundary |
 | --- | --- | --- |
-| Voter Vue app | Coffee screens, cart, field presentation, save intent | Uses library resource state; no custom reconciliation |
-| Voter Go backend | Application OIDC session/CSRF, fixed resource scope, participant-token requests, coffee pricing/orders, commit-request orchestration | No fallback participant writes as a ServiceAccount; no generic stream engine |
+| Voter Vue app | Coffee/voting screens, cart, field presentation, save intent | Uses library resource state; no custom reconciliation |
+| Voter Go backend | Application OIDC session/CSRF, fixed resource scope, participant-token requests, coffee pricing/orders, ballot validation/aggregation, commit-request orchestration | No fallback participant writes as a ServiceAccount; no generic stream engine |
 | krm-stream | Kubernetes watch-to-SSE protocol, shared-watch cache/fan-out, projections, snapshots, reconciliation, draft/conflicts, patch generation, generic recovery and optional framework adapters | No coffee semantics, application credentials, login UI or Git commit workflow |
 | Room Pass | Room lifecycle, rotating codes, browser enrollment, stable participant identity, bound handoff to Dex | No application grants or token signing; no Voter dependency |
 | Dex | OAuth 2.0/OIDC authorization server and OpenID Provider, connectors, codes and signed tokens | Trusts Room Pass assertions only through a protected authproxy integration |
@@ -225,8 +225,8 @@ remain server-authoritative. Changing maximumUsage affects subsequent orders.
 Redemptions are currently in process memory: a restart resets counts and a second
 replica would enforce a different tally. Keep one replica until shared atomic
 persistence exists. A resource watch is neither order storage nor change history.
-The quiz path still contains retired ForwardAuth assumptions; unsupported flows are
-candidates for removal, not automatic restoration work.
+Voting is restored in the next increment described below; unsupported admin-order
+and history screens remain separate work.
 
 ConfigButler should own durable Git history and commit completion. The UI needs three
 separate facts: Kubernetes saved, CommitRequest accepted, Git commit observed. Current
@@ -264,3 +264,35 @@ in the disposable fixture; the production smoke test stopped at login.
 The library-store migration, conditional saves and shared streaming described above
 are still target behavior. [PLAN.md](PLAN.md) records release digests, rollback,
 remaining acceptance criteria and platform follow-up. Design history belongs in Git.
+
+## Voting rounds
+
+The restored voting flow uses the same Dex application session as coffee. `/vote`
+reads QuizSessions through `/public/rounds`; `/answer/:session` reads a fresh round
+and posts answers with its UID/resourceVersion and the session CSRF token. The
+backend rereads the round, requires `state: live`, checks the question version,
+required answers, answer types, choices and numeric/text bounds, then constructs a
+QuizSubmission with the participant token. Namespace, timestamp and ballot name
+are server-owned. No ForwardAuth route or browser-supplied identity remains.
+
+Kubernetes stores ballots durably. A deterministic hash of round UID and OIDC
+subject supplies the create-only ballot name, making duplicate tabs/retries one
+vote per enrollment in that round. Reopening a round preserves votes; create a
+new named round for another vote. Drafts are scoped to participant and round UID.
+`/public/rounds/:name/results` reads ballots selected by round UID and returns
+counts, numeric averages and text answers without ballot metadata. The browser
+refreshes results on demand; this flow opens no extra watches or polling loops.
+
+Round definitions come from GitOps; see `voter/config/demo-round.yaml`. Keep the
+question set unchanged after voting starts: changing it can invalidate existing
+answers, which results exclude. A close takes effect when the submission handler
+reads the round; a submission already in flight can finish afterward because a
+round read and ballot create are separate Kubernetes operations.
+
+This is an audience demo, not a secret ballot or election system. Participants
+can read submissions through their Kubernetes grants; the UI explains that answers
+are shared. Validation and duplicate rules are enforced by the application, not
+admission, and direct API writers can bypass them. One enrollment is one identity,
+not proof of one physical person. Stronger rules would require a separately scoped
+admission/policy design. Existing coffee shared-stream and merge work is independent
+of restoring voting.

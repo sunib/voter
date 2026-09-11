@@ -100,7 +100,7 @@ const scaleUiValue = computed<number>({
       </div>
 
       <div :class="scaleIsSet ? '' : 'opacity-85'">
-        <Slider v-model="scaleUiValue" :min="0" :max="10" :step="1" />
+        <Slider :aria-label="question.title" v-model="scaleUiValue" :min="0" :max="10" :step="1" />
       </div>
 
       <div class="flex items-center justify-between text-[11px] font-semibold text-black/55">
@@ -115,6 +115,7 @@ const scaleUiValue = computed<number>({
     <div v-else-if="question.type === 'number'" class="grid gap-2">
       <InputNumber
         v-model="numberValue"
+        :aria-label="question.title"
         :min="question.min"
         :max="question.max"
         :use-grouping="false"
@@ -131,6 +132,8 @@ const scaleUiValue = computed<number>({
     <!-- freeText -->
     <div v-else-if="question.type === 'freeText'" class="grid gap-2">
       <Textarea
+        :aria-label="question.title"
+        :maxlength="2000"
         auto-resize
         rows="3"
         class="w-full"

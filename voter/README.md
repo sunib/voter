@@ -17,8 +17,16 @@ See [architecture](../ARCHITECTURE.md) and
 | `POST /auth/logout` | CSRF-protected application logout |
 | `GET /public/coffeeconfig` | Read the configured object using the participant token |
 | `PATCH /public/coffeeconfig` | CSRF-protected patch and optional CommitRequest |
+| `GET /public/storefront`, `POST /public/orders` | Coffee menu and order decisions |
+| `GET /public/vouchers` | Process-local voucher usage |
+| `GET /public/stream` | krm-stream CoffeeConfig events |
+| `GET /public/rounds` | List voting rounds |
+| `GET,POST /public/rounds/{name}` | Read questions or submit a validated ballot |
+| `GET /public/rounds/{name}/results` | Aggregated counts, averages and shared text answers |
 
-Storefront, orders, editor streams and quiz forwarding still need restoration.
+Voting uses persisted QuizSession/QuizSubmission resources. See the
+[demo runbook](../docs/voting-demo.md) and [sample round](config/demo-round.yaml).
+
 There is no legacy login mode, ForwardAuth endpoint, impersonation client or
 server-owned Kubernetes credential. Browser requests cannot select their identity
 by supplying headers. The Kubernetes client uses only the session's Dex ID token.

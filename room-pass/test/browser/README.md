@@ -1,4 +1,4 @@
-# Browser room-authentication tests
+# Browser authentication, editor and voting tests
 
 ```bash
 task room-pass:e2e-up
@@ -12,7 +12,8 @@ exercises the room form without mocking browser headers or the login protocol.
 
 The test runner reads only `room-pass/.local/kubeconfig`, never the current user
 context. Kubernetes supplies the rotating code and verifies enrollment records.
-Tests delete only Participants with their unique test display name. The enrollment-closure
+Tests delete only Participants with their unique test display name. The voting test
+also deletes its uniquely named round and the ballots labeled with that round UID. The enrollment-closure
 test restores the prior enrollment setting in a finally block. Do not run
 concurrently with the other fixture suites or against a shared presentation room.
 
@@ -27,6 +28,8 @@ this directory. Failure traces can be opened with `npx playwright show-trace`.
 Artifacts are gitignored and contain local test sessions; treat them as sensitive
 if adapting the tests for a different environment.
 
-This tests Room Pass authentication with the fixture client. It does not claim the
-real Voter storefront or GitHub/LinkedIn login works. CI builds the local fixture, runs these tests and retains recordings/reports for
+The suite also runs the real Voter editor across independent browsers and completes
+a voting round with two enrolled identities. It checks required-answer rejection,
+text serialization, refreshed results, duplicate prevention and closure. It does not
+claim production capacity or GitHub/LinkedIn login works. CI builds the local fixture, runs these tests and retains recordings/reports for
 seven days. Metrics unit tests and the independent Dex network suite are also gates.

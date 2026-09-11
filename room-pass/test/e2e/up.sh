@@ -98,6 +98,8 @@ k3d image import voter:dev -c room-pass-e2e
 # race against the API server starting to serve the new kind.
 kubectl apply -f test/e2e/coffeeconfig-crd.yaml
 kubectl wait --for=condition=Established crd/coffeeconfigs.examples.configbutler.ai --timeout=60s
+kubectl apply -f ../voter/config/crd/
+kubectl wait --for=condition=Established crd/quizsessions.examples.configbutler.ai crd/quizsubmissions.examples.configbutler.ai --timeout=60s
 kubectl apply -f test/e2e/voter.yaml
 kubectl -n room-pass rollout restart deployment/voter
 kubectl -n room-pass rollout status deployment/voter --timeout=180s

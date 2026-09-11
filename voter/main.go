@@ -86,6 +86,7 @@ func main() {
 	registerOIDCHandlers(mux, oidcClient, cfg, deps.defaultNS)
 	registerParticipantCoffeeHandlers(mux, deps)
 	registerParticipantStorefrontHandlers(mux, deps)
+	registerParticipantQuizHandlers(mux, deps)
 	registerParticipantStreamHandlers(mux, deps)
 	// Last: it owns "/" and therefore everything unclaimed above.
 	registerHandlers(mux, deps)

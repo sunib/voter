@@ -17,7 +17,7 @@ of this refactor, delivered as a separate change from the editor replacement.
 
 Generic resource streaming, reconciliation and editor state belong in krm-stream.
 Room Pass becomes an independently released room-enrollment service integrated with
-Dex. Voter keeps coffee behavior, its application session, narrow authorized endpoints
+Dex. Voter keeps coffee and voting behavior, its application session, narrow authorized endpoints
 and presentation. Reducing code means deleting duplicate responsibilities, not moving
 an entire demo into a general-purpose package.
 
@@ -327,9 +327,17 @@ an unrelated OIDC application through Dex, and upgrade without changing identiti
       counts for now. Before promising durable orders or enabling replicas > 1, choose
       shared persistence with atomic redemption enforcement. Do not build the admin
       order history on transient counters or put coffee persistence in krm-stream.
-- [ ] Proposed scope reduction: remove the broken quiz/ForwardAuth UI and unsupported
-      admin-order/history affordances from the demo's active navigation. Port only if
-      they become an explicit requirement; do not retain dead routes as obligations.
+- [x] Restore voting as an explicit demo requirement: participant-token round reads,
+      validated submission, one ballot per identity/round UID and aggregated results.
+      Remove the obsolete ForwardAuth client and cached quiz-session store. `/vote`
+      lists rounds; existing `/answer/:session` links work; vote confirmation has its
+      own results screen. Results refresh on demand, without attendee watches/polling.
+      Go tests/vet/lint, 14 frontend tests/build/lint and all 10 browser tests pass
+      locally (9.1s); CI and deployment are tracked separately below.
+- [ ] Publish the voting increment and provision `voter/config/demo-round.yaml` in
+      the platform GitOps repository after CI passes. Verify Flux and running image.
+- [ ] Remove unsupported admin-order/history affordances from active navigation;
+      restoring voting does not imply implementing unrelated legacy screens.
 - [x] Deploy the first tested increment (`d7d38ba`) through GitOps (`5d3d176`);
       verify Flux revision, ready pods, pinned digests and the public login path.
 - [ ] For the completed refactor, publish tested images, then change

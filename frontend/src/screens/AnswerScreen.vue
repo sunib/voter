@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, watch, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppShell from '../components/layout/AppShell.vue'
@@ -8,15 +8,14 @@ import SessionStateBanner from '../components/session/SessionStateBanner.vue'
 import QuestionRenderer from '../components/questions/QuestionRenderer.vue'
 import SubmitBar from '../components/submission/SubmitBar.vue'
 
-import { useSessionStore } from '../stores/session'
+import type { QuizSession } from '../api/types'
 import { useDraftSubmissionStore } from '../stores/draftSubmission'
-import { createQuizSubmission } from '../api/kube'
-import { getSession } from '../api/session'
+import { createQuizSubmission, getQuizSession } from '../api/quiz'
+import { currentSession, getSession } from '../api/session'
 
 async function isSignedOut(): Promise<boolean> {
   try {
-    await getSession()
-    return false
+    return (await getSession()) === null
   } catch (e: any) {
     return e?.status === 401
   }
@@ -26,52 +25,58 @@ const props = defineProps<{ session: string }>()
 
 const route = useRoute()
 const router = useRouter()
-const sessionStore = useSessionStore()
+const round = ref<QuizSession>()
 const draft = useDraftSubmissionStore()
 
 const busy = ref(false)
 const submitError = ref<string | null>(null)
 const loadError = ref<string | null>(null)
 
-const session = computed(() => sessionStore.byName[props.session]?.data)
-const state = computed(() => session.value?.spec?.state)
-const title = computed(() => session.value?.spec?.title ?? props.session)
-const questions = computed(() => session.value?.spec?.questions ?? [])
+const state = computed(() => round.value?.spec?.state)
+const title = computed(() => round.value?.spec?.title ?? props.session)
+const questions = computed(() => round.value?.spec?.questions ?? [])
 
-onMounted(async () => {
-  draft.load(props.session)
+watch(() => props.session, async () => {
+  round.value = undefined
+  loadError.value = null
+  submitError.value = null
   try {
-    await sessionStore.ensureLoaded(props.session)
-    sessionStore.setCurrentSession(props.session)
+    round.value = await getQuizSession(props.session)
+    draft.load(`${currentSession()?.username}:${round.value?.metadata.uid}`)
   } catch (e: any) {
     const status = e?.status
+    if (e?.code === 'AlreadyVoted') {
+      await router.replace({ name: 'vote-results', params: { session: props.session }, query: { submitted: 'already' } })
+      return
+    }
     if ((status === 401 || status === 403) && (await isSignedOut())) {
       await router.replace({ name: 'login', query: { next: route.fullPath } })
       return
     }
     loadError.value = e?.message ?? 'Failed to load session'
   }
-})
+}, { immediate: true })
 
 async function submit() {
   submitError.value = null
 
-  // Basic MVP rule: if session is closed, block submit.
-  if (state.value === 'closed') {
-    submitError.value = 'This session is closed.'
+  if (busy.value || !round.value) return
+  if (state.value !== 'live') {
+    submitError.value = 'This round is not open for voting.'
     return
   }
 
   busy.value = true
   try {
-    await createQuizSubmission({
-      sessionName: props.session,
-      answers: draft.toAnswerList(),
-    })
+    await createQuizSubmission(round.value, draft.toAnswerList(questions.value))
     draft.clear()
-    await router.replace({ name: 'thanks', params: { session: props.session } })
+    await router.replace({ name: 'vote-results', params: { session: props.session }, query: { submitted: '1' } })
   } catch (e: any) {
     const status = e?.status
+    if (e?.code === 'AlreadyVoted') {
+      await router.replace({ name: 'vote-results', params: { session: props.session }, query: { submitted: 'already' } })
+      return
+    }
     if ((status === 401 || status === 403) && (await isSignedOut())) {
       await router.replace({ name: 'login', query: { next: route.fullPath } })
       return
@@ -104,7 +109,7 @@ async function submit() {
         </template>
       </Card>
 
-      <Card v-else-if="!session" class="rounded-[var(--radius)]">
+      <Card v-else-if="!round" class="rounded-[var(--radius)]">
         <template #content>
           <div class="p-5">
             <div class="space-y-2">
@@ -144,7 +149,7 @@ async function submit() {
 
     <SubmitBar
       :busy="busy"
-      :disabled="!session"
+      :disabled="!round || state !== 'live'"
       :error="submitError ?? undefined"
       @submit="submit"
     />

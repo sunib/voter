@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import type { QuizSessionSpec } from '../api/types'
 
 type DraftState = {
   sessionName?: string
@@ -39,27 +40,23 @@ export const useDraftSubmissionStore = defineStore('draftSubmission', {
     setAnswer(questionId: string, value: unknown) {
       this.answers[questionId] = value
       if (!this.sessionName) return
-      localStorage.setItem(storageKey(this.sessionName), JSON.stringify(this.answers))
+      try { localStorage.setItem(storageKey(this.sessionName), JSON.stringify(this.answers)) } catch { /* In-memory drafts still work when storage is unavailable. */ }
     },
-    toAnswerList(): DraftAnswer[] {
-      return Object.entries(this.answers)
-        .filter(([, value]) => value !== undefined && value !== null)
-        .map(([questionId, value]) => {
-          if (Array.isArray(value)) {
-            return { questionId, multiChoice: value as string[] }
-          }
-          switch (typeof value) {
-            case 'string':
-              return { questionId, singleChoice: value }
-            case 'number':
-              return { questionId, number: value }
-            default:
-              return { questionId, freeText: String(value) }
-          }
-        })
+    toAnswerList(questions: NonNullable<QuizSessionSpec['questions']>): DraftAnswer[] {
+      return questions.flatMap((q): DraftAnswer[] => {
+        const value = this.answers[q.id]
+        if (value === undefined || value === null || value === '') return []
+        const questionId = q.id
+        switch (q.type) {
+          case 'singleChoice': return [{ questionId, singleChoice: value as string }]
+          case 'multiChoice': return [{ questionId, multiChoice: value as string[] }]
+          case 'number': case 'scale0to10': return [{ questionId, number: value as number }]
+          case 'freeText': return [{ questionId, freeText: value as string }]
+        }
+      })
     },
     clear() {
-      if (this.sessionName) localStorage.removeItem(storageKey(this.sessionName))
+      try { if (this.sessionName) localStorage.removeItem(storageKey(this.sessionName)) } catch { /* Storage may be unavailable. */ }
       this.answers = {}
     },
   },
