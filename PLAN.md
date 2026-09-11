@@ -2,6 +2,9 @@
 
 This is the implementation plan, not a claim that the target design is deployed.
 [ARCHITECTURE.md](ARCHITECTURE.md) defines the boundaries and target data flow.
+Reviewed against krm-stream **0.3.0** and upstream main `2154f9d` on **2026-09-11**;
+the released primitives are now integrated in the working tree as described below.
+Deployment facts below are retained from the earlier verification, not rechecked by this review.
 Updated **2026-09-11** for deployed Voter revision `14dffd4` and GitOps
 revision `ef45717`; Room Pass remains on `d7d38ba`. Historical investigations remain in Git; this file keeps actionable
 work and operational facts that still matter.
@@ -41,15 +44,15 @@ Validation: Go tests/vet/lint and frontend unit tests/type-check/build/lint pass
 All **9 browser tests passed in 6.0s** against the rebuilt image in the disposable
 fixture after clearing local disk pressure and restoring its issuer DNS aliases.
 
-The library-store migration, receipt-only saves, conditional writes and shared streaming
-remain outstanding. The deployed increment does not yet provide safe concurrent editing
-or the planned shared-watch capacity for 200 attendees.
+That deployed increment predates the working-tree migration below. Shared streaming
+and the 200-attendee acceptance rehearsal remain outstanding; these source changes
+have not been released or deployed to production.
 
 ## Voting increment
 
 Deployed Voter `14dffd4` through GitOps `ef45717` on 2026-09-11. `/vote` lists rounds,
 `/answer/demo-round-1` is open, and `/answer/demo-round-1/results` shows results on
-explicit refresh. Ballots persist in Kubernetes; text answers serialize correctly;
+explicit refresh. QuizSubmissions persist in Kubernetes; text answers serialize correctly;
 required/type/choice/range validation, closed/stale-round rejection and duplicate
 prevention use the participant-token backend. Removed the obsolete ForwardAuth
 client and cached quiz-session store. See [voting demo](docs/voting-demo.md).
@@ -69,9 +72,9 @@ was exercised in the disposable fixture, not by casting votes in the production 
 | Deployment | GitOps commit `ef45717b6218f2e4d866d1e44bc36188adba538d` is pushed to `ConfigButler/k8s` main. Flux `voter-demo` is Ready at that revision; Voter completed rollout and the sample round is live. |
 | Running versions | Voter runs `sha-14dffd4`, pinned to `sha256:9f82a3157b7c160506f6332aaaae6ae9d538a5fb8f218491d87ea505d8b23e89`; the ready pod image ID matches. Room Pass remains on `sha-d7d38ba`. |
 | Production checks | Public `/public/build-info` reports `gitCommit: 14dffd4`, `gitDirty: 0`. Chromium reached Room Pass through `/vote`; anonymous round reads return 401. The sample QuizSession is live. |
-| Editor | Still uses `reconcileValue`, local dirty/conflict maps and whole-spec PATCH. Array reconciliation, conditional writes and library ownership of the draft remain open. |
-| Stream | Live updates are deployed, but sharing, managed gap recovery and complete stream/session failure handling remain open. |
-| Resource contract | REST reads and transitional save responses now use the library projection. Runtime typing, common store initialization and conflict recovery still need the planned migration. |
+| Editor | Deployed revision remains the old editor. Working tree now uses the library store, atomic arrays and conditional intent saves; no custom reconciliation remains. |
+| Stream | Working tree adds managed recovery, exact namespace/name/version restrictions and per-session deadlines. Shared watches and bounded RBAC rechecks remain open. |
+| Resource contract | Working tree initializes from stream snapshots, reconciles guarded projected GETs and returns receipt-only saves. |
 | Git payoff | At the latest CRD check, `commitrequests.configbutler.ai` was absent. Neither an observed Git commit nor end-to-end actor attribution has been verified. |
 
 First-increment artifacts retained as a rollback reference:
@@ -84,28 +87,72 @@ Rollback the voting increment by reverting GitOps commit `ef45717` in
 and removes the sample round from GitOps. All workload changes came from Git;
 Flux reconciliation was triggered to apply the committed revision.
 
-## 1. Establish the public resource contract and library changes
+## 1. Adopt the released integration primitives
 
-Agree the resource contract before replacing the editor, but do not block every
-Voter deletion on completion of every upstream feature. Begin the store integration
-against existing APIs while developing missing generic behavior in krm-stream.
-The contributor implementing each upstream dependency also owns its release handoff:
-record the upstream PR, exact revision, required API and consuming Voter change.
-Publish a tagged prerelease when that increment passes its tests; stabilize it before
-production rollout. No fixed release date or maintainer approval is assumed.
+The external checkout was fast-forwarded from `4a12571` to main `2154f9d`.
+The npm and both Go 0.3.0 tags point to `209537c`; main only adds release tooling/docs.
+Voter now pins npm and both Go modules to **0.3.0**. The Go module and image builder
+use **1.27.1**. Upstream runtime behavior was reviewed at the release tag; no local
+upstream override or core library copy is used.
 
-During development, an exact Go pseudo-version or reproducibly packed npm artifact
-from a recorded commit is acceptable. Record its owner and replacement milestone in
-the consuming PR; replace local paths/overrides with registry artifacts before merging
-Voter to main. Never depend on a moving branch. The external checkout is a development
-workspace, not a production dependency.
+### Implemented locally, not yet deployed
 
-- [ ] Make stream, initial read and conflict reread use the same projected KRM shape:
+- AdminScreen now renders the store's draft and derived changes/conflicts. Removed
+  custom reconciliation, mutation helpers and dirty registries. Arrays remain atomic;
+  existing SKU/code inputs are read-only and row changes use store APIs.
+- Managed fetch streams retain same-origin cookie authentication, expose connection
+  state, recover sequence gaps, and close on disposal. Storefront uses a read-only policy.
+- Saves send captured UID/RV/patch; backend accepts only spec edits, validates projection,
+  and adds the captured preconditions to Kubernetes PATCH. No unconditional save is
+  accepted. Responses contain receipts with `saved` and optional `commitRequested`,
+  `commitRequest` / `commitError`; they never return the object.
+- A 409 triggers a guarded uncached GET. Actual conflicts require Take Theirs or Keep
+  Mine; a refreshed version without conflicts asks for a new deliberate save. Later
+  typing survives the response. A bounded delayed read recovers missing watch echoes.
+- Editor UID stays fixed. Deletion offers an in-memory copy of unsaved input; disposal
+  clears it. Reopening a replacement starts a new editor. Cross-login draft restoration
+  remains separate work; a page navigation currently discards the in-memory draft.
+- The per-participant stream now enforces configured namespace/name/version and closes
+  at session/token expiry. It does not yet share watches or periodically query RBAC.
+
+Validation: **21 frontend tests**, frontend build/lint, Go tests with race detection,
+vet/lint and the Go 1.27.1 container build passed. **All 12 browser tests passed in
+10.7s** against the final rebuilt disposable fixture, including a real Kubernetes 409 followed
+by a fresh reviewed save, receipt-only response and explicit conflict choice. Backend
+tests also prove exact scope refusal and expiry isolation; a client integration test
+proves transport reconnection preserves edits through a fresh snapshot. Production remains on the
+previous revision; shared-watch capacity and the full race/reconnect matrix remain open.
+The final fixture run required extending the expired local Room deadline; no production
+room or deployment was changed.
+
+| Earlier upstream request | 0.3.0 finding | Voter decision |
+| --- | --- | --- |
+| Managed recovery | `connectManagedResourceStream` is exported: fetch transport, bounded jittered retries, health reset, cancellation, terminal 401/403 | Adopt it with the existing same-origin session cookie; delete native EventSource gap assumptions |
+| Periodic subscriber authorization | `ReauthorizationInterval` and `ReauthorizationTimeout` check authorization and projection independently per subscriber | Configure the existing gateway; no upstream extension or Voter watch loop |
+| Conditional-save integration | Exported `captureSave` and `captureReconciliation`, tested host/client examples and a real-cluster 409 test source | Use the primitives; adapt the small host controller for CoffeeConfig and receipts |
+| Vue binding | Tested copyable composable, not an npm export or separate adapter package | Keep a thin Voter binding following the example; no adapter release dependency |
+| Authorization naming | `SubjectAccessReviewAuthorizer` exported; `SSARAuthorizer` retained as deprecated alias | Use the clearer name |
+
+[Proposal 0005](https://github.com/ConfigButler/krm-stream/blob/2154f9d/docs/proposals/0005-kubernetes-stream-and-save-semantics.md)
+is design discussion, not an approved runtime contract.
+[Plan 0006](https://github.com/ConfigButler/krm-stream/blob/2154f9d/docs/proposals/0006-stream-and-save-implementation-plan.md)
+supersedes its phase order. Corrected save outcomes and focused regressions shipped;
+formal convergence clarification, real-API status/save and UID-race hardening, and upstream
+watch continuation remain follow-ups. Do not wait for replay, SSA, version-only events
+or a general save framework to remove Voter's duplicate editor state.
+
+- [x] Pin npm and both Go modules to published **0.3.0**, update lockfiles and run
+      consumer checks outside upstream `go.work`. Both Go modules now require Go
+      **1.27.1**; verify Voter module/toolchain, CI and image build compatibility.
+      Verified Go tests/vet/lint and the image build against registry modules.
+      No lasting `replace`, local overrides or vendored core source. The external
+      checkout is review/development evidence, not a production dependency.
+- [x] Make stream, initial read and conflict reread use the same projected KRM shape:
       GVK, namespace/name, **UID**, resourceVersion and preserved JSON value types.
       Keep redaction information with the resource where relevant. Use
       `gateway.Project`; avoid round-tripping editable objects through lossy coffee
       DTOs. Defaults for display must not silently become user edits.
-- [ ] Render withheld-field indicators from `store.redactions()`, never from mask
+- [x] Render withheld-field indicators from `store.redactions()`, never from mask
       strings inserted into draft values. Preserve disclosure metadata during recovery
       and reject patches to protected paths. CoffeeConfig's `apiKeySecretRef` fields
       contain references (name/key), not Secret values; do not resolve or mask them
@@ -114,40 +161,32 @@ workspace, not a production dependency.
 - [ ] Reuse `LiveResourceStore`, segment-array `Path`, `regionPolicy`,
       `readOnlyPolicy`, `withOpenAPIKeyedLists`, stream URL/transport helpers and
       `gateway.ValidateMergePatch`. Configure Voter's editable region as `spec`.
-- [ ] Add generic connection lifecycle/recovery upstream: explicit state, bounded
-      retry with jitter, cancellation, fresh snapshot after a sequence gap, terminal
-      error delivery and a transport-closure signal. In 0.2.1 a gap calls
-      `EventSource.close()`; native automatic retry cannot repair that connection.
-      Keep identity selection and login navigation in the host.
-- [ ] Provide a small optional Vue adapter in the public krm-stream project if needed
-      to avoid copying store subscriptions/ref synchronization into each application.
-      Keep the core framework-independent; Vue is an optional peer dependency.
-- [ ] Exercise save/watch ordering upstream: duplicate echoes, a newer watch event
-      preceding an older HTTP result, local edits made during a save, convergence,
-      deletion and recreation under a new UID. Add only the missing store behavior;
-      do not implement a second reconciliation or version-ordering algorithm in Voter.
-- [ ] Put reusable conditional-edit mechanics in an optional krm-stream client module:
-      capture patch/base version/UID together, track the in-flight save, and reconcile
-      a conflict reread through the store. Accept host-supplied save/read callbacks;
-      return conflict/auth/error outcomes without navigating or retrying a stale write.
-      This is a proposed upstream API, not an existing 0.2.1 capability. The host owns
-      HTTP status mapping, credentials/CSRF, mandatory precondition enforcement,
-      Kubernetes PATCH, resource policy and commit orchestration. Keep those host
-      handlers short; do not build a generic mutation server to remove a few lines.
-- [ ] Pin and consume published npm/Go releases and lockfiles. No lasting `replace`,
-      copied library source or application-local fork. Add a small non-coffee example
-      for each new generic API so its public contract is independently useful.
+- [x] Replace `connectWithEventSource` with `connectManagedResourceStream`. Use its
+      connecting/syncing/live/retrying/closed/terminal/exhausted states and `onError`
+      classification. Keep login navigation in Voter; same-origin fetch carries the
+      HttpOnly cookie without exposing the token. Close the owned connection on teardown.
+- [x] Follow the upstream Vue example for reactive draft/changes/conflicts/redactions
+      and subscription cleanup. It binds one fixed UID; mount the editor only after
+      snapshot discovery and remount for a replacement UID. A parent owns any shared
+      browser connection. Thin host glue is allowed; copied reconciliation is not.
+- [x] Use `captureSave(uid)` and `captureReconciliation(uid)` directly. Adapt the
+      conditional-editor example for Voter's HTTP errors, CSRF and receipt body;
+      serialize saves and gate them on live/same-UID readiness and no unresolved conflicts.
+      Do not propose another generic conditional-edit module upstream.
+- [x] Preserve the existing upstream save/watch ordering tests and add focused Voter
+      integration coverage for the actual component and host endpoints. Track upstream
+      0006 follow-ups separately rather than treating every planned test as shipped.
 
-Acceptance: library tests cover generic invariants; Voter can consume a released
-resource/connection adapter without knowing how reconciliation or recovery works.
+Acceptance: Voter consumes released store/connection primitives with thin host glue,
+without implementing reconciliation, retry scheduling or shared-watch machinery.
 
 ## 2. Replace the editor and make writes conditional
 
-- [ ] Make the library store the sole owner of server truth, draft, dirtiness and
+- [x] Make the library store the sole owner of server truth, draft, dirtiness and
       conflicts. Wire fields through `setValue`, `isDirty`, `changes`, `conflicts`
       and `takeTheirs`; treat values returned by the store as snapshots, not mutable
       Vue models. Route add/remove operations through store APIs too.
-- [ ] Delete `reconcileValue`, `preserveOrConflict`, dirty/conflict bookkeeping,
+- [x] Delete `reconcileValue`, `preserveOrConflict`, dirty/conflict bookkeeping,
       duplicated deep equality/path mutation helpers and the unusable-merge guard.
       Retain only presentation state such as text being entered into a comma-separated
       field, reason text and highlight timing where the adapter does not own it.
@@ -159,21 +198,24 @@ resource/connection adapter without knowing how reconciliation or recovery works
       replaces identity and can affect references; it is not an ordinary text edit.
       Generate/consume that schema instead of maintaining a second handwritten list policy. Keyed merging still requires conditional writes: JSON merge patch
       replaces the resulting array as a whole.
-- [ ] Use one initialization path: the stream snapshot seeds the store. A manual
+- [x] Use one initialization path: the stream snapshot seeds the store. A manual
       refresh or recovery GET feeds the same store, never resets an active draft.
       Coordinate delayed reads so they cannot roll back a newer snapshot.
-- [ ] Send `store.patch()` plus the **resourceVersion of the base used to produce
-      that patch**. Capture patch, base version and object identity together. Require
+- [x] Send `store.captureSave(uid)` with its detached patch, base resourceVersion and UID.
+      Capture the intent before any await. Require
       the precondition in the backend; never substitute a newer version onto an old
       patch. Preserve Kubernetes 409 responses and enforce the fixed object scope.
-- [ ] On 409, read current state with the caller's token and reconcile through the
-      library. Preserve the draft and show conflicts for explicit resolution before
-      another save. Do not retry the stale payload automatically. Reject saving a
+- [x] On 409, capture `store.captureReconciliation(uid)` before a most-recent,
+      uncached projected GET with the caller's token. An accepted GET advances the base.
+      Show `draft-conflict` only for actual conflicting paths; otherwise report
+      `version-stale` (“Configuration refreshed; review and save again”). A refused
+      guard returns `recovering`, not permission to force the response; follow the
+      example's conservative guarded-read recovery before another write. Do not retry the stale payload automatically. Reject saving a
       draft against a replacement UID or while the resource is missing/unsynchronized.
-- [ ] Validate allowed patch paths and projection with the library on the backend.
+- [x] Validate allowed patch paths and projection with the library on the backend.
       Only `spec` is user-editable; metadata.resourceVersion is a precondition, not
       an editable field. Kubernetes remains the authorization/admission authority.
-- [ ] Return a **receipt only**, never the CoffeeConfig object, from the save endpoint.
+- [x] Return a **receipt only**, never the CoffeeConfig object, from the save endpoint.
       Keep HTTP 200 JSON for Kubernetes-save and commit-request outcomes; a bare 204
       cannot carry partial-success information. The normal projected watch echo owns
       resource updates. Report saved immediately and synchronization pending until
@@ -181,25 +223,31 @@ resource/connection adapter without knowing how reconciliation or recovery works
       unused save-object/adoptSaved adapter from Voter. Do not clear edits made after
       dispatch or regress newer state. Any future object-return exception needs a
       documented use case and projection/ordering tests; it is outside this refactor.
-- [ ] Disable submission of unresolved conflicts until the user explicitly chooses
-      local or server values. Show conflict state without hiding the form. The new
-      `v-else-if="loadError"` branch currently hides an existing draft on save errors;
-      keep initial-load failure separate from in-editor errors.
+- [x] Disable submission of unresolved conflicts until the user explicitly chooses
+      local or server values. `takeTheirs` is public; there is no dedicated keep-local
+      method. For a reviewed local choice, retain the chosen value, resolve with
+      `takeTheirs`, then reapply it through the store as a new edit without an await;
+      verify scalar and atomic-array behavior. Keep save errors separate from initial
+      loading failures; draft-preserving error rendering was already fixed in d7d38ba.
 - [x] Replace recursive voucher refresh with `getVoucherUsage()`. Keep redemption
       state separate from CoffeeConfig resource state and describe its process scope.
       Test that refreshing calls the endpoint and updates the displayed count; a swallowed
       exception can evade page-error listeners. A failed read keeps the old count with
       a stale/error indication instead of silently claiming freshness.
 - [ ] Render connecting/live/reconnecting/expired/forbidden/missing states in both
-      screens. Expired sessions need an application-owned re-login path: native
-      EventSource cannot read the wrapper's JSON 401 body. Preserve drafts across
+      screens. Expired sessions need an application-owned re-login path; managed fetch reports
+      HTTP 401/403 terminally, unlike the old native EventSource wrapper. Preserve drafts across
       re-login only for the same identity, scope and UID; never carry them to a
       different user. Any temporary persistence excludes credentials and sensitive data.
-- [ ] Keep storefront presentation on a read-only library store; server order pricing
+- [x] Handle deletion explicitly: the store prunes deleted-object drafts. Keep an
+      in-memory recovery copy of unsaved input before pruning if offering copy-out;
+      never automatically attach it to a replacement UID or another identity. Clear
+      it on logout/identity change and keep it out of credentials/persistent storage.
+- [x] Keep storefront presentation on a read-only library store; server order pricing
       remains authoritative. Stop streams and subscriptions on unmount/logout.
-- [ ] Restrict the stream to the configured namespace and CoffeeConfig name server-side.
-      The current policy checks the resource type, not those exact values. Bound stream
-      subscription lifetime by session expiry. Shared-stream authorization and
+- [x] Restrict the stream to the configured namespace and CoffeeConfig name server-side.
+      Namespace/name/version are checked before opening the backend. Subscription
+      lifetime is bounded by the earlier session/token expiry. Shared-stream authorization and
       revocation handling follow the dedicated integration step below.
 
 Acceptance: no custom merge remains in Voter, no unconditional CoffeeConfig save is
@@ -216,8 +264,8 @@ separate reviewable change; reuse library fan-out, cache, queues and cleanup.
       instance from `Clients`; constructing it per request would defeat sharing.
       Scope is fixed to the demo CoffeeConfig. Same-scope subscribers share one watch;
       different scopes and separate replicas do not share it.
-- [ ] Use `kube.SSARAuthorizer` before any cached snapshot is disclosed. Despite its
-      name, it creates SubjectAccessReviews for both list and watch. Map the session
+- [ ] Use `kube.SubjectAccessReviewAuthorizer` before any cached snapshot is disclosed.
+      It creates SubjectAccessReviews for both list and watch. Map the session
       to Kubernetes user/groups/UID/extras from trusted SelfSubjectReview identity,
       never browser headers or guessed OIDC username prefixes. Denial or review failure
       refuses the subscription. Replace the current token-presence-only authorizer.
@@ -229,11 +277,14 @@ separate reviewable change; reuse library fan-out, cache, queues and cleanup.
 - [ ] Enforce each subscriber's session deadline server-side and release its subscription
       on expiry/disconnect. One attendee leaving must not cancel other attendees' watch;
       the last subscriber leaving must cancel it. Keep browser drafts independent.
-- [ ] Recheck subscriber authorization at each snapshot cycle and at a bounded interval
-      (target maximum 60 seconds), even during continuous live traffic. Session expiry
-      remains its own earlier deadline. Use a library lifecycle hook or upstream generic
-      extension for periodic checks; do not implement a second watch loop. Document and
-      test the revocation bound; never claim instantaneous withdrawal.
+- [ ] Set `ReauthorizationInterval = 30s` and `ReauthorizationTimeout = 5s`.
+      Checks pause only that subscriber's object delivery and fail closed on denial,
+      timeout or projection-policy change. Session expiry remains an earlier host
+      deadline; the captured principal does not refresh itself. Target termination
+      within 60s of withdrawal, verifying interval + check/sink scheduling under load.
+      Host callbacks must honor context cancellation and sinks must have bounded writes.
+      Budget roughly 13.3 SAR requests/second for 200 subscribers, plus opening/cycle
+      bursts. No custom timer or second watch loop in Voter.
 - [ ] Expose subscriber count, upstream watch count, resync/overflow and access-review
       failures with bounded metric labels. Use library queue bounds and slow-consumer
       recovery; do not create another Voter cache or per-user event queue.
@@ -259,7 +310,10 @@ Extend the existing disposable browser fixture rather than introducing another s
       denies reconnection. Other authorized subscribers must continue; the upstream
       watch stops only after the last subscriber leaves. Also prove bounded grant
       withdrawal and fail-closed access-review errors against an already-warm cache.
-- [ ] Browser: two users edit the same field; independent edits; edit product A while
+- [ ] Browser: a 409 without conflicting fields shows refreshed/review state; a
+      refused GET overlapping a snapshot blocks writes until recovery; keep-local
+      resolution preserves the reviewed choice; deletion offers the recovery copy
+      without editing a replacement UID. Also cover two users editing the same field; independent edits; edit product A while
       the server reorders products; lose a stream while typing; reconnect and resnapshot;
       session expiry/re-login; resource deletion; save rejection without losing the form.
       Delay a watch event deliberately to prove the save race is closed.
@@ -271,8 +325,12 @@ Extend the existing disposable browser fixture rather than introducing another s
       watches: one at steady state for the configured scope on one replica. Verify all
       viewers converge after updates; exercise reconnect bursts, slow clients and final
       disconnect cleanup. Record latency, CPU/memory, access-review load and errors
-      under deployment resource limits. Use real-browser smoke tests alongside the load
-      harness; 200 HTTP clients alone do not prove browser rendering.
+      under deployment resource limits. Count upstream recycling and browser reconnect
+      resets separately, bytes per snapshot, and save 409s with/without field conflicts.
+      0.3.0 still resnapshots after upstream watch closure and every browser reconnect;
+      sharing does not eliminate per-browser transfer or rendering. Upstream continuation
+      is a measured follow-up, not a claimed 0.3.0 feature. Use real-browser smoke tests
+      alongside the load harness; 200 HTTP clients alone do not prove browser rendering.
 - [ ] Verify multiple tabs keep independent drafts while sharing the upstream watch.
       Test denied users, altered identity headers, denied list/watch separately, scope
       separation and expiry without disrupting other subscribers. Retain upstream
@@ -334,7 +392,8 @@ an unrelated OIDC application through Dex, and upgrade without changing identiti
 
 - [ ] Install/configure ConfigButler through `external/k8s` and provision its Git target.
       Represent Kubernetes save, CommitRequest acceptance and observed Git commit as
-      separate states. `committed: true` must no longer mean merely request creation.
+      separate states. The working tree now names request acceptance `commitRequested`;
+      end-to-end commit observation is still missing.
       Show the resulting commit reference and verify actor attribution end to end.
 - [ ] Use ConfigButler's public APIs for durable change history and commit observation;
       a krm-stream watch is current state, not an audit/history database. General
@@ -344,7 +403,8 @@ an unrelated OIDC application through Dex, and upgrade without changing identiti
       shared persistence with atomic redemption enforcement. Do not build the admin
       order history on transient counters or put coffee persistence in krm-stream.
 - [x] Restore voting as an explicit demo requirement: participant-token round reads,
-      validated submission, one ballot per identity/round UID and aggregated results.
+      validated, create-only QuizSubmission, one per identity/round UID and aggregated results.
+      Submitted answers cannot be edited through Voter; retries never overwrite them.
       Remove the obsolete ForwardAuth client and cached quiz-session store. `/vote`
       lists rounds; existing `/answer/:session` links work; vote confirmation has its
       own results screen. Results refresh on demand, without attendee watches/polling.

@@ -1,173 +1,258 @@
-import { onBeforeUnmount, ref, shallowRef, type Ref } from 'vue'
-
+import { computed, onScopeDispose, ref, shallowRef } from 'vue'
 import {
   LiveResourceStore,
-  connectWithEventSource,
+  connectManagedResourceStream,
+  regionPolicy,
+  readOnlyPolicy,
   resourceStreamURL,
+  get,
+  type Change,
+  type Conflict,
+  type ConnectionState,
+  type KRMObject,
+  type ManagedStreamHandle,
   type Path,
-  type StreamHandle,
 } from '@configbutler/krm-stream'
-
+import {
+  getAdminCoffeeConfig,
+  patchAdminCoffeeConfig,
+  type ApiError,
+} from './coffee'
 import type { CoffeeConfig } from './coffeeTypes'
 
-// Live CoffeeConfig, shared by the storefront and the editor.
-//
-// This is the part of the demo that has to be seen: someone changes the menu on
-// stage and it appears on every phone in the room, with nobody refreshing.
-//
-// The transport is native EventSource, deliberately. EventSource cannot send an
-// Authorization header, which is exactly why the backend authenticates this
-// stream with the same-origin HttpOnly session cookie the rest of the app
-// already uses -- no token in JavaScript, nothing an XSS can read.
-//
-// LiveResourceStore is what makes the editor safe while the stream is running.
-// It keeps the server's object and the local draft apart, so an incoming change
-// is merged into what someone is typing rather than overwriting it, and a field
-// they actually edited that the server also moved is reported as a conflict
-// instead of being silently resolved. That machinery used to be hand-rolled
-// here; it now belongs to a library that has conformance fixtures for it.
-
-/** The scope this application streams. The backend allowlists exactly this and
- *  refuses anything else, so widening here alone changes nothing. */
-const COFFEE_SCOPE = {
-  group: 'examples.configbutler.ai',
-  version: 'v1alpha1',
-  resource: 'coffeeconfigs',
-} as const
-
-export type LiveCoffeeConfig = {
-  /** The server's object with local edits merged over it: what a UI renders. */
-  draft: Ref<CoffeeConfig | null>
-  /** Server truth, with no local edits. */
-  server: Ref<CoffeeConfig | null>
-  /** True once the first snapshot has completed. */
-  synced: Ref<boolean>
-  /** Set when the stream failed terminally; the caller should fall back to a
-   *  plain read rather than pretending to be live. */
-  error: Ref<string>
-  /** Paths the server moved since the last render — for a highlight. */
-  flashed: Ref<Path[]>
-  /** Paths where a local edit and a server change disagree. */
-  conflicts: Ref<Path[]>
-
-  setValue: (path: Path, value: unknown) => void
-  isDirty: (path: Path) => boolean
-  takeTheirs: (path: Path) => void
-  /** An RFC 7386 merge patch of just the local edits, or null. */
-  patch: () => Record<string, unknown> | null
-  /** Adopt the object a save returned, so the field stops reading as dirty
-   *  without waiting for the watch to echo. */
-  adoptSaved: (object: CoffeeConfig) => void
-  close: () => void
+function coffeeResource(object: unknown): object is KRMObject & CoffeeConfig {
+  if (!object || typeof object !== 'object') return false
+  const resource = object as KRMObject
+  return (
+    resource.apiVersion === 'examples.configbutler.ai/v1alpha1' &&
+    resource.kind === 'CoffeeConfig' &&
+    typeof resource.metadata?.uid === 'string' &&
+    typeof resource.metadata.resourceVersion === 'string' &&
+    !!resource.spec &&
+    typeof resource.spec === 'object' &&
+    !Array.isArray(resource.spec)
+  )
 }
 
-/**
- * Connect to the live stream for one CoffeeConfig.
- *
- * `namespace` and `name` address the object. Both come from the server (the
- * session reports the namespace), never from user input: the backend would
- * refuse an out-of-scope request anyway, but there is no reason to make one.
- */
+/** Thin host binding: the library owns all draft, conflict and recovery mechanics. */
 export function useLiveCoffeeConfig(
   namespace: string,
   name: string,
-): LiveCoffeeConfig {
-  const store = new LiveResourceStore()
-
+  editable = false,
+) {
+  const store = new LiveResourceStore(
+    editable ? regionPolicy([['spec']]) : readOnlyPolicy,
+  )
+  const uid = ref<string>()
   const draft = shallowRef<CoffeeConfig | null>(null)
   const server = shallowRef<CoffeeConfig | null>(null)
-  const synced = ref(false)
-  const error = ref('')
+  const changes = shallowRef<Change[]>([])
+  const conflicts = shallowRef<Conflict[]>([])
+  const redactions = shallowRef<{ path: Path; rev: number }[]>([])
   const flashed = shallowRef<Path[]>([])
-  const conflicts = shallowRef<Path[]>([])
-
-  // The stream addresses ONE object by name. A namespace-wide watch would hand
-  // this browser every CoffeeConfig in the namespace, which is more than the
-  // screen needs and more than it should receive.
+  const state = shallowRef<Readonly<ConnectionState>>({
+    status: 'connecting',
+    retries: 0,
+  })
+  const error = ref('')
+  const notice = ref('')
+  const commitNotice = ref('')
+  const saving = ref(false)
+  const recoveryDraft = shallowRef<CoffeeConfig | null>(null)
+  const needsRead = ref(false)
+  let disposed = false
+  let handle: ManagedStreamHandle | undefined
+  let recoveryTimer: ReturnType<typeof setTimeout> | undefined
   const url = resourceStreamURL('/public/stream', {
-    ...COFFEE_SCOPE,
+    group: 'examples.configbutler.ai',
+    version: 'v1alpha1',
+    resource: 'coffeeconfigs',
     namespace,
     name,
   })
-
-  /** The single object's uid, once the snapshot has named it. */
-  function currentId(): string | undefined {
-    return store.ids()[0]
-  }
+  const available = () => !!uid.value && store.ids().includes(uid.value)
+  const synced = computed(() => state.value.status === 'live')
+  const canSave = computed(
+    () =>
+      editable &&
+      synced.value &&
+      !!draft.value &&
+      !saving.value &&
+      conflicts.value.length === 0,
+  )
 
   function refresh() {
-    const id = currentId()
-    if (id === undefined) {
+    // Editors keep their first UID; a replacement never inherits unsaved input.
+    uid.value ??= store.ids()[0]
+    const id = uid.value
+    if (!id || !available()) {
       draft.value = null
       server.value = null
+      changes.value = []
+      conflicts.value = []
+      redactions.value = []
       return
     }
-    draft.value = store.draft(id) as unknown as CoffeeConfig
-    server.value = store.server(id) as unknown as CoffeeConfig
-    conflicts.value = store.conflicts(id).map((c) => c.path)
+    const next = store.draft(id)
+    if (
+      !coffeeResource(next) ||
+      next.metadata.namespace !== namespace ||
+      next.metadata.name !== name
+    ) {
+      error.value = 'The stream returned an invalid CoffeeConfig.'
+      draft.value = null
+      return
+    }
+    draft.value = next
+    server.value = store.server(id) as KRMObject & CoffeeConfig
+    changes.value = store.changes(id)
+    conflicts.value = store.conflicts(id)
+    redactions.value = store.redactions(id)
+    // Copy-out only, captured before deletion prunes the library store.
+    recoveryDraft.value = changes.value.length ? next : null
   }
-
-  let handle: StreamHandle | undefined = connectWithEventSource(url, store, {
-    onChange: (change) => {
-      flashed.value = change.flashed
-      refresh()
-    },
-    onSynced: () => {
-      synced.value = true
-      refresh()
-    },
-    onError: (code, message, terminal) => {
-      // A terminal error has already closed the connection. Retrying it is the
-      // bug, not the fix — so record it and let the screen fall back.
-      if (terminal) {
-        error.value = `${code}: ${message}`
-        synced.value = false
-      }
-    },
-    onGap: () => {
-      // A dropped frame means the store may be stale. EventSource reconnects on
-      // its own and the next snapshot repairs it; say nothing to the user.
-      synced.value = false
-    },
-  })
-
-  const close = () => {
+  const stop = store.subscribe(refresh)
+  function connect() {
+    handle = connectManagedResourceStream(url, store, {
+      onStateChange(next) {
+        state.value = next
+        if (
+          next.status === 'live' &&
+          /^(UNAUTHENTICATED|FORBIDDEN|UPSTREAM_UNAVAILABLE|INTERNAL):/.test(
+            error.value,
+          )
+        )
+          error.value = ''
+      },
+      onChange(change) {
+        flashed.value = change.flashed
+      },
+      onError(code, message, terminal) {
+        if (terminal) error.value = `${code}: ${message}`
+      },
+    })
+  }
+  connect()
+  async function reconnect() {
     handle?.close()
-    handle = undefined
+    await handle?.closed
+    if (!disposed) connect()
   }
-  onBeforeUnmount(close)
-
+  async function refreshFromServer(): Promise<boolean> {
+    if (!available()) {
+      await reconnect()
+      return false
+    }
+    const id = uid.value!
+    needsRead.value = true
+    const reconcile = store.captureReconciliation(id)
+    const object = await getAdminCoffeeConfig()
+    if (disposed) return false
+    if (!coffeeResource(object) || object.metadata.uid !== id || !available()) {
+      notice.value =
+        'This configuration was removed or replaced. Open a new editor.'
+      return false
+    }
+    // CoffeeConfig has no projected Secret payload. Omitted metadata retains
+    // stream redaction protections; never invent revision counters for a GET.
+    const accepted = reconcile(object)
+    needsRead.value = !accepted || !synced.value
+    notice.value = needsRead.value
+      ? 'Live updates overtook the read. Refresh again after reconnecting.'
+      : conflicts.value.length
+        ? 'Another editor changed the same fields. Review the highlighted conflicts.'
+        : 'Configuration refreshed. Your edits are intact; review and save again.'
+    return !needsRead.value
+  }
+  async function save(reason: string) {
+    if (!canSave.value || !available()) return
+    saving.value = true
+    error.value = ''
+    clearTimeout(recoveryTimer)
+    try {
+      if (needsRead.value) {
+        await refreshFromServer()
+        return
+      }
+      const intent = store.captureSave(uid.value!)
+      if (!intent) return
+      const receipt = await patchAdminCoffeeConfig(intent, { reason })
+      if (disposed) return
+      commitNotice.value =
+        receipt.commitError ??
+        (receipt.commitRequested
+          ? 'Commit request accepted. A Git commit has not yet been observed.'
+          : '')
+      notice.value =
+        'Saved to Kubernetes. Waiting for live synchronization; later edits remain unsaved.'
+      // One guarded read recovers a missing echo without adopting a save object.
+      recoveryTimer = setTimeout(() => {
+        void refreshFromServer()
+          .then((accepted) => {
+            if (accepted)
+              notice.value =
+                'Saved to Kubernetes. Live view synchronized; any remaining changes are unsaved.'
+          })
+          .catch((cause: unknown) => {
+            error.value = (cause as Error).message
+          })
+      }, 1500)
+    } catch (cause) {
+      if (disposed) return
+      if ((cause as ApiError).status === 409) {
+        try {
+          await refreshFromServer()
+        } catch (readError) {
+          error.value = (readError as Error).message
+        }
+      } else error.value = (cause as Error).message
+    } finally {
+      saving.value = false
+    }
+  }
+  function setValue(path: Path, value: unknown) {
+    if (available()) store.setValue(uid.value!, path, value)
+  }
+  function takeTheirs(path: Path) {
+    if (available()) store.takeTheirs(uid.value!, path)
+  }
+  function keepMine(path: Path) {
+    if (!available()) return
+    const chosen = get(store.draft(uid.value!), path)
+    store.takeTheirs(uid.value!, path)
+    if (chosen === undefined) store.removeKey(uid.value!, path)
+    else store.setValue(uid.value!, path, chosen)
+  }
+  function close() {
+    disposed = true
+    clearTimeout(recoveryTimer)
+    handle?.close()
+    stop()
+    recoveryDraft.value = null
+  }
+  onScopeDispose(close)
   return {
     draft,
     server,
+    changes,
+    conflicts,
+    redactions,
+    flashed,
+    state,
     synced,
     error,
-    flashed,
-    conflicts,
-    setValue: (path, value) => {
-      const id = currentId()
-      if (id === undefined) return
-      store.setValue(id, path, value)
-      refresh()
-    },
-    isDirty: (path) => {
-      const id = currentId()
-      return id === undefined ? false : store.isDirty(id, path)
-    },
-    takeTheirs: (path) => {
-      const id = currentId()
-      if (id === undefined) return
-      store.takeTheirs(id, path)
-      refresh()
-    },
-    patch: () => {
-      const id = currentId()
-      return id === undefined ? null : store.patch(id)
-    },
-    adoptSaved: (object) => {
-      store.adoptSaved(object as never)
-      refresh()
-    },
+    notice,
+    commitNotice,
+    saving,
+    canSave,
+    recoveryDraft,
+    needsRead,
+    setValue,
+    takeTheirs,
+    keepMine,
+    save,
+    refreshFromServer,
+    reconnect,
     close,
   }
 }

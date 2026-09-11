@@ -60,6 +60,7 @@ func TestVotingRound(t *testing.T) {
 		{"trailing body", valid + `{}`, 400},
 		{"valid", valid, 201},
 		{"duplicate", valid, 409},
+		{"duplicate with changed answers", strings.Replace(valid, `"A"`, `"B"`, 1), 409},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rec := request("POST", "/public/rounds/demo", "alice", tc.body, true)
@@ -67,6 +68,21 @@ func TestVotingRound(t *testing.T) {
 				t.Fatalf("status %d: %s", rec.Code, rec.Body)
 			}
 		})
+	}
+	for _, method := range []string{http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		before := len(client.Actions())
+		rec := request(method, "/public/rounds/demo", "alice", valid, true)
+		if rec.Code != http.StatusMethodNotAllowed || len(client.Actions()) != before {
+			t.Fatalf("%s must not edit a QuizSubmission: status=%d", method, rec.Code)
+		}
+	}
+	submissions, err := client.Resource(quizSubmissions).Namespace("voter").List(t.Context(), metav1.ListOptions{})
+	if err != nil || len(submissions.Items) != 1 {
+		t.Fatalf("retry must leave one QuizSubmission: %v, %v", submissions, err)
+	}
+	answers, _, err := unstructured.NestedSlice(submissions.Items[0].Object, "spec", "answers")
+	if err != nil || len(answers) != 2 || answers[0].(map[string]any)["singleChoice"] != "A" {
+		t.Fatalf("submitted answers were overwritten: %v, %v", answers, err)
 	}
 	before := calls
 	if rec := request("POST", "/public/rounds/demo", "bob", valid, false); rec.Code != 403 || calls != before {
@@ -87,14 +103,14 @@ func TestVotingRound(t *testing.T) {
 		t.Fatalf("wrong results: %s", rec.Body)
 	}
 	_ = unstructured.SetNestedField(round.Object, "closed", "spec", "state")
-	_, err := client.Resource(quizSessions).Namespace("voter").Update(t.Context(), round, metav1.UpdateOptions{})
+	_, err = client.Resource(quizSessions).Namespace("voter").Update(t.Context(), round, metav1.UpdateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rec := request("POST", "/public/rounds/demo", "bob", valid, true); rec.Code != 409 || !strings.Contains(rec.Body.String(), "not open") {
 		t.Fatalf("closed round: %s", rec.Body)
 	}
-	// An old round's ballots must not count after delete/recreate under the same name.
+	// An old round's QuizSubmissions must not count after delete/recreate under the same name.
 	round.SetUID("new-uid")
 	_, err = client.Resource(quizSessions).Namespace("voter").Update(t.Context(), round, metav1.UpdateOptions{})
 	if err != nil {

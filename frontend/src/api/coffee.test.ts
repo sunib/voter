@@ -84,7 +84,11 @@ describe('endpoint paths', () => {
   it('patches the coffee config on the participant endpoint', async () => {
     await signIn()
     stubFetch({ config: { spec: {} }, saved: true })
-    await patchAdminCoffeeConfig({ spec: { shopName: 'New' } })
+    await patchAdminCoffeeConfig({
+      uid: 'coffee',
+      resourceVersion: '1',
+      patch: { spec: { shopName: 'New' } },
+    })
 
     expect(only().url).toBe('/public/coffeeconfig')
     expect(only().init.method).toBe('PATCH')
@@ -117,7 +121,11 @@ describe('CSRF proof', () => {
   it('sends the session token on a config patch', async () => {
     await signIn('token-abc')
     stubFetch({ config: { spec: {} }, saved: true })
-    await patchAdminCoffeeConfig({ spec: {} })
+    await patchAdminCoffeeConfig({
+      uid: 'coffee',
+      resourceVersion: '1',
+      patch: { spec: {} },
+    })
 
     expect(headerOf('x-csrf-token')).toBe('token-abc')
   })
@@ -130,12 +138,15 @@ describe('CSRF proof', () => {
     expect(headerOf('x-csrf-token')).toBeNull()
   })
 
-  it('keeps the merge-patch content type while adding CSRF', async () => {
+  it('sends the conditional intent as JSON with CSRF', async () => {
     await signIn('token-abc')
     stubFetch({ config: { spec: {} }, saved: true })
-    await patchAdminCoffeeConfig({ spec: {} }, { reason: 'raise the limit' })
+    await patchAdminCoffeeConfig(
+      { uid: 'coffee', resourceVersion: '1', patch: { spec: {} } },
+      { reason: 'raise the limit' },
+    )
 
-    expect(headerOf('content-type')).toBe('application/merge-patch+json')
+    expect(headerOf('content-type')).toBe('application/json')
     expect(headerOf('x-change-reason')).toBe('raise the limit')
     expect(headerOf('x-csrf-token')).toBe('token-abc')
   })
@@ -159,20 +170,21 @@ describe('the save result', () => {
   it('reports a save that reached Kubernetes but not ConfigButler', async () => {
     await signIn()
     stubFetch({
-      config: { spec: { shopName: 'New' } },
       saved: true,
-      committed: false,
+      commitRequested: false,
       commitError: 'asking ConfigButler to commit it failed',
     })
 
-    const result = await patchAdminCoffeeConfig({ spec: {} })
+    const result = await patchAdminCoffeeConfig({
+      uid: 'coffee',
+      resourceVersion: '1',
+      patch: { spec: {} },
+    })
 
     expect(result.saved).toBe(true)
-    expect(result.committed).toBe(false)
+    expect(result.commitRequested).toBe(false)
     expect(result.commitError).toBeTruthy()
-    // The config is nested in the result, not the result itself. Treating the
-    // envelope as a CoffeeConfig is what the old type signature invited.
-    expect(result.config.spec.shopName).toBe('New')
+    expect(result).not.toHaveProperty('config')
   })
 
   it('surfaces a rejected order as a failure body, not a thrown error', async () => {
@@ -203,7 +215,10 @@ describe('the save result', () => {
 
     await expect(
       submitOrder({ items: [{ sku: 'coffee-espresso', quantity: 1 }] }),
-    ).rejects.toMatchObject({ status: 403, message: 'coffeeconfigs is forbidden' })
+    ).rejects.toMatchObject({
+      status: 403,
+      message: 'coffeeconfigs is forbidden',
+    })
   })
 })
 

@@ -30,9 +30,8 @@ RUN npm run build
 ############################################
 # Backend binary
 ############################################
-# 1.26, not 1.25: golang.org/x/oauth2 (the OIDC client's OAuth2 implementation)
-# declares go >= 1.26.0, so a 1.25 builder fails at `go mod download`.
-FROM golang:1.26-bookworm AS build
+# krm-stream 0.3.0 requires Go 1.27.1.
+FROM golang:1.27.1-bookworm AS build
 WORKDIR /src
 
 COPY voter/go.mod voter/go.sum ./

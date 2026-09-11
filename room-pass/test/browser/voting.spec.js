@@ -69,8 +69,8 @@ test('two participants vote, see durable results, and cannot vote twice or after
     await expect(bob.getByText('This round is not open for voting.')).toBeVisible();
     await bob.reload();
     await expect(bob.getByRole('button', { name: 'Submit', exact: true })).toBeDisabled();
-    const ballots = JSON.parse(kube('get', 'quizsubmissions', '-l', `voter.configbutler.ai/round-uid=${uid}`, '-o', 'json')).items;
-    expect(ballots).toHaveLength(2);
+    const quizSubmissions = JSON.parse(kube('get', 'quizsubmissions', '-l', `voter.configbutler.ai/round-uid=${uid}`, '-o', 'json')).items;
+    expect(quizSubmissions).toHaveLength(2);
   } finally {
     for (const context of contexts) await context.close();
     kube('delete', 'quizsubmissions', '-l', `voter.configbutler.ai/round-uid=${uid}`);

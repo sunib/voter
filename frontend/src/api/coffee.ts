@@ -1,3 +1,4 @@
+import type { SaveRequest } from '@configbutler/krm-stream'
 import type {
   CoffeeConfig,
   CoffeeConfigChangeRecord,
@@ -112,33 +113,29 @@ export async function submitOrder(
 }
 
 export async function getAdminCoffeeConfig(): Promise<CoffeeConfig> {
-  return await requestJson<CoffeeConfig>('/public/coffeeconfig')
+  return await requestJson<CoffeeConfig>('/public/coffeeconfig', {
+    cache: 'no-store',
+  })
 }
 
 export type PatchAdminCoffeeConfigOptions = {
   reason?: string
 }
 
-/** What the backend reports after a save.
- *
- *  `saved` and `committed` are separate on purpose: the CoffeeConfig write and
- *  the CommitRequest are two Kubernetes operations, and the second can fail
- *  after the first succeeded. Note that `committed: true` means the
- *  CommitRequest was CREATED, not that a Git commit was observed. */
+/** Receipt only: commitRequested means acceptance, not an observed Git commit. */
 export type PatchCoffeeConfigResult = {
-  config: CoffeeConfig
   saved: boolean
-  committed?: boolean
+  commitRequested?: boolean
   commitRequest?: string
   commitError?: string
 }
 
 export async function patchAdminCoffeeConfig(
-  patch: unknown,
+  intent: SaveRequest,
   options?: PatchAdminCoffeeConfigOptions,
 ): Promise<PatchCoffeeConfigResult> {
   const headers = new Headers({
-    'content-type': 'application/merge-patch+json',
+    'content-type': 'application/json',
   })
   if (options?.reason?.trim()) {
     headers.set('x-change-reason', options.reason.trim())
@@ -146,7 +143,7 @@ export async function patchAdminCoffeeConfig(
   return await requestJson<PatchCoffeeConfigResult>('/public/coffeeconfig', {
     method: 'PATCH',
     headers,
-    body: JSON.stringify(patch),
+    body: JSON.stringify(intent),
   })
 }
 
@@ -218,9 +215,9 @@ export function buildStorefrontFromConfig(
   voucherCode?: string,
 ): StorefrontResponse {
   const normalizedVoucherCode = (voucherCode ?? '').trim()
-  const voucher = findVoucher(config.spec.vouchers, normalizedVoucherCode)
+  const voucher = findVoucher(config.spec.vouchers ?? [], normalizedVoucherCode)
   const voucherState = resolveVoucherState(
-    config.spec.products,
+    config.spec.products ?? [],
     voucher,
     normalizedVoucherCode,
   )
@@ -237,7 +234,7 @@ export function buildStorefrontFromConfig(
       displayMessage: voucher?.displayMessage ?? '',
       state: voucherState,
     },
-    products: config.spec.products
+    products: (config.spec.products ?? [])
       .filter((product) => product.enabled)
       .map((product) => ({
         sku: product.sku,

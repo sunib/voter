@@ -1,206 +1,186 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { get, isPrefix, type Path } from '@configbutler/krm-stream'
 import { formatConflictValue, humanizePath } from '../adminFormatters'
-import {
-  formatMoney,
-  getAdminCoffeeConfig,
-  getVoucherUsage,
-  patchAdminCoffeeConfig,
-  type ApiError,
-} from '../api/coffee'
+import { formatMoney, getVoucherUsage } from '../api/coffee'
 import { useLiveCoffeeConfig } from '../api/liveCoffeeConfig'
 import { currentSession } from '../api/session'
 import AdminNav from '../components/admin/AdminNav.vue'
 import FieldStateMarker from '../components/admin/FieldStateMarker.vue'
-import type { CoffeeConfig } from '../api/coffeeTypes'
-
-type FieldConflict = {
-  previousServer: unknown
-  incomingServer: unknown
-}
 
 type FieldState = 'clean' | 'dirty' | 'conflict'
-
-const loading = ref(true)
-const saving = ref(false)
-const loadError = ref('')
-// Set when the CoffeeConfig write succeeded but the CommitRequest did not.
-// Reporting an unqualified success there would be the one lie this demo
-// cannot afford.
-const commitNotice = ref('')
+type FieldConflict = { previousServer?: unknown; incomingServer: unknown }
+const session = currentSession()!
+const live = useLiveCoffeeConfig(
+  session.namespace,
+  session.coffeeConfigName,
+  true,
+)
+const {
+  draft: draftConfig,
+  server: serverConfig,
+  saving,
+  error: loadError,
+  commitNotice,
+  notice,
+  canSave,
+  state,
+  recoveryDraft,
+  redactions,
+} = live
+const loading = computed(
+  () =>
+    !draftConfig.value &&
+    ['connecting', 'syncing'].includes(state.value.status),
+)
 const changeReason = ref('')
-const serverConfig = ref<CoffeeConfig | null>(null)
-const draftConfig = ref<CoffeeConfig | null>(null)
 const voucherUsage = ref<Record<string, number>>({})
 const voucherUsageError = ref('')
-const dirtyPaths = ref<Record<string, true>>({})
 const flashedPaths = ref<Record<string, true>>({})
-const conflicts = ref<Record<string, FieldConflict>>({})
 const arrayFieldInputs = ref<Record<string, string>>({})
-
 const flashTimers = new Map<string, ReturnType<typeof setTimeout>>()
-
+// Presentation paths address only fixed CoffeeConfig fields. Arbitrary KRM
+// keys never pass through this conversion; the store receives segment arrays.
+const fieldPath = (path: string): Path =>
+  path
+    .split('.')
+    .map((segment) => (/^\d+$/.test(segment) ? Number(segment) : segment))
+const conflicts = computed<Record<string, FieldConflict>>(() =>
+  Object.fromEntries(
+    live.conflicts.value.map((conflict) => [
+      conflict.path.join('.'),
+      { incomingServer: conflict.theirs },
+    ]),
+  ),
+)
 const currency = computed(() => draftConfig.value?.spec.currency ?? 'EUR')
-const dirtyFieldCount = computed(() => Object.keys(dirtyPaths.value).length)
-const conflictEntries = computed(() => Object.entries(conflicts.value))
-const conflictCount = computed(() => conflictEntries.value.length)
+const dirtyFieldCount = computed(() => live.changes.value.length)
+const conflictCount = computed(() => live.conflicts.value.length)
+const cleanDirtyCount = computed(() =>
+  Math.max(0, dirtyFieldCount.value - conflictCount.value),
+)
 const dirtySummaryEntries = computed(() =>
-  Object.keys(dirtyPaths.value)
-    .sort((left, right) => {
-      const leftState = fieldState(left)
-      const rightState = fieldState(right)
-      if (leftState !== rightState) {
-        return leftState === 'conflict' ? -1 : 1
-      }
-      return humanizePath(left).localeCompare(humanizePath(right))
-    })
-    .map((path) => ({
+  live.changes.value.map((change) => {
+    const path = change.path.join('.')
+    return {
       path,
       label: humanizePath(path),
       state: fieldState(path),
-      draftValue: getPathValue(draftConfig.value, path),
-      serverValue: serverValueFor(path),
-      previousServer: conflictFor(path)?.previousServer,
-    })),
+      draftValue: change.new,
+      serverValue: change.old,
+      previousServer: undefined,
+    }
+  }),
 )
-const cleanDirtyCount = computed(
-  () => dirtyFieldCount.value - conflictCount.value,
+const saveButtonLabel = computed(() =>
+  saving.value
+    ? 'Saving…'
+    : live.needsRead.value
+      ? 'Refresh before saving'
+      : dirtyFieldCount.value
+        ? `Save ${dirtyFieldCount.value} Change${dirtyFieldCount.value === 1 ? '' : 's'}`
+        : 'No Changes to Save',
 )
-const saveButtonLabel = computed(() => {
-  if (saving.value) {
-    return 'Saving…'
-  }
-  if (dirtyFieldCount.value === 0) {
-    return 'No Changes to Save'
-  }
-  return `Save ${dirtyFieldCount.value} Change${dirtyFieldCount.value === 1 ? '' : 's'}`
+const connectionMessage = computed(() => {
+  if (loadError.value) return loadError.value
+  if (state.value.status === 'live')
+    return draftConfig.value
+      ? 'Live updates connected.'
+      : 'This configuration was removed. Open a new editor for a replacement.'
+  if (state.value.status === 'terminal')
+    return 'Live access ended. Sign in again or check your permissions.'
+  if (state.value.status === 'exhausted')
+    return 'Could not reconnect. Your unsaved changes are retained; retry when ready.'
+  return 'Connecting to live updates. Your unsaved changes are retained; saving is paused.'
 })
-
-async function loadAdminState() {
-  loading.value = true
-  loadError.value = ''
-  try {
-    const config = await getAdminCoffeeConfig()
-    resetConfigState(config)
-    await refreshVoucherUsage()
-  } catch (error) {
-    loadError.value = (error as ApiError).message
-  } finally {
-    loading.value = false
-  }
-}
-
-async function saveConfig() {
-  if (!draftConfig.value) {
-    return
-  }
-  saving.value = true
-  loadError.value = ''
-  try {
-    const result = await patchAdminCoffeeConfig(
-      {
-        spec: draftConfig.value.spec,
-      },
-      {
-        reason: changeReason.value,
-      },
-    )
-    resetConfigState(result.config)
-    // The save reached Kubernetes but ConfigButler did not accept the commit
-    // request. Say so rather than reporting an unqualified success -- the
-    // whole point of the demo is that the change becomes a commit.
-    commitNotice.value = result.commitError ?? ''
-    await refreshVoucherUsage()
-  } catch (error) {
-    loadError.value = (error as Error).message
-  } finally {
-    saving.value = false
-  }
-}
-
-// The editor is live again, through krm-stream. A change another operator
-// saves arrives here while someone is typing, and applyIncomingConfig merges it
-// into the draft rather than overwriting it -- a field they actually edited
-// that the server also moved becomes a conflict they resolve, not a silent
-// loss.
-//
-// The order stream is still absent; voucher usage is re-read instead.
-const session = currentSession()
-const live = session
-  ? useLiveCoffeeConfig(session.namespace, session.coffeeConfigName)
-  : null
-
-if (live) {
-  watch(live.server, (incoming) => {
-    if (!incoming) return
-    applyIncomingConfig(incoming)
-    // A save elsewhere can change how depleted a voucher is, so the counter
-    // beside maximumUsage must not go stale while the page stays open.
-    void refreshVoucherUsage()
-  })
-}
-
 async function refreshVoucherUsage() {
   try {
-    const usage = await getVoucherUsage()
-    voucherUsage.value = usage.voucherUsage
+    voucherUsage.value = (await getVoucherUsage()).voucherUsage
     voucherUsageError.value = ''
   } catch {
     voucherUsageError.value =
       'Voucher usage could not be refreshed. Counts may be out of date.'
   }
 }
-
 async function refreshFromServer() {
   try {
-    const config = await getAdminCoffeeConfig()
-    applyIncomingConfig(config)
-    loadError.value = ''
+    await live.refreshFromServer()
     await refreshVoucherUsage()
-  } catch (error) {
-    loadError.value = (error as ApiError).message
+  } catch (cause) {
+    loadError.value = (cause as Error).message
   }
 }
-
+async function saveConfig() {
+  await live.save(changeReason.value)
+}
+watch(
+  () => serverConfig.value?.metadata?.resourceVersion,
+  () => {
+    void refreshVoucherUsage()
+  },
+)
+watch(live.flashed, (paths) => {
+  for (const path of paths) flashField(path.join('.'))
+})
+onMounted(refreshVoucherUsage)
+function updateField(path: string, value: unknown) {
+  live.setValue(fieldPath(path), value)
+}
+function applyServerValue(path: string) {
+  live.takeTheirs(fieldPath(path))
+  clearArrayInputBranch(path)
+}
+function keepLocalValue(path: string) {
+  live.keepMine(fieldPath(path))
+  clearArrayInputBranch(path)
+}
 function addProduct() {
-  if (!draftConfig.value) {
-    return
-  }
-  draftConfig.value.spec.products.push({
-    sku: `coffee-${draftConfig.value.spec.products.length + 1}`,
-    name: 'New Coffee',
-    priceCents: 300,
-    description: '',
-    enabled: true,
-  })
-  refreshFieldState('spec.products')
+  const products = draftConfig.value?.spec.products ?? []
+  let index = products.length + 1
+  while (products.some((product) => product.sku === `coffee-${index}`)) index++
+  updateField('spec.products', [
+    ...products,
+    {
+      sku: `coffee-${index}`,
+      name: 'New Coffee',
+      priceCents: 300,
+      description: '',
+      enabled: true,
+    },
+  ])
 }
-
 function removeProduct(index: number) {
-  draftConfig.value?.spec.products.splice(index, 1)
-  refreshFieldState('spec.products')
+  updateField(
+    'spec.products',
+    (draftConfig.value?.spec.products ?? []).filter((_, i) => i !== index),
+  )
 }
-
 function addVoucher() {
-  draftConfig.value?.spec.vouchers.push({
-    code: 'newvoucher',
-    enabled: true,
-    discountType: 'percentage',
-    discountValue: 100,
-    maximumUsage: 1,
-    appliesToProducts: [],
-    displayMessage: '',
-  })
+  const vouchers = draftConfig.value?.spec.vouchers ?? []
+  let index = vouchers.length + 1
+  while (vouchers.some((voucher) => voucher.code === `voucher-${index}`))
+    index++
+  updateField('spec.vouchers', [
+    ...vouchers,
+    {
+      code: `voucher-${index}`,
+      enabled: true,
+      discountType: 'percentage',
+      discountValue: 100,
+      maximumUsage: 1,
+      appliesToProducts: [],
+      displayMessage: '',
+    },
+  ])
   clearArrayInputBranch('spec.vouchers')
-  refreshFieldState('spec.vouchers')
 }
-
 function removeVoucher(index: number) {
-  draftConfig.value?.spec.vouchers.splice(index, 1)
+  updateField(
+    'spec.vouchers',
+    (draftConfig.value?.spec.vouchers ?? []).filter((_, i) => i !== index),
+  )
   clearArrayInputBranch('spec.vouchers')
-  refreshFieldState('spec.vouchers')
 }
-
 function setVoucherProducts(path: string, value: string) {
   arrayFieldInputs.value = {
     ...arrayFieldInputs.value,
@@ -228,188 +208,6 @@ function finishVoucherProductsEdit(path: string) {
   arrayFieldInputs.value = next
 }
 
-function cloneConfig(config: CoffeeConfig): CoffeeConfig {
-  const cloned = JSON.parse(JSON.stringify(config)) as CoffeeConfig
-  cloned.spec.products ??= []
-  cloned.spec.vouchers ??= []
-  cloned.spec.mail ??= {}
-  cloned.spec.mail.apiKeySecretRef ??= {}
-  cloned.spec.payments ??= {}
-  cloned.spec.payments.apiKeySecretRef ??= {}
-  return cloned
-}
-
-function resetConfigState(config: CoffeeConfig) {
-  const cloned = cloneConfig(config)
-  serverConfig.value = cloneConfig(cloned)
-  draftConfig.value = cloned
-  changeReason.value = ''
-  dirtyPaths.value = {}
-  conflicts.value = {}
-  arrayFieldInputs.value = {}
-  clearAllFlashes()
-}
-
-function applyIncomingConfig(config: CoffeeConfig) {
-  const incoming = cloneConfig(config)
-  if (!serverConfig.value || !draftConfig.value) {
-    resetConfigState(incoming)
-    return
-  }
-
-  const merged = reconcileValue(
-    '',
-    draftConfig.value,
-    serverConfig.value,
-    incoming,
-  )
-  // Never blank the editor because a merge produced something unusable. An
-  // undefined draft removes the whole form from the DOM, which reads as "the
-  // page broke" rather than "one update could not be merged" -- and it throws
-  // away whatever the person had typed. Keep the current draft and take the
-  // server object; the next event reconciles from a known-good base.
-  if (merged === null || typeof merged !== 'object') {
-    serverConfig.value = incoming
-    return
-  }
-  draftConfig.value = merged as CoffeeConfig
-  serverConfig.value = incoming
-}
-
-function reconcileValue(
-  path: string,
-  draftValue: unknown,
-  previousServer: unknown,
-  incomingServer: unknown,
-): unknown {
-  if (
-    Array.isArray(previousServer) ||
-    Array.isArray(incomingServer) ||
-    Array.isArray(draftValue)
-  ) {
-    const previousArray = Array.isArray(previousServer) ? previousServer : []
-    const incomingArray = Array.isArray(incomingServer) ? incomingServer : []
-    const draftArray = Array.isArray(draftValue) ? draftValue : []
-
-    if (
-      isDirtyPath(path) ||
-      previousArray.length !== incomingArray.length ||
-      draftArray.length !== previousArray.length
-    ) {
-      return preserveOrConflict(path, draftArray, previousArray, incomingArray)
-    }
-
-    return incomingArray.map((item, index) =>
-      reconcileValue(
-        joinPath(path, String(index)),
-        draftArray[index],
-        previousArray[index],
-        item,
-      ),
-    )
-  }
-
-  if (
-    isObjectLike(previousServer) ||
-    isObjectLike(incomingServer) ||
-    isObjectLike(draftValue)
-  ) {
-    const previousObject = isObjectLike(previousServer) ? previousServer : {}
-    const incomingObject = isObjectLike(incomingServer) ? incomingServer : {}
-    const draftObject = isObjectLike(draftValue) ? draftValue : {}
-    const result: Record<string, unknown> = {}
-    const keys = new Set([
-      ...Object.keys(previousObject),
-      ...Object.keys(incomingObject),
-      ...Object.keys(draftObject),
-    ])
-
-    for (const key of keys) {
-      result[key] = reconcileValue(
-        joinPath(path, key),
-        draftObject[key],
-        previousObject[key],
-        incomingObject[key],
-      )
-    }
-
-    return result
-  }
-
-  if (deepEqual(previousServer, incomingServer)) {
-    return cloneValue(draftValue)
-  }
-
-  if (!path) {
-    return cloneValue(incomingServer)
-  }
-
-  if (isDirtyPath(path)) {
-    if (deepEqual(draftValue, incomingServer)) {
-      clearDirty(path)
-      clearConflict(path)
-      return cloneValue(draftValue)
-    }
-    setConflict(path, previousServer, incomingServer)
-    return cloneValue(draftValue)
-  }
-
-  clearConflict(path)
-  flashField(path)
-  return cloneValue(incomingServer)
-}
-
-function preserveOrConflict(
-  path: string,
-  draftValue: unknown,
-  previousServer: unknown,
-  incomingServer: unknown,
-): unknown {
-  if (deepEqual(draftValue, incomingServer)) {
-    clearDirty(path)
-    clearConflict(path)
-    return cloneValue(draftValue)
-  }
-  setConflict(path, previousServer, incomingServer)
-  return cloneValue(draftValue)
-}
-
-function updateField(path: string, value: unknown) {
-  if (!draftConfig.value) {
-    return
-  }
-  setPathValue(draftConfig.value, path, value)
-  refreshFieldState(path)
-}
-
-function refreshFieldState(path: string) {
-  const draftValue = getPathValue(draftConfig.value, path)
-  const serverValue = getPathValue(serverConfig.value, path)
-  if (deepEqual(draftValue, serverValue)) {
-    clearDirty(path)
-    clearConflict(path)
-    return
-  }
-  dirtyPaths.value = {
-    ...dirtyPaths.value,
-    [path]: true,
-  }
-}
-
-function applyServerValue(path: string) {
-  if (!draftConfig.value || !serverConfig.value) {
-    return
-  }
-  setPathValue(
-    draftConfig.value,
-    path,
-    cloneValue(getPathValue(serverConfig.value, path)),
-  )
-  clearDirtyBranch(path)
-  clearConflictBranch(path)
-  clearArrayInputBranch(path)
-}
-
 function getFieldValue(path: string): unknown {
   return getPathValue(draftConfig.value, path)
 }
@@ -434,7 +232,11 @@ function getArrayField(path: string): string[] {
 }
 
 function fieldState(path: string): FieldState {
-  if (conflicts.value[path]) {
+  if (
+    live.conflicts.value.some((conflict) =>
+      isPrefix(conflict.path, fieldPath(path)),
+    )
+  ) {
     return 'conflict'
   }
   if (isDirtyPath(path)) {
@@ -473,57 +275,9 @@ function serverValueFor(path: string): unknown {
 }
 
 function isDirtyPath(path: string): boolean {
-  return Boolean(dirtyPaths.value[path])
-}
-
-function setConflict(
-  path: string,
-  previousServer: unknown,
-  incomingServer: unknown,
-) {
-  conflicts.value = {
-    ...conflicts.value,
-    [path]: {
-      previousServer: cloneValue(previousServer),
-      incomingServer: cloneValue(incomingServer),
-    },
-  }
-}
-
-function clearConflict(path: string) {
-  if (!conflicts.value[path]) {
-    return
-  }
-  const next = { ...conflicts.value }
-  delete next[path]
-  conflicts.value = next
-}
-
-function clearConflictBranch(path: string) {
-  const next = Object.fromEntries(
-    Object.entries(conflicts.value).filter(
-      ([candidate]) => candidate !== path && !candidate.startsWith(`${path}.`),
-    ),
-  ) as Record<string, FieldConflict>
-  conflicts.value = next
-}
-
-function clearDirty(path: string) {
-  if (!dirtyPaths.value[path]) {
-    return
-  }
-  const next = { ...dirtyPaths.value }
-  delete next[path]
-  dirtyPaths.value = next
-}
-
-function clearDirtyBranch(path: string) {
-  const next = Object.fromEntries(
-    Object.entries(dirtyPaths.value).filter(
-      ([candidate]) => candidate !== path && !candidate.startsWith(`${path}.`),
-    ),
-  ) as Record<string, true>
-  dirtyPaths.value = next
+  return live.changes.value.some((change) =>
+    isPrefix(change.path, fieldPath(path)),
+  )
 }
 
 function clearArrayInputBranch(path: string) {
@@ -566,102 +320,10 @@ function clearAllFlashes() {
   flashedPaths.value = {}
 }
 
-function joinPath(base: string, key: string): string {
-  return base ? `${base}.${key}` : key
-}
-
 function getPathValue(target: unknown, path: string): unknown {
-  if (!target || !path) {
-    return target
-  }
-  return path.split('.').reduce<unknown>((current, segment) => {
-    if (current === null || current === undefined) {
-      return undefined
-    }
-    const index = Number(segment)
-    if (Array.isArray(current) && Number.isInteger(index)) {
-      return current[index]
-    }
-    if (isObjectLike(current)) {
-      return current[segment]
-    }
-    return undefined
-  }, target)
+  return get(target, fieldPath(path))
 }
-
-function setPathValue(target: unknown, path: string, value: unknown) {
-  if (!target || !path) {
-    return
-  }
-
-  const segments = path.split('.')
-  let current: unknown = target
-
-  for (let index = 0; index < segments.length - 1; index += 1) {
-    const segment = segments[index]
-    const nextSegment = segments[index + 1]
-    if (segment === undefined || nextSegment === undefined) {
-      return
-    }
-    const nextIsIndex = Number.isInteger(Number(nextSegment))
-
-    if (Array.isArray(current)) {
-      const arrayIndex = Number(segment)
-      if (current[arrayIndex] === undefined) {
-        current[arrayIndex] = nextIsIndex ? [] : {}
-      }
-      current = current[arrayIndex]
-      continue
-    }
-
-    if (!isObjectLike(current)) {
-      return
-    }
-
-    if (current[segment] === undefined || current[segment] === null) {
-      current[segment] = nextIsIndex ? [] : {}
-    }
-    current = current[segment]
-  }
-
-  const lastSegment = segments[segments.length - 1]
-  if (lastSegment === undefined) {
-    return
-  }
-  if (Array.isArray(current)) {
-    current[Number(lastSegment)] = value as never
-    return
-  }
-  if (isObjectLike(current)) {
-    current[lastSegment] = value
-  }
-}
-
-function isObjectLike(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function deepEqual(left: unknown, right: unknown): boolean {
-  return JSON.stringify(left) === JSON.stringify(right)
-}
-
-function cloneValue<T>(value: T): T {
-  if (value === null || value === undefined) {
-    return value
-  }
-  if (typeof value !== 'object') {
-    return value
-  }
-  return JSON.parse(JSON.stringify(value)) as T
-}
-
-onMounted(async () => {
-  await loadAdminState()
-})
-
-onBeforeUnmount(() => {
-  clearAllFlashes()
-})
+onBeforeUnmount(clearAllFlashes)
 </script>
 
 <template>
@@ -678,6 +340,40 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
+    <section class="panel" role="status">
+      <p>{{ connectionMessage }}</p>
+      <p v-if="notice">{{ notice }}</p>
+      <a
+        v-if="state.status === 'terminal'"
+        class="button"
+        href="/auth/login?returnTo=/admin"
+        >Sign in again</a
+      >
+      <button
+        v-if="state.status === 'exhausted'"
+        class="button"
+        @click="live.reconnect"
+      >
+        Retry connection
+      </button>
+      <a v-if="!draftConfig && !loading" class="button" href="/admin"
+        >Open a new editor</a
+      >
+      <details
+        v-if="recoveryDraft && (!draftConfig || state.status === 'terminal')"
+      >
+        <summary>Copy unsaved configuration before leaving this page</summary>
+        <textarea
+          readonly
+          rows="12"
+          :value="JSON.stringify(recoveryDraft.spec, null, 2)"
+          aria-label="Unsaved configuration recovery"
+        />
+      </details>
+      <p v-for="entry in redactions" :key="entry.path.join('.')">
+        Withheld field: {{ entry.path.join('.') }}
+      </p>
+    </section>
     <section v-if="loading" class="panel">
       <h2>Loading admin state…</h2>
     </section>
@@ -701,13 +397,17 @@ onBeforeUnmount(() => {
         <h2>Admin request failed</h2>
         <p>{{ loadError }}</p>
       </section>
-      <section v-if="voucherUsageError" class="panel panel--warning" role="status">
+      <section
+        v-if="voucherUsageError"
+        class="panel panel--warning"
+        role="status"
+      >
         <h2>Voucher usage unavailable</h2>
         <p>{{ voucherUsageError }}</p>
       </section>
 
       <section v-if="commitNotice" class="panel panel--warning">
-        <h2>Saved, but not committed</h2>
+        <h2>Git commit status</h2>
         <p>{{ commitNotice }}</p>
       </section>
 
@@ -835,6 +535,11 @@ onBeforeUnmount(() => {
                   </div>
                   <input
                     :value="getTextField(`spec.products.${index}.sku`)"
+                    :readonly="
+                      !!serverConfig?.spec.products?.some(
+                        (row) => row.sku === product.sku,
+                      )
+                    "
                     type="text"
                     @input="
                       updateField(
@@ -1016,6 +721,11 @@ onBeforeUnmount(() => {
                   </div>
                   <input
                     :value="getTextField(`spec.vouchers.${index}.code`)"
+                    :readonly="
+                      !!serverConfig?.spec.vouchers?.some(
+                        (row) => row.code === voucher.code,
+                      )
+                    "
                     type="text"
                     @input="
                       updateField(
@@ -1542,9 +1252,9 @@ onBeforeUnmount(() => {
                       into the watched config.
                     </template>
                     <template v-else>
-                      Yellow dots save local edits. Red dots mean a newer server
-                      value arrived; saving now keeps your changes and
-                      overwrites that newer value unless you take theirs first.
+                      Red dots indicate concurrent changes. Choose Take Theirs
+                      or Keep Mine for each conflict before saving. Arrays are
+                      reviewed as a whole.
                     </template>
                   </p>
                 </div>
@@ -1610,6 +1320,13 @@ onBeforeUnmount(() => {
                   >
                     {{ entry.state === 'conflict' ? 'Take Theirs' : 'Revert' }}
                   </button>
+                  <button
+                    v-if="entry.state === 'conflict'"
+                    class="button button--ghost"
+                    @click="keepLocalValue(entry.path)"
+                  >
+                    Keep Mine
+                  </button>
                 </li>
               </ul>
 
@@ -1634,7 +1351,7 @@ onBeforeUnmount(() => {
               <div class="save-summary__footer">
                 <button
                   class="button save-summary__button"
-                  :disabled="saving || dirtyFieldCount === 0"
+                  :disabled="!canSave || dirtyFieldCount === 0"
                   @click="saveConfig"
                 >
                   {{ saveButtonLabel }}

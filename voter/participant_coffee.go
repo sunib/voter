@@ -9,6 +9,7 @@ package main
 // the honest answer and it stays a 403.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -77,24 +78,55 @@ func registerParticipantCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 				return
 			}
 
+			var intent struct {
+				UID             string         `json:"uid"`
+				ResourceVersion string         `json:"resourceVersion"`
+				Patch           map[string]any `json:"patch"`
+			}
+			decoder := json.NewDecoder(bytes.NewReader(patch))
+			decoder.DisallowUnknownFields()
+			if err := decoder.Decode(&intent); err != nil || intent.UID == "" || intent.ResourceVersion == "" || intent.Patch == nil {
+				http.Error(w, "uid, resourceVersion and patch are required", http.StatusBadRequest)
+				return
+			}
+			for key := range intent.Patch {
+				if key != "spec" {
+					http.Error(w, "only spec is editable", http.StatusBadRequest)
+					return
+				}
+			}
 			ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 			defer cancel()
-
-			updated, err := clients.dynamic.Resource(coffeeConfigGVR()).Namespace(ns).
-				Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
+			resource := clients.dynamic.Resource(coffeeConfigGVR()).Namespace(ns)
+			current, err := resource.Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				writeParticipantKubeError(w, err)
 				return
 			}
-			// Transitional response for the existing editor. The store migration
-			// will replace this object with a receipt and the normal watch echo.
-			projected, _ := gateway.Project(gateway.ProjectionFull, updated.Object)
+			if string(current.GetUID()) != intent.UID {
+				http.Error(w, "configuration was replaced; open it as a new editor", http.StatusConflict)
+				return
+			}
+			intent.Patch["metadata"] = map[string]any{"uid": intent.UID, "resourceVersion": intent.ResourceVersion}
+			patch, err = json.Marshal(intent.Patch)
+			if err != nil {
+				http.Error(w, "invalid patch", http.StatusBadRequest)
+				return
+			}
+			if err = gateway.ValidateMergePatch(gateway.ProjectionFull, current.Object, patch); err != nil {
+				http.Error(w, "patch touches a protected field", http.StatusBadRequest)
+				return
+			}
+			if _, err = resource.Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+				writeParticipantKubeError(w, err)
+				return
+			}
 
 			// The CoffeeConfig write and the CommitRequest are two separate
 			// Kubernetes operations. If the second fails, the first still
 			// happened -- so report PARTIAL success rather than pretending the
 			// pair was atomic or that nothing occurred.
-			response := map[string]any{"config": projected, "saved": true}
+			response := map[string]any{"saved": true}
 
 			if target := strings.TrimSpace(cfg.ConfigButlerGitTargetName); target != "" {
 				crNS := strings.TrimSpace(cfg.ConfigButlerCommitRequestNamespace)
@@ -106,11 +138,11 @@ func registerParticipantCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 				switch {
 				case crErr != nil:
 					log.Printf("commitrequest: create failed sub=%s target=%s: %v", s.Subject, target, crErr)
-					response["committed"] = false
+					response["commitRequested"] = false
 					response["commitError"] = "Your change was saved to Kubernetes, but asking ConfigButler to commit it failed."
 				default:
 					log.Printf("commitrequest: created name=%s sub=%s target=%s", crName, s.Subject, target)
-					response["committed"] = true
+					response["commitRequested"] = true
 					response["commitRequest"] = crName
 				}
 			}

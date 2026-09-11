@@ -147,6 +147,10 @@ async function submit() {
       </Card>
     </div>
 
+    <p class="mt-4 text-sm text-black/60">
+      Submitting creates your QuizSubmission for this round. You can change your
+      answers before submitting, but submitted answers cannot be edited.
+    </p>
     <SubmitBar
       :busy="busy"
       :disabled="!round || state !== 'live'"

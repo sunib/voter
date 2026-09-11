@@ -21,7 +21,7 @@ them. The Voter repository sample is a template, not a second reconciler.
 4. To close, change `spec.state` to `closed` in Git and push. A request that read
    the live state just before closure can still finish; this is not an atomic cutoff.
 5. For another round, add a resource with a new name. Reopening a closed round
-   keeps its existing ballots and does not let existing voters vote again.
+   keeps its existing QuizSubmissions and does not let existing voters vote again.
 
 Do not change questions after voting begins. A browser with an older resource
 version is asked to reload, and answers invalid under a changed question set are
@@ -29,18 +29,23 @@ excluded from results. Use a new round for a changed question set instead.
 
 ## Behavior and limits
 
-- Ballots survive application restarts because Kubernetes stores them.
-- An enrolled identity can create one ballot per round UID through Voter. Duplicate
-  submits never replace the recorded answer. A lost success response can be retried;
+A **QuizSubmission** is one participant's submitted answers for a QuizSession
+(round). Draft answers can change before submission. Submitting creates a new
+QuizSubmission; the app never edits an existing one. Each participant has one
+QuizSubmission per round UID, so retries do not create additional submissions.
+
+- QuizSubmissions survive application restarts because Kubernetes stores them.
+- An enrolled identity can create one QuizSubmission per round UID through Voter. Duplicate
+  submits, including those with changed answers, never replace the recorded QuizSubmission. A lost success response can be retried;
   the app then reports the existing vote and shows results.
 - Required answers, choices, types, numeric bounds and text length are checked on
   the server. Drafts survive reloads, scoped to the participant and round UID.
-- Answers are shared with the room, including free text. This is not a secret ballot;
+- Answers are shared with the room, including free text. These submissions are not anonymous;
   participant RBAC allows reading submissions. Avoid collecting sensitive answers.
 - Application voting rules are not Kubernetes admission rules. Direct API clients
   with the granted create permission can bypass them. Re-enrollment can also create
   another identity. This is an audience demo, not an election system.
-- Results use explicit reads, with paginated ballot retrieval. No polling loops or
+- Results use explicit reads, with paginated QuizSubmission retrieval. No polling loops or
   additional watches are opened. This has browser coverage with two participants,
   not a measured 200-person capacity guarantee. The shared CoffeeConfig streaming
   and load rehearsal in PLAN.md remain outstanding.

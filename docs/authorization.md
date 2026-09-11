@@ -42,6 +42,10 @@ The demo Role grants these operations throughout the `voter` namespace:
 | QuizSessions | get, list, watch |
 | QuizSubmissions | create, get, list, watch |
 
+QuizSubmissions are create-only for participants: this Role grants neither update
+nor patch on them, and Voter exposes no editing endpoint. Broader additive grants or
+administrator access are separate; the CRD does not enforce immutable spec fields.
+
 This Role does not grant Secrets, RBAC changes, impersonation or deletion. It is
 not limited to one named CoffeeConfig and it permits reading other submissions.
 Voter's current handler addresses one configured CoffeeConfig, but callers with

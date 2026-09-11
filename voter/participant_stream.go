@@ -1,29 +1,8 @@
 package main
 
-// Live resource updates for the browser, via krm-stream.
-//
-// The demo's point is that Kubernetes is the application API. That reads very
-// differently when a change someone makes on stage appears on every phone in
-// the room a moment later, without anybody refreshing -- so this is not a
-// nicety, it is the part of the story that has to be seen to land.
-//
-// krm-stream (github.com/ConfigButler/krm-stream) does the hard half: it turns
-// a Kubernetes watch into SSE an EventSource can read, coalesces many browsers
-// onto fewer upstream watches, and gives the client a three-way merge so a live
-// update reconciles with what someone is typing instead of clobbering it.
-//
-// The reason it fits THIS application rather than merely being available:
-//
-//   - A browser's EventSource cannot send an Authorization header. The library's
-//     recommended route is therefore a same-origin HttpOnly cookie plus a server
-//     that custodies the token -- which is exactly the session Voter already has.
-//   - The upstream watch is opened with the CALLER's credential, so the demo's
-//     central claim still holds: a participant who may not watch a resource is
-//     refused by the API server, not by this code. No fallback to the
-//     ServiceAccount, here or anywhere.
-//
-// The library holds no credential and is not an authorization boundary.
-// Kubernetes is.
+// krm-stream owns watch translation and recovery. This increment still opens
+// watches with participant credentials; shared service-account watches are a
+// separate integration requiring platform RBAC and subscriber identity mapping.
 
 import (
 	"context"
@@ -50,8 +29,7 @@ func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 
 	handler := gateway.Handler(gateway.Options{
 		// Identity comes from the signed session cookie and nowhere else. The
-		// gateway never inspects a header for it, so an EventSource that cannot
-		// send one loses nothing.
+		// gateway never trusts browser identity headers.
 		Principal: func(r *http.Request) (gateway.Principal, error) {
 			s, ok := getParticipantSession(r, cfg, sessionCookieCodec, time.Now())
 			if !ok {
@@ -60,14 +38,9 @@ func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 			return &streamPrincipal{session: s}, nil
 		},
 
-		// Authorization is Kubernetes' answer, obtained with the participant's
-		// OWN token. We deliberately do not use kube.SSARAuthorizer here: that
-		// asks the API server a question ABOUT a user using the server's
-		// credential, and needs system:auth-delegator. Opening the watch as the
-		// participant gets the same verdict from the same RBAC without granting
-		// this application any new power -- which is the property the whole demo
-		// is built to show.
-		Authorizer: participantWatchAuthorizer{},
+		// Participant-token watches rely on Kubernetes RBAC. SharedBackend will
+		// require SubjectAccessReviewAuthorizer and service-account grants.
+		Authorizer: participantWatchAuthorizer{namespace: deps.defaultNS, name: cfg.CoffeeConfigName},
 
 		// One client per caller, built from that caller's token. Nothing is
 		// cached across principals, so one participant's credential can never
@@ -105,36 +78,35 @@ func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 	// requireParticipant gives the 401-with-loginUrl shape the SPA already
 	// understands, so an expired session on a stream looks like an expired
 	// session anywhere else. GET only: a stream is a read.
-	mux.HandleFunc("/public/stream", requireParticipant(cfg, func(w http.ResponseWriter, r *http.Request, _ participantSession) {
+	mux.HandleFunc("/public/stream", requireParticipant(cfg, func(w http.ResponseWriter, r *http.Request, s participantSession) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		handler.ServeHTTP(w, r)
+		deadline := time.Unix(s.ExpiresAt, 0)
+		if s.TokenExpiry > 0 && time.Unix(s.TokenExpiry, 0).Before(deadline) {
+			deadline = time.Unix(s.TokenExpiry, 0)
+		}
+		ctx, cancel := context.WithDeadline(r.Context(), deadline)
+		defer cancel()
+		handler.ServeHTTP(w, r.WithContext(ctx))
 	}))
 }
 
-// participantWatchAuthorizer permits the scope and lets Kubernetes decide.
-//
-// This is not AllowAll with a friendlier name. AllowAll would be a claim that
-// nobody needs authorizing; this is a statement about WHERE the authorization
-// happens: the backend for this principal is built from their own ID token, so
-// the watch either opens as them or the API server refuses it as them. The
-// gateway re-authorizes on every snapshot cycle, so a revoked grant reaches a
-// stream that is already open -- by the watch failing, exactly as a revoked
-// grant should.
-//
-// The scope allowlist above still applies; this only declines to add a second,
-// weaker opinion on top of RBAC.
-type participantWatchAuthorizer struct{}
+// Scope restriction precedes any data disclosure; Kubernetes authorizes the
+// participant-backed watch itself. This is not a shared-cache authorizer.
+type participantWatchAuthorizer struct{ namespace, name string }
 
-func (participantWatchAuthorizer) Authorize(_ context.Context, p gateway.Principal, scope gateway.Scope) error {
+func (a participantWatchAuthorizer) Authorize(_ context.Context, p gateway.Principal, scope gateway.Scope) error {
 	principal, ok := p.(*streamPrincipal)
 	if !ok {
 		return gateway.Forbidden("not authenticated")
 	}
 	if principal.session.IDToken == "" {
 		return gateway.Forbidden("no participant credential")
+	}
+	if scope.Namespace != a.namespace || scope.Name != a.name || scope.Version != "v1alpha1" {
+		return gateway.Forbidden("stream is restricted to the configured CoffeeConfig")
 	}
 	log.Printf("stream: open sub=%s resource=%s ns=%s name=%s",
 		principal.session.Subject, scope.Resource, scope.Namespace, scope.Name)

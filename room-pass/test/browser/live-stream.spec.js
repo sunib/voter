@@ -7,7 +7,7 @@ import { resolve } from "node:path";
 // nobody touched shows the new value.
 //
 // Two independent browser contexts, so two independent cookie jars and two
-// independent EventSource connections — a shared context would prove only that
+// independent managed fetch streams — a shared context would prove only that
 // one page can re-read its own write.
 //
 // This is deliberately end-to-end through the real parts: Chromium, Traefik,
@@ -110,7 +110,7 @@ test.afterEach(async () => {
     "demo-coffee",
     "--type=merge",
     "-p",
-    JSON.stringify({ spec: { shopName: "Fixture Coffee" } }),
+    JSON.stringify({ spec: { shopName: "Fixture Coffee", bannerText: "Edit this menu" } }),
   );
   for (const p of participants().filter((p) =>
     names.includes(p.spec.displayName),
@@ -252,7 +252,7 @@ test("a rejected save keeps the editor and unsaved input visible", async ({ brow
     });
     await bannerText(editor.page).fill("Keep this unsaved edit");
     await editor.page.getByRole("button", { name: /^Save \d+ Change/ }).click();
-    await expect(editor.page.getByRole("alert")).toContainText("Configuration changed");
+    await expect(editor.page.getByText("Configuration refreshed. Your edits are intact; review and save again.")).toBeVisible();
     await expect(bannerText(editor.page)).toHaveValue("Keep this unsaved edit");
     await expect(shopName(editor.page)).toBeVisible();
   } finally {
@@ -277,7 +277,7 @@ test("usage read failures do not block the editor and a live update retries them
     });
   });
   try {
-    await expect(editor.page.getByRole("status")).toContainText("Counts may be out of date");
+    await expect(editor.page.getByRole("status").filter({ hasText: "Voucher usage unavailable" })).toContainText("Counts may be out of date");
     await bannerText(editor.page).fill("Preserve this while refreshing usage");
     usageAvailable = true;
     kube("-n", "room-pass", "patch", "coffeeconfig", "demo-coffee", "--type=merge", "-p",
@@ -289,4 +289,55 @@ test("usage read failures do not block the editor and a live update retries them
   } finally {
     await editor.context.close();
   }
+});
+
+
+test("a real Kubernetes 409 preserves input and a new reviewed save succeeds", async ({ browser }) => {
+  const editor = await signIn(browser, "real-conflict");
+  let patches = 0;
+  try {
+    await editor.page.route("**/public/coffeeconfig", async route => {
+      if (route.request().method() !== "PATCH") return route.continue();
+      patches++;
+      if (patches === 1) {
+        // The browser has already frozen its intent; a real persisted change
+        // now invalidates that resourceVersion before the host submits it.
+        kube("-n", "room-pass", "patch", "coffeeconfig", "demo-coffee", "--type=merge", "-p",
+          JSON.stringify({ spec: { shopName: "Concurrent winner" } }));
+      }
+      await route.continue();
+    });
+    await bannerText(editor.page).fill("Reviewed local banner");
+    const rejected = editor.page.waitForResponse(response => response.url().endsWith("/public/coffeeconfig") && response.request().method() === "PATCH");
+    await editor.page.getByRole("button", { name: /^Save \d+ Change/ }).click();
+    expect((await rejected).status()).toBe(409);
+    await expect(editor.page.getByText("Configuration refreshed. Your edits are intact; review and save again.")).toBeVisible();
+    await expect(bannerText(editor.page)).toHaveValue("Reviewed local banner");
+    expect(coffeeConfig().spec.shopName).toBe("Concurrent winner");
+    expect(patches).toBe(1);
+    const saved = editor.page.waitForResponse(response => response.url().endsWith("/public/coffeeconfig") && response.request().method() === "PATCH");
+    await editor.page.getByRole("button", { name: /^Save \d+ Change/ }).click();
+    const receipt = await (await saved).json();
+    expect(receipt.saved).toBe(true);
+    expect(receipt).not.toHaveProperty("config");
+    expect(coffeeConfig().spec.bannerText).toBe("Reviewed local banner");
+    expect(coffeeConfig().spec.shopName).toBe("Concurrent winner");
+  } finally { await editor.context.close(); }
+});
+
+test("overlapping edits require an explicit conflict choice", async ({ browser }) => {
+  const editor = await signIn(browser, "overlap");
+  try {
+    await shopName(editor.page).fill("My chosen name");
+    kube("-n", "room-pass", "patch", "coffeeconfig", "demo-coffee", "--type=merge", "-p",
+      JSON.stringify({ spec: { shopName: "Their chosen name" } }));
+    await expect(editor.page.getByRole("button", { name: "Keep Mine", exact: true })).toBeVisible();
+    await expect(editor.page.getByRole("button", { name: /^Save \d+ Change/ })).toBeDisabled();
+    await editor.page.getByRole("button", { name: "Keep Mine", exact: true }).click();
+    await expect(shopName(editor.page)).toHaveValue("My chosen name");
+    const saved = editor.page.waitForResponse(response => response.url().endsWith("/public/coffeeconfig") && response.request().method() === "PATCH");
+    await editor.page.getByRole("button", { name: /^Save \d+ Change/ }).click();
+    expect((await saved).status()).toBe(200);
+    expect(coffeeConfig().spec.shopName).toBe("My chosen name");
+  } finally { await editor.context.close(); }
 });

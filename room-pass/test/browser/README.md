@@ -13,7 +13,7 @@ exercises the room form without mocking browser headers or the login protocol.
 The test runner reads only `room-pass/.local/kubeconfig`, never the current user
 context. Kubernetes supplies the rotating code and verifies enrollment records.
 Tests delete only Participants with their unique test display name. The voting test
-also deletes its uniquely named round and the ballots labeled with that round UID. The enrollment-closure
+also deletes its uniquely named round and the QuizSubmissions labeled with that round UID. The enrollment-closure
 test restores the prior enrollment setting in a finally block. Do not run
 concurrently with the other fixture suites or against a shared presentation room.
 

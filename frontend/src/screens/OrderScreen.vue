@@ -174,6 +174,25 @@ watch(
 
 <template>
   <main class="page-shell">
+    <section v-if="live && !live.synced.value" class="panel" role="status">
+      <p>
+        {{
+          live.error.value ||
+          'Reconnecting to live prices. Displayed prices may be out of date; your order is priced by the server.'
+        }}
+      </p>
+      <a v-if="live.state.value.status === 'terminal'" href="/auth/login"
+        >Sign in again</a
+      >
+      <button
+        v-if="live.state.value.status === 'exhausted'"
+        class="button"
+        @click="live.reconnect"
+      >
+        Retry connection
+      </button>
+    </section>
+
     <section class="hero-card">
       <h1>{{ storefront?.shop.name ?? 'Coffee Loading…' }}</h1>
       <p class="hero-copy">

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -32,7 +33,7 @@ func authorizedRequest(t *testing.T, cfg config, method, token string) *http.Req
 	}, now); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(method, "/public/coffeeconfig", strings.NewReader(`{"spec":{"shopName":"Changed"}}`))
+	req := httptest.NewRequest(method, "/public/coffeeconfig", strings.NewReader(`{"uid":"coffee-uid","resourceVersion":"42","patch":{"spec":{"shopName":"Changed"}}}`))
 	for _, cookie := range rec.Result().Cookies() {
 		req.AddCookie(cookie)
 	}
@@ -51,7 +52,7 @@ func TestCoffeeAuthorizationGate(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"apiVersion":"examples.configbutler.ai/v1alpha1","kind":"CoffeeConfig","metadata":{"name":"testnet"},"spec":{}}`))
+		_, _ = w.Write([]byte(`{"apiVersion":"examples.configbutler.ai/v1alpha1","kind":"CoffeeConfig","metadata":{"name":"testnet","uid":"coffee-uid","resourceVersion":"42"},"spec":{}}`))
 	}))
 	defer upstream.Close()
 	cfg.KubernetesAPIServer = upstream.URL
@@ -94,6 +95,9 @@ func TestCoffeeAuthorizationGate(t *testing.T) {
 			wantCalls := 0
 			if tc.want == 200 {
 				wantCalls = 1
+				if tc.method == "PATCH" {
+					wantCalls = 2
+				}
 			}
 			if calls-before != wantCalls {
 				t.Fatalf("upstream calls = %d, want %d", calls-before, wantCalls)
@@ -107,11 +111,11 @@ func TestCoffeePreservesKubernetesDenialAndPartialSave(t *testing.T) {
 		name                                             string
 		patchStatus, commitStatus, wantStatus, wantCalls int
 	}{
-		{"authenticated but forbidden", 403, 201, 403, 1},
-		{"token rejected", 401, 201, 401, 1},
-		{"stale resource version", 409, 201, 409, 1},
-		{"commit forbidden after saved patch", 200, 403, 200, 2},
-		{"token expires between writes", 200, 401, 200, 2},
+		{"authenticated but forbidden", 403, 201, 403, 2},
+		{"token rejected", 401, 201, 401, 2},
+		{"stale resource version", 409, 201, 409, 2},
+		{"commit forbidden after saved patch", 200, 403, 200, 3},
+		{"token expires between writes", 200, 401, 200, 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := authorizationFixture(t)
@@ -129,7 +133,11 @@ func TestCoffeePreservesKubernetesDenialAndPartialSave(t *testing.T) {
 				status := tc.patchStatus
 				wantPath := "/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/coffeeconfigs/testnet"
 				wantMethod := "PATCH"
-				if calls == 2 {
+				if calls == 1 {
+					status = 200
+					wantMethod = "GET"
+				}
+				if calls == 3 {
 					status = tc.commitStatus
 					wantPath = "/apis/configbutler.ai/v1alpha3/namespaces/voter/commitrequests"
 					wantMethod = "POST"
@@ -142,7 +150,7 @@ func TestCoffeePreservesKubernetesDenialAndPartialSave(t *testing.T) {
 				if status >= 400 {
 					_ = json.NewEncoder(w).Encode(map[string]any{"apiVersion": "v1", "kind": "Status", "status": "Failure", "code": status, "reason": http.StatusText(status), "message": "denied by API"})
 				} else {
-					_, _ = w.Write([]byte(`{"apiVersion":"examples.configbutler.ai/v1alpha1","kind":"CoffeeConfig","metadata":{"name":"testnet"},"spec":{}}`))
+					_, _ = w.Write([]byte(`{"apiVersion":"examples.configbutler.ai/v1alpha1","kind":"CoffeeConfig","metadata":{"name":"testnet","uid":"coffee-uid","resourceVersion":"42"},"spec":{}}`))
 				}
 			}))
 			defer upstream.Close()
@@ -158,15 +166,15 @@ func TestCoffeePreservesKubernetesDenialAndPartialSave(t *testing.T) {
 			if rec.Code != tc.wantStatus || calls != tc.wantCalls {
 				t.Fatalf("status=%d calls=%d body=%s", rec.Code, calls, rec.Body.String())
 			}
-			if tc.wantCalls == 2 {
+			if tc.wantCalls == 3 {
 				var body struct {
-					Saved, Committed bool
-					CommitError      string
+					Saved, CommitRequested bool
+					CommitError            string
 				}
 				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 					t.Fatal(err)
 				}
-				if !body.Saved || body.Committed || body.CommitError == "" {
+				if !body.Saved || body.CommitRequested || body.CommitError == "" {
 					t.Fatalf("partial success misreported: %s", rec.Body.String())
 				}
 			}
@@ -212,7 +220,7 @@ func TestConcurrentRequestsKeepTheirOwnCredentials(t *testing.T) {
 }
 
 // The editor needs the same lossless projected resource on REST reads and
-// transitional save responses as on the stream, not a coffee business DTO.
+// stream. Saves return receipts only.
 func TestCoffeeEditorPreservesProjectedResource(t *testing.T) {
 	cfg := authorizationFixture(t)
 	const resource = `{
@@ -263,10 +271,65 @@ func TestCoffeeEditorPreservesProjectedResource(t *testing.T) {
 			}
 			var object any = got
 			if method == http.MethodPatch {
-				object = got["config"]
+				if _, exists := got["config"]; exists || got["saved"] != true {
+					t.Fatalf("save should return only a receipt: %s", rec.Body.String())
+				}
+				return
 			}
 			if !reflect.DeepEqual(object, want) {
 				t.Fatalf("editor resource lost data or exposed removed metadata:\n%s", rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestCoffeeConditionalPatchBoundary(t *testing.T) {
+	cfg := authorizationFixture(t)
+	var writes int
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == "PATCH" {
+			writes++
+			var patch map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+				t.Fatal(err)
+			}
+			metadata := patch["metadata"].(map[string]any)
+			if metadata["uid"] != "coffee-uid" || metadata["resourceVersion"] != "41" {
+				t.Errorf("captured precondition changed: %v", metadata)
+			}
+			w.WriteHeader(409)
+			_, _ = w.Write([]byte(`{"apiVersion":"v1","kind":"Status","code":409,"reason":"Conflict","message":"stale version"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"apiVersion":"examples.configbutler.ai/v1alpha1","kind":"CoffeeConfig","metadata":{"uid":"coffee-uid","name":"testnet","resourceVersion":"42"},"spec":{}}`))
+	}))
+	defer upstream.Close()
+	cfg.KubernetesAPIServer = upstream.URL
+	mux := http.NewServeMux()
+	registerParticipantCoffeeHandlers(mux, handlerDeps{cfg: cfg, defaultNS: "voter"})
+	for _, tc := range []struct {
+		name, body     string
+		status, writes int
+	}{
+		{"old unconditional body", `{"spec":{"shopName":"bad"}}`, 400, 0},
+		{"missing version", `{"uid":"coffee-uid","patch":{"spec":{}}}`, 400, 0},
+		{"missing identity", `{"resourceVersion":"42","patch":{"spec":{}}}`, 400, 0},
+		{"root replacement", `null`, 400, 0},
+		{"metadata injection", `{"uid":"coffee-uid","resourceVersion":"42","patch":{"metadata":{"resourceVersion":"43"}}}`, 400, 0},
+		{"status injection", `{"uid":"coffee-uid","resourceVersion":"42","patch":{"status":{"ready":true}}}`, 400, 0},
+		{"unknown envelope", `{"uid":"coffee-uid","resourceVersion":"42","patch":{},"target":"other"}`, 400, 0},
+		{"replacement identity", `{"uid":"old-uid","resourceVersion":"42","patch":{"spec":{}}}`, 409, 0},
+		{"captured version forwarded", `{"uid":"coffee-uid","resourceVersion":"41","patch":{"spec":{"shopName":"mine"}}}`, 409, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := writes
+			req := authorizedRequest(t, cfg, "PATCH", "participant-token")
+			req.Body = io.NopCloser(strings.NewReader(tc.body))
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if rec.Code != tc.status || writes-before != tc.writes {
+				t.Fatalf("status=%d writes=%d body=%s", rec.Code, writes-before, rec.Body.String())
 			}
 		})
 	}
