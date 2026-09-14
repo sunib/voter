@@ -32,10 +32,15 @@ const live = useLiveResources({
 // once it is live, and stays listed once closed so results survive.
 const allRounds = computed<QuizSession[]>(() => {
   const streamed = live.items.value as unknown as QuizSession[]
-  const source = live.synced() && streamed.length ? streamed : rounds.value
+  // Once synced, an EMPTY collection is the truth, not a reason to distrust the
+  // stream: falling back on length would resurrect a round that had just been
+  // deleted, using the REST list read minutes earlier.
+  const source = live.synced() ? streamed : rounds.value
   return source
     .filter((round) => round.spec.state !== 'draft')
-    .sort((a, b) => (a.metadata.name ?? '').localeCompare(b.metadata.name ?? ''))
+    .sort((a, b) =>
+      (a.metadata.name ?? '').localeCompare(b.metadata.name ?? ''),
+    )
 })
 
 const openRounds = computed(() =>
@@ -189,9 +194,7 @@ onMounted(async () => {
             written to.
           </p>
         </div>
-        <RouterLink class="button" to="/coffee"
-          >Open the coffee bar</RouterLink
-        >
+        <RouterLink class="button" to="/coffee">Open the coffee bar</RouterLink>
       </div>
     </section>
   </AppShell>

@@ -68,9 +68,38 @@ test('two participants vote, see durable results, and cannot vote twice or after
     // Carol has not voted, so she still gets the form and meets the closure instead.
     const carol = await signIn('carol');
     await carol.getByRole('button', { name: 'GitOps', exact: true }).click();
+    await expect(carol.getByRole('button', { name: 'Submit', exact: true })).toBeEnabled();
+
+    // Closing the round has to reach a page that is already open, with no
+    // reload: a participant mid-answer should not learn the room moved on by
+    // pressing Submit and being refused.
     kube('patch', 'quizsession', name, '--type=merge', '-p', '{"spec":{"state":"closed"}}');
-    await carol.getByRole('button', { name: 'Submit', exact: true }).click();
-    await expect(carol.getByText('This round is not open for voting.')).toBeVisible();
+    await expect(carol.getByText('This round has just been closed.')).toBeVisible();
+    await expect(carol.getByRole('button', { name: 'Submit', exact: true })).toBeDisabled();
+
+    // The disabled button is not the guard -- it is the courtesy. The server
+    // refuses a closed round on its own, which is what actually protects the
+    // result, so ask it directly rather than through a button that is now
+    // deliberately unclickable.
+    const refusedAfterClose = await carol.evaluate(async (roundName) => {
+      const session = await (await fetch('/auth/session', { credentials: 'include' })).json();
+      const round = await (await fetch(`/public/rounds/${roundName}`, { credentials: 'include' })).json();
+      const res = await fetch(`/public/rounds/${roundName}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json', 'x-csrf-token': session.csrfToken },
+        body: JSON.stringify({
+          uid: round.round.metadata.uid,
+          resourceVersion: round.round.metadata.resourceVersion,
+          answers: [{ questionId: 'choice', singleChoice: 'GitOps' }],
+        }),
+      });
+      return { status: res.status, body: await res.text() };
+    }, name);
+    expect(refusedAfterClose.status, refusedAfterClose.body).toBe(409);
+    expect(refusedAfterClose.body).toContain('not open for voting');
+
+    // A reload must not resurrect the form either.
     await carol.reload();
     await expect(carol.getByRole('button', { name: 'Submit', exact: true })).toBeDisabled();
     const quizSubmissions = JSON.parse(kube('get', 'quizsubmissions', '-l', `voter.configbutler.ai/round-uid=${uid}`, '-o', 'json')).items;

@@ -3,6 +3,7 @@ import { computed, watch, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppShell from '../components/layout/AppShell.vue'
+import { useLiveResources } from '../api/liveResources'
 import Card from 'primevue/card'
 import SessionStateBanner from '../components/session/SessionStateBanner.vue'
 import QuestionRenderer from '../components/questions/QuestionRenderer.vue'
@@ -33,29 +34,63 @@ const voted = ref(false)
 const submitError = ref<string | null>(null)
 const loadError = ref<string | null>(null)
 
-const state = computed(() => round.value?.spec?.state)
+// The round can close while somebody is still looking at it. Without this they
+// find out by pressing Submit and being refused, which is a bad way to learn
+// that the room has moved on.
+//
+// The COLLECTION, not this one round: the component is reused when the route
+// parameter changes, so a watch pinned to a name would go stale, and the
+// participants' round list is already sharing this exact scope.
+const live = useLiveResources({
+  group: 'examples.configbutler.ai',
+  version: 'v1alpha1',
+  resource: 'quizsessions',
+  namespace: currentSession()?.namespace ?? '',
+})
+
+const streamedRound = computed(() => {
+  if (!live.synced()) return undefined
+  return live.items.value.find((o) => o.metadata?.name === props.session) as
+    | { spec?: { state?: QuizSession['spec']['state'] } }
+    | undefined
+})
+
+// Only the STATE follows the stream. The questions deliberately do not: swapping
+// them under someone mid-answer is the thing the round rules forbid, and the
+// submit path already refuses answers built against an older resourceVersion.
+// A closed round simply stops accepting; it does not rewrite what is on screen.
+const state = computed(
+  () => streamedRound.value?.spec?.state ?? round.value?.spec?.state,
+)
+const closedWhileAnswering = computed(
+  () => round.value?.spec?.state === 'live' && state.value !== 'live',
+)
 const title = computed(() => round.value?.spec?.title ?? props.session)
 const questions = computed(() => round.value?.spec?.questions ?? [])
 
-watch(() => props.session, async () => {
-  round.value = undefined
-  voted.value = false
-  loadError.value = null
-  submitError.value = null
-  try {
-    const view = await getQuizSession(props.session)
-    round.value = view.round
-    voted.value = view.voted
-    draft.load(`${currentSession()?.username}:${round.value?.metadata.uid}`)
-  } catch (e: any) {
-    const status = e?.status
-    if ((status === 401 || status === 403) && (await isSignedOut())) {
-      await router.replace({ name: 'login', query: { next: route.fullPath } })
-      return
+watch(
+  () => props.session,
+  async () => {
+    round.value = undefined
+    voted.value = false
+    loadError.value = null
+    submitError.value = null
+    try {
+      const view = await getQuizSession(props.session)
+      round.value = view.round
+      voted.value = view.voted
+      draft.load(`${currentSession()?.username}:${round.value?.metadata.uid}`)
+    } catch (e: any) {
+      const status = e?.status
+      if ((status === 401 || status === 403) && (await isSignedOut())) {
+        await router.replace({ name: 'login', query: { next: route.fullPath } })
+        return
+      }
+      loadError.value = e?.message ?? 'Failed to load session'
     }
-    loadError.value = e?.message ?? 'Failed to load session'
-  }
-}, { immediate: true })
+  },
+  { immediate: true },
+)
 
 async function submit() {
   submitError.value = null
@@ -70,12 +105,20 @@ async function submit() {
   try {
     await createQuizSubmission(round.value, draft.toAnswerList(questions.value))
     draft.clear()
-    await router.replace({ name: 'vote-results', params: { session: props.session }, query: { submitted: '1' } })
+    await router.replace({
+      name: 'vote-results',
+      params: { session: props.session },
+      query: { submitted: '1' },
+    })
   } catch (e: any) {
     const status = e?.status
     if (e?.code === 'AlreadyVoted') {
       voted.value = true
-      await router.replace({ name: 'vote-results', params: { session: props.session }, query: { submitted: 'already' } })
+      await router.replace({
+        name: 'vote-results',
+        params: { session: props.session },
+        query: { submitted: 'already' },
+      })
       return
     }
     if ((status === 401 || status === 403) && (await isSignedOut())) {
@@ -127,10 +170,12 @@ async function submit() {
         <template #content>
           <div class="p-5">
             <div class="space-y-3">
-              <h1 class="text-xl font-extrabold">You have already voted in this round.</h1>
+              <h1 class="text-xl font-extrabold">
+                You have already voted in this round.
+              </h1>
               <p class="text-sm text-black/60">
-                Your QuizSubmission is recorded and cannot be changed. A new round is
-                needed to vote again.
+                Your QuizSubmission is recorded and cannot be changed. A new
+                round is needed to vote again.
               </p>
               <RouterLink
                 :to="{ name: 'vote-results', params: { session } }"
@@ -168,6 +213,15 @@ async function submit() {
       </Card>
     </div>
 
+    <p
+      v-if="closedWhileAnswering"
+      role="status"
+      class="mt-4 rounded-xl border border-black/10 bg-black/5 p-4 text-sm"
+    >
+      <strong>This round has just been closed.</strong> The presenter closed it
+      while you were answering, so it can no longer take your vote. Your answers
+      are still here, and the results are already available.
+    </p>
     <p v-if="!voted" class="mt-4 text-sm text-black/60">
       Submitting creates your QuizSubmission for this round. You can change your
       answers before submitting, but submitted answers cannot be edited.
