@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,12 +53,19 @@ func TestAPISchemaAndReconcile(t *testing.T) {
 	if room.Spec.JoinCode.ValidFor != "30s" {
 		t.Fatalf("defaults missing: %+v", room.Spec.JoinCode)
 	}
-	for _, mutate := range []func(*api.Room){func(r *api.Room) { r.Spec.Enrollment = "Maybe" }, func(r *api.Room) { r.Spec.AudienceGroup = "system:masters" }, func(r *api.Room) { r.Spec.AllowedReturnURLs = []string{"https://evil.test/"} }, func(r *api.Room) { r.Spec.JoinCode.ValidFor = "60s" }} {
+	for _, mutate := range []func(*api.Room){func(r *api.Room) { r.Spec.Enrollment = "Maybe" }, func(r *api.Room) { r.Spec.AudienceGroup = "system:masters" }, func(r *api.Room) { r.Spec.AllowedReturnURLs = []string{"https://evil.test/"} }, func(r *api.Room) { r.Spec.JoinCode.ValidFor = "60s" }, func(r *api.Room) { r.Spec.AttributionNote = "<b>bold</b>" }, func(r *api.Room) { r.Spec.AttributionNote = strings.Repeat("x", 201) }} {
 		bad := room.DeepCopy()
 		mutate(bad)
 		if db.Update(ctx, bad) == nil {
 			t.Fatal("invalid update accepted")
 		}
+	}
+	room.Spec.AttributionNote = "It labels your changes in Git."
+	if e = db.Update(ctx, room); e != nil {
+		t.Fatalf("attributionNote rejected: %v", e)
+	}
+	if e = db.Get(ctx, key, room); e != nil || room.Spec.AttributionNote != "It labels your changes in Git." {
+		t.Fatalf("attributionNote did not round-trip: %q %v", room.Spec.AttributionNote, e)
 	}
 	rec := &controller.Reconciler{Client: db, Room: key}
 	if _, e = rec.Reconcile(ctx, ctrl.Request{NamespacedName: key}); e != nil {

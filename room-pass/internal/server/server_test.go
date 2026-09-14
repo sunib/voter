@@ -782,6 +782,49 @@ func TestJoinPageShowsTheAddressBeforeAnyScriptRuns(t *testing.T) {
 	}
 }
 
+// What the address is FOR is the operator's to say, not Room Pass's. Room Pass
+// only knows the address is synthetic; whether it lands on a Git commit, an
+// audit line or nothing at all belongs to the application behind it, so the
+// page must claim nothing until a Room says what to claim.
+func TestAttributionNoteIsTheOperatorsToMake(t *testing.T) {
+	s, db := fixture(t, "http://dex.test")
+	b := newBrowser()
+	body := b.request(s, "GET", "https://demo.test/join", nil).Body.String()
+	if strings.Contains(body, "Git") {
+		t.Error("the page invents a claim about Git that no Room made")
+	}
+	if !strings.Contains(body, "never a real mailbox") {
+		t.Error("the page drops the one thing Room Pass does know about the address")
+	}
+
+	room := &api.Room{}
+	if e := db.Get(context.Background(), s.cfg.Room, room); e != nil {
+		t.Fatal(e)
+	}
+	room.Spec.AttributionNote = "It labels your changes in Git."
+	if e := db.Update(context.Background(), room); e != nil {
+		t.Fatal(e)
+	}
+
+	body = b.request(s, "GET", "https://demo.test/join", nil).Body.String()
+	if !strings.Contains(body, "It labels your changes in Git.") {
+		t.Errorf("the join form drops the operator's note: %s", body)
+	}
+
+	// A returning participant is shown the address without being asked to type
+	// anything, so that is precisely where the note has to survive too.
+	_, rest, _ := strings.Cut(body, `name="csrf" value="`)
+	csrf, _, _ := strings.Cut(rest, `"`)
+	if w := b.request(s, "POST", "https://demo.test/join", url.Values{
+		"csrf": {csrf}, "code": {"BCDFGH"}, "name": {"Ada Demo"}, "return": {"https://demo.test/app/"},
+	}); w.Code != 303 {
+		t.Fatalf("enrollment: %d %s", w.Code, w.Body.String())
+	}
+	if body = b.request(s, "GET", "https://demo.test/join", nil).Body.String(); !strings.Contains(body, "It labels your changes in Git.") {
+		t.Errorf("the returning page drops the operator's note: %s", body)
+	}
+}
+
 // A returning participant sees the identity they will reuse, including the
 // address, and is not asked for a room code the page does not even show.
 func TestReturningParticipantSeesTheirIssuedAddress(t *testing.T) {

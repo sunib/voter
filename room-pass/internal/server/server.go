@@ -237,7 +237,7 @@ const participantPrefix = "p-"
 const maxParticipantID = 40
 
 // participantID derives the Participant's object name and the local part of its
-// demo address from the display name the participant typed. The name is the
+// address from the display name the participant typed. The name is the
 // identity here -- no random suffix -- so the mapping must be stable, safe as a
 // Kubernetes name, safe in a Git author line, and reproducible in the browser:
 // the join page previews the address while it is being typed, and a preview
@@ -272,9 +272,10 @@ func participantID(display string) string {
 	return strings.TrimRight(id, "-")
 }
 
-// demoEmail is the only place an author address is formed. RFC 2606 reserves
-// .invalid so the address can never resolve, which is the point: the demo needs
-// an address on its Git commits, not a mailbox.
+// demoEmail is the only place an address is formed. RFC 2606 reserves .invalid
+// so the address can never resolve, which is the point: the application behind
+// Room Pass needs an address-shaped identifier, not a mailbox. What it does
+// with it is its own business -- see Room.spec.attributionNote.
 func demoEmail(id string) string { return id + "@demo.invalid" }
 
 func participantEmail(p *api.Participant) string {
@@ -447,9 +448,9 @@ func (s *Server) csrfReason(r *http.Request) string {
 //
 // The third one is the one that is easy to forget, because in the common
 // deployment it is invisible: when the application and the join form are served
-// from the same host -- which is how Traefik routes /join on voter.koudijs.dev
-// today -- the application origin IS 'self' and the list looks complete while
-// silently depending on that coincidence.
+// from the same host -- one ingress routing /join to Room Pass and everything
+// else to the application -- the application origin IS 'self' and the list looks
+// complete while silently depending on that coincidence.
 //
 // Put the application on its own host and every browser login breaks with a CSP
 // error, while curl and any Go HTTP client sail through, because neither
@@ -521,7 +522,7 @@ var previewScriptSource = func() string {
 	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
 }()
 
-var pageSource = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Join the room</title><style>body{font:18px system-ui;margin:3rem auto;padding:0 1rem;max-width:30rem;background:#f8fafc;color:#172033}input,button{box-sizing:border-box;width:100%;padding:.8rem;margin:.4rem 0 1rem;font:inherit}button{background:#1749a5;color:white;border:0;border-radius:.4rem}label{display:block}small{line-height:1.5}.scanned{background:#e8f0fe;border-radius:.4rem;padding:.6rem .8rem;margin:.4rem 0 1rem}.error{color:#b3261e;font-weight:600}input[aria-invalid=true]{border:2px solid #b3261e;background:#fff5f5}.issued{color:#64748b;font-size:.8em;line-height:1.45;margin:-.7rem 0 1.4rem}.issued .line{display:block;font-size:1.15em;margin-bottom:.35rem}.addr{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#475569;word-break:break-all}</style><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}{{if .Form}}<form method="post" action="/join"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="handoff" value="{{.Handoff}}"><input type="hidden" name="return" value="{{.Return}}">{{if .Enrolled}}<p>You’re already enrolled as <strong>{{.EnrolledName}}</strong>. Continue with the same demo identity.</p><p class="issued"><span class="line">You are joining as <span class="addr">{{.EnrolledEmail}}</span></span>Room Pass built that address from your name, which is why there was nothing to fill in: it labels your changes in Git and is never a real mailbox.</p>{{else}}{{if .Code}}<p class="scanned">Room code <strong>{{.Code}}</strong>, from the code you scanned. <input type="hidden" name="code" value="{{.Code}}"></p>{{else}}<label>Room code<input name="code" required maxlength="24" autocomplete="off" autocapitalize="characters" placeholder="BCDFGH"{{if .CodeInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "code"}} autofocus{{end}}></label>{{end}}<label>Display name<input id="rp-name" name="name" required maxlength="64" autocomplete="nickname" value="{{.Name}}"{{if .NameInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "name"}} autofocus{{end}}></label><p class="issued"><span class="line">You will join as <output id="rp-email" for="rp-name" class="addr">{{.Email}}</output></span>Room Pass builds that address from your name, so there is nothing to fill in: it labels your changes in Git and is never a real mailbox.</p>{{end}}<button>Continue</button></form>{{end}}{{if .Enrolled}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out of this browser</button></form>{{end}}<small>Your name is a demo label, not a verified identity. Demo changes may appear in Git with this name and the address shown above.</small><script>` + previewScript + `</script></html>`
+var pageSource = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Join the room</title><style>body{font:18px system-ui;margin:3rem auto;padding:0 1rem;max-width:30rem;background:#f8fafc;color:#172033}input,button{box-sizing:border-box;width:100%;padding:.8rem;margin:.4rem 0 1rem;font:inherit}button{background:#1749a5;color:white;border:0;border-radius:.4rem}label{display:block}small{line-height:1.5}.scanned{background:#e8f0fe;border-radius:.4rem;padding:.6rem .8rem;margin:.4rem 0 1rem}.error{color:#b3261e;font-weight:600}input[aria-invalid=true]{border:2px solid #b3261e;background:#fff5f5}.issued{color:#64748b;font-size:.8em;line-height:1.45;margin:-.7rem 0 1.4rem}.issued .line{display:block;font-size:1.15em;margin-bottom:.35rem}.addr{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#475569;word-break:break-all}</style><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}{{if .Form}}<form method="post" action="/join"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="handoff" value="{{.Handoff}}"><input type="hidden" name="return" value="{{.Return}}">{{if .Enrolled}}<p>You’re already enrolled as <strong>{{.EnrolledName}}</strong>. Continue with the same identity.</p><p class="issued"><span class="line">You are joining as <span class="addr">{{.EnrolledEmail}}</span></span>Room Pass built that address from your name, which is why there was nothing to fill in: it is never a real mailbox.{{with .AttributionNote}} {{.}}{{end}}</p>{{else}}{{if .Code}}<p class="scanned">Room code <strong>{{.Code}}</strong>, from the code you scanned. <input type="hidden" name="code" value="{{.Code}}"></p>{{else}}<label>Room code<input name="code" required maxlength="24" autocomplete="off" autocapitalize="characters" placeholder="BCDFGH"{{if .CodeInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "code"}} autofocus{{end}}></label>{{end}}<label>Display name<input id="rp-name" name="name" required maxlength="64" autocomplete="nickname" value="{{.Name}}"{{if .NameInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "name"}} autofocus{{end}}></label><p class="issued"><span class="line">You will join as <output id="rp-email" for="rp-name" class="addr">{{.Email}}</output></span>Room Pass builds that address from your name, so there is nothing to fill in: it is never a real mailbox.{{with .AttributionNote}} {{.}}{{end}}</p>{{end}}<button>Continue</button></form>{{end}}{{if .Enrolled}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out of this browser</button></form>{{end}}<small>Your name is an unverified label, not a verified identity. It is shown to the application you are joining, together with the address above.</small><script>` + previewScript + `</script></html>`
 
 func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" && r.Method != "POST" {
@@ -564,7 +565,7 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		if !valid {
 			s.logReject(r, "handoff-invalid", "tx_found", tx != nil, "join_browser_cookie", cookieOK,
 				"confirmed", tx != nil && tx.Confirmed, "already_used", tx != nil && tx.Session != nil)
-			http.Error(w, "Login expired. Start again from the demo.", 400)
+			http.Error(w, "Login expired. Start again from the application.", 400)
 			return
 		}
 	}
@@ -572,8 +573,8 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	enrolled := s.decode(r, "__Host-rp-session", &ss) == nil
 	// The name the participant chose, shown back to them when they are already
 	// enrolled. Someone returning to this page has no other way to see which
-	// identity they are about to continue as -- and the whole point of the demo
-	// is that their name ends up on a Git commit.
+	// identity they are about to continue as -- and the name is the identity
+	// here, so it is the one thing worth showing.
 	enrolledName, enrolledEmail := "", ""
 	if enrolled {
 		_, p, e := s.identity(r.Context(), ss)
@@ -601,10 +602,10 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	}
 	form := true
 	if !controller.Active(room, s.now()) {
-		message = "This demo has ended."
+		message = "This room has closed."
 		form = false
 	} else if room.Spec.Enrollment != "Open" && !enrolled {
-		message = "Joining is closed. If you already joined, return to the demo."
+		message = "Joining is closed. If you already joined, return to the application."
 		form = false
 	}
 	// A mistyped code is the one mistake every audience makes, so it returns the form
@@ -633,7 +634,7 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		// Email is what the script would compute for the name already in the
 		// box, so a browser with script disabled and a form that came back with
 		// a typed name both still show the address that is actually on offer.
-		_ = page.Execute(w, map[string]any{"Title": room.Spec.Title, "Message": message, "Form": form, "CSRF": csrf, "Handoff": handoff, "Return": dest, "Enrolled": enrolled, "EnrolledName": enrolledName, "EnrolledEmail": enrolledEmail, "Code": scanned, "Error": failure, "Name": name, "Email": emailPreview(name), "Focus": focus, "CodeInvalid": field == "code", "NameInvalid": field == "name"})
+		_ = page.Execute(w, map[string]any{"Title": room.Spec.Title, "AttributionNote": room.Spec.AttributionNote, "Message": message, "Form": form, "CSRF": csrf, "Handoff": handoff, "Return": dest, "Enrolled": enrolled, "EnrolledName": enrolledName, "EnrolledEmail": enrolledEmail, "Code": scanned, "Error": failure, "Name": name, "Email": emailPreview(name), "Focus": focus, "CodeInvalid": field == "code", "NameInvalid": field == "name"})
 	}
 	if r.Method == "GET" {
 		render(200, "", "", "")

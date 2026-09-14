@@ -69,14 +69,19 @@ tasks:
     # tool rather than a page in the application, which would need an operator
     # login of its own.
     #
-    #   task room-pass:present BASE=https://voter.koudijs.dev NEXT=/answer/round-1
+    # BASE is the application's origin and has no default: it is the one thing
+    # this tool cannot guess, and guessing it would print a QR code that quietly
+    # sends the room somewhere else.
+    #
+    #   task room-pass:present BASE=https://app.example.com NEXT=/answer/round-1
     vars:
-      BASE: '{{.BASE | default "https://voter.koudijs.dev"}}'
+      BASE: '{{.BASE}}'
       NEXT: '{{.NEXT | default "/"}}'
       ROOM: '{{.ROOM | default "demo"}}'
-      ROOM_NAMESPACE: '{{.ROOM_NAMESPACE | default "voter"}}'
+      ROOM_NAMESPACE: '{{.ROOM_NAMESPACE | default "room-pass"}}'
+      LOGIN_PATH: '{{.LOGIN_PATH | default "/auth/login"}}'
     cmds:
-      - go run ./cmd/room-qr --base {{.BASE}} --next {{.NEXT}} --room {{.ROOM}} --namespace {{.ROOM_NAMESPACE}}
+      - go run ./cmd/room-qr --base {{.BASE}} --next {{.NEXT}} --room {{.ROOM}} --namespace {{.ROOM_NAMESPACE}} --login-path {{.LOGIN_PATH}}
 
   image:
     desc: Build the standalone Room Pass image

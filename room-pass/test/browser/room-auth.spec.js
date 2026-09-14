@@ -138,7 +138,7 @@ test("closing enrollment removes the browser join form", async ({ page }) => {
     await page.goto("/app/login");
     await expect(
       page.getByText(
-        "Joining is closed. If you already joined, return to the demo.",
+        "Joining is closed. If you already joined, return to the application.",
         { exact: true },
       ),
     ).toBeVisible();

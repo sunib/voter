@@ -19,6 +19,10 @@ rules:
     verbs: [get, list, create]
   - apiGroups: ['']
     resources: [secrets]
+    # Fixed name, matched by cookieSecretName in cmd/room-pass/main.go. It is
+    # deliberately not configurable: resourceNames is what keeps this Role from
+    # being "read any Secret in the namespace", so the two have to agree and a
+    # knob on one side alone would only ever fail closed.
     resourceNames: [room-pass-cookie]
     verbs: [get]
 ---

@@ -38,6 +38,14 @@ func number(k string, d int) int {
 	}
 	return v
 }
+
+// cookieSecretName is fixed, not an environment variable. The Role that lets
+// this process read it pins the name in resourceNames, so a configurable name
+// would be a knob whose only reachable setting is this one: any other value
+// fails closed at startup with Forbidden. Change it in deploy/base/rbac.yaml
+// and here together, or not at all.
+const cookieSecretName = "room-pass-cookie"
+
 func main() {
 	if e := run(); e != nil {
 		log.Fatal(e)
@@ -60,7 +68,7 @@ func run() error {
 		return e
 	}
 	secret := &corev1.Secret{}
-	if e = db.Get(ctx, client.ObjectKey{Namespace: ns, Name: env("COOKIE_SECRET", "room-pass-cookie")}, secret); e != nil {
+	if e = db.Get(ctx, client.ObjectKey{Namespace: ns, Name: cookieSecretName}, secret); e != nil {
 		return fmt.Errorf("cookie secret: %w", e)
 	}
 	app, e := server.New(server.Config{Room: key, ConnectorID: env("CONNECTOR_ID", "room-pass"), JoinOrigin: os.Getenv("JOIN_ORIGIN"), IssuerOrigin: os.Getenv("ISSUER_ORIGIN"), DexUpstream: os.Getenv("DEX_UPSTREAM"), AllowedReturns: strings.Split(os.Getenv("ALLOWED_RETURN_URLS"), ","), HashKey: secret.Data["hash-key"], BlockKey: secret.Data["block-key"], CookieLifetime: time.Duration(number("COOKIE_LIFETIME_SECONDS", 86400)) * time.Second, JoinRate: rate.Limit(number("JOIN_RATE", 20)), JoinBurst: number("JOIN_BURST", 150), HandoffRate: rate.Limit(number("HANDOFF_RATE", 20)), HandoffBurst: number("HANDOFF_BURST", 150), MaxHandoffs: number("MAX_HANDOFFS", 1000)}, db)

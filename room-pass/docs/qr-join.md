@@ -111,10 +111,15 @@ The code rotates every `rotateEvery` and stays valid for `validFor`, so a
 screen as the code turns over:
 
 ```
-task room-pass:present BASE=https://voter.koudijs.dev NEXT=/answer/round-1
+task room-pass:present BASE=https://app.example.com NEXT=/answer/round-1
 ```
 
-That is `cmd/room-qr`, which follows the Room's status and redraws. It runs
+That is `cmd/room-qr`, which follows the Room's status and redraws. `BASE` and
+`LOGIN_PATH` (default `/auth/login`) name the application's login endpoint, which
+is the one part of the scanned URL Room Pass does not own; the `code` and
+`return` query parameters are the contract an application implements to be
+scannable. `ROOM_NAMESPACE` defaults to `room-pass` and has to be set when the
+Room lives beside the application instead. It runs
 under the operator's own kubeconfig, so Kubernetes decides who may see a join
 code — the same reason it is not a page in the application, which would need an
 operator login of its own built and got right.

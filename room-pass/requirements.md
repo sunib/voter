@@ -30,8 +30,10 @@ Room Pass enrollment. Reauthentication in the same enrolled browser preserves id
 The participant page should be phone-friendly and explain three things plainly:
 
 - Enter the room code and choose a display name.
-- The name is a demo label, not a verified personal identity.
-- Demo changes may appear in Git with that name and a generated email address.
+- The name is an unverified label, not a verified personal identity.
+- The generated address is synthetic and never a real mailbox. What the
+  application behind Room Pass does with the name and address is the operator's
+  to state, in `Room.spec.attributionNote`; Room Pass does not claim it.
 
 Do not show issuer URLs, Kubernetes groups, token details, or other implementation
 settings in the normal join flow.
@@ -70,6 +72,7 @@ metadata:
   namespace: room-pass
 spec:
   title: ConfigButler demo
+  attributionNote: It labels your changes in Git and is never a real mailbox.
   endsAt: "2026-09-16T16:00:00Z" # illustrative; choose the actual event time
   enrollment: Open
   stopped: false
@@ -87,6 +90,7 @@ spec:
 | Desired field | Contract |
 |---|---|
 | `title` | Required, nonempty, bounded display text |
+| `attributionNote` | Optional, bounded text shown beside the issued address. The operator's sentence about what the application does with it; Room Pass only guarantees the address is unroutable |
 | `endsAt` | Required timestamp, editable by operators to accommodate schedule changes; shortening ends access sooner and extending can reopen an expired, non-stopped Room |
 | `enrollment` | `Open` or `Closed`; defaults to `Closed` |
 | `stopped` | Defaults to false; transition to true is irreversible for this object |
@@ -412,8 +416,8 @@ These checks define completion; they are not claims that anything has passed yet
 | Fresh mobile browser, valid code and nickname | One enrollment and successful return to the intended app |
 | Invalid code, invalid name, missing fields | Clear error; no enrollment or identity assertion |
 | Room full | “This room is full. Please ask the presenter.” |
-| Room stopped/expired | “This demo has ended.” |
-| Enrollment closed | “Joining is closed. If you already joined, return to the demo.” |
+| Room stopped/expired | “This room has closed.” |
+| Enrollment closed | “Joining is closed. If you already joined, return to the application.” |
 | Room end extended with a valid cookie | Same Participant remains usable under the new schedule |
 | Intentional shared audience group | Both Rooms may use it; no uniqueness rejection |
 | Sign out then join again | New Participant; no promise of nickname-based identity recovery |

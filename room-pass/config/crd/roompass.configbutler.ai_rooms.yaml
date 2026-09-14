@@ -61,6 +61,17 @@ spec:
                 x-kubernetes-validations:
                 - message: allowedReturnURLs is immutable
                   rule: self == oldSelf
+              attributionNote:
+                description: |-
+                  AttributionNote is the operator's one sentence about what the issued
+                  address is for. Room Pass knows the address is synthetic and never a real
+                  mailbox; what the application behind it does with the address -- put it on
+                  a Git commit, write it to an audit log, nothing at all -- is not Room
+                  Pass's to claim. Empty means the join page claims nothing beyond the
+                  address being unroutable.
+                maxLength: 200
+                pattern: ^[^<>\x00-\x1f\x7f]*$
+                type: string
               audienceGroup:
                 description: AudienceGroup selects operator-managed RBAC; Room Pass
                   never creates grants.

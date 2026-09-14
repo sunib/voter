@@ -59,12 +59,16 @@ kubectl -n demo get configmaps
 Or project a QR code instead, so nobody has to type anything but a name:
 
 ```sh
-task room-pass:present BASE=https://voter.koudijs.dev NEXT=/answer/round-1
+task room-pass:present BASE=https://demo.roompass.test:18443 NEXT=/answer/round-1
 ```
 
 That follows the rotating code and redraws, under your own kubeconfig — a join code is
 operator-only credential material, so Kubernetes decides who may see one. The scan lands
 on the application's login URL carrying both the code and the page to finish on.
+
+`BASE`, `ROOM_NAMESPACE` (default `room-pass`) and `LOGIN_PATH` (default `/auth/login`)
+belong to the application, not to Room Pass: the login endpoint is the application's, and
+the QR contract it has to implement is the two query parameters `code` and `return`.
 
 That works through a general Room Pass integration point: **an application sharing the
 join host may pre-supply a room code in the `__Host-room-pass-joincode` cookie**, and the

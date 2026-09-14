@@ -12,13 +12,20 @@
 // tool that runs under the operator's own kubeconfig inherits the answer
 // Kubernetes already gives. If you cannot read rooms/status, you get nothing.
 //
-//	go run ./cmd/room-qr --room demo --namespace voter \
-//	  --base https://voter.koudijs.dev --next /answer/round-1
+//	go run ./cmd/room-qr --room demo --namespace room-pass \
+//	  --base https://app.example.com --next /answer/round-1
 //
 // The QR encodes the application's login URL with two parameters: the code, so
 // the participant never types it, and the destination, so they arrive at the
 // questionnaire rather than the front page. Everything else -- Dex, the
 // enrollment, the token exchange -- is the ordinary flow.
+//
+// That URL is the one thing here that belongs to the application rather than to
+// Room Pass, so it is configurable: --login-path names the endpoint that starts
+// login. The two query parameters are the contract an application implements to
+// be scannable -- "code" carries the join code and "return" the path to land on
+// -- and an application that reads them under different names should be given
+// the names it expects, not a different tool.
 package main
 
 import (
@@ -50,6 +57,7 @@ func main() {
 type options struct {
 	room, namespace string
 	base, next      string
+	loginPath       string
 	interval        time.Duration
 	once            bool
 }
@@ -57,9 +65,10 @@ type options struct {
 func run() error {
 	var o options
 	flag.StringVar(&o.room, "room", "demo", "Room name")
-	flag.StringVar(&o.namespace, "namespace", "voter", "Room namespace")
-	flag.StringVar(&o.base, "base", "", "Application origin, e.g. https://voter.koudijs.dev (required)")
+	flag.StringVar(&o.namespace, "namespace", "room-pass", "Room namespace")
+	flag.StringVar(&o.base, "base", "", "Application origin, e.g. https://app.example.com (required)")
 	flag.StringVar(&o.next, "next", "/", "Absolute path within the application to land on after login")
+	flag.StringVar(&o.loginPath, "login-path", "/auth/login", "Absolute path of the application endpoint that starts login")
 	flag.DurationVar(&o.interval, "interval", time.Second, "How often to re-read the Room")
 	flag.BoolVar(&o.once, "once", false, "Print one QR code and exit, instead of following rotation")
 	flag.Parse()
@@ -142,7 +151,7 @@ func run() error {
 func (o *options) validate() error {
 	u, err := url.Parse(o.base)
 	if err != nil || u.Scheme == "" || u.Host == "" || u.Path != "" || u.RawQuery != "" {
-		return errors.New("--base must be a bare origin such as https://voter.koudijs.dev")
+		return errors.New("--base must be a bare origin such as https://app.example.com")
 	}
 	if u.Scheme != "https" && u.Hostname() != "localhost" && u.Hostname() != "127.0.0.1" {
 		// A camera app follows whatever the QR code says. Handing the room an
@@ -151,6 +160,15 @@ func (o *options) validate() error {
 	}
 	if !strings.HasPrefix(o.next, "/") || strings.HasPrefix(o.next, "//") {
 		return errors.New("--next must be an absolute path within the application, such as /answer/round-1")
+	}
+	// Same shape as --next, and for the same reason: "//evil.example" is a
+	// protocol-relative URL, and a QR code is scanned by a camera app that
+	// follows whatever it is handed without showing anyone the destination.
+	if !strings.HasPrefix(o.loginPath, "/") || strings.HasPrefix(o.loginPath, "//") {
+		return errors.New("--login-path must be an absolute path within the application, such as /auth/login")
+	}
+	if u, err := url.Parse(o.loginPath); err != nil || u.RawQuery != "" || u.Fragment != "" {
+		return errors.New("--login-path must not carry a query string or fragment")
 	}
 	if o.interval < 100*time.Millisecond {
 		return errors.New("--interval is too short")
@@ -166,7 +184,7 @@ func (o *options) joinURL(code string) string {
 	if o.next != "/" {
 		q.Set("return", o.next)
 	}
-	return o.base + "/auth/login?" + q.Encode()
+	return o.base + o.loginPath + "?" + q.Encode()
 }
 
 const clearScreen = "\033[H\033[2J"

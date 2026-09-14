@@ -38,6 +38,16 @@ type RoomSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=120
 	Title string `json:"title"`
+	// AttributionNote is the operator's one sentence about what the issued
+	// address is for. Room Pass knows the address is synthetic and never a real
+	// mailbox; what the application behind it does with the address -- put it on
+	// a Git commit, write it to an audit log, nothing at all -- is not Room
+	// Pass's to claim. Empty means the join page claims nothing beyond the
+	// address being unroutable.
+	// +kubebuilder:validation:MaxLength=200
+	// +kubebuilder:validation:Pattern="^[^<>\\x00-\\x1f\\x7f]*$"
+	// +optional
+	AttributionNote string `json:"attributionNote,omitempty"`
 	// EndsAt can be extended without changing participant identities.
 	EndsAt metav1.Time `json:"endsAt"`
 	// +kubebuilder:default=Closed
