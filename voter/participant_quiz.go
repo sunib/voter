@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 var quizSessions = schema.GroupVersionResource{Group: "examples.configbutler.ai", Version: "v1alpha1", Resource: "quizsessions"}
@@ -223,6 +224,49 @@ func registerParticipantQuizHandlers(mux *http.ServeMux, deps handlerDeps) {
 			return
 		}
 		writeJSON(w, 201, map[string]string{"name": name})
+	}))
+	// Opening and closing a round from the operator page, instead of through a
+	// commit and a Flux reconcile. There is no admin check here on purpose: the
+	// patch goes to Kubernetes with the caller's OWN token, so the answer comes
+	// from RBAC. A participant holds get/list/watch on quizsessions and nothing
+	// more, and the 403 the API server writes is the message the page shows --
+	// the demo is better when the refusal is real.
+	mux.HandleFunc("/public/rounds/{name}/state", requireParticipant(deps.cfg, func(w http.ResponseWriter, r *http.Request, s participantSession) {
+		noStore(w)
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", 405)
+			return
+		}
+		var body struct {
+			State string `json:"state"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+			writeJSON(w, 400, map[string]string{"error": "could not read the requested state"})
+			return
+		}
+		// Only the two states an operator drives from a page. "draft" is the
+		// presenter's scratch space and belongs in Git, where a round is
+		// written; letting a button return a live round to it would hide it
+		// from the room mid-demo with no record of who did it.
+		if body.State != "live" && body.State != "closed" {
+			writeJSON(w, 400, map[string]string{"error": `state must be "live" or "closed"`})
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		clients, err := deps.participantClientsFor(s.IDToken)
+		if err != nil {
+			writeParticipantKubeError(w, err)
+			return
+		}
+		patch := []byte(`{"spec":{"state":"` + body.State + `"}}`)
+		updated, err := clients.dynamic.Resource(quizSessions).Namespace(deps.defaultNS).
+			Patch(ctx, r.PathValue("name"), types.MergePatchType, patch, metav1.PatchOptions{})
+		if err != nil {
+			writeParticipantKubeError(w, err)
+			return
+		}
+		writeJSON(w, 200, updated)
 	}))
 	mux.HandleFunc("/public/rounds/{name}/results", requireParticipant(deps.cfg, func(w http.ResponseWriter, r *http.Request, s participantSession) {
 		noStore(w)

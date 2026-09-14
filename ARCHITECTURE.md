@@ -50,6 +50,26 @@ sequenceDiagram
     V->>K: Request with participant's own ID token
 ```
 
+## The operator page
+
+`/room` is the presenter's own screen: the Room's rotating join code as a QR, and
+open/close for each round. It holds no admin check. The page opens the same
+watches any signed-in browser may ask for, carrying that browser's own token, and
+renders what Kubernetes is willing to send — a participant's RBAC grants nothing
+on rooms, so a participant sees a refusal and no code. `/admin` stays public on
+purpose: editing the CoffeeConfig is a thing the audience is meant to do.
+
+Two locks guard the stream. `scopePolicy` in `participant_stream.go` says which
+KINDS may be streamed at all and `streamAllowlist` says which objects of them, so
+a verb granted to the audience for some other reason cannot by itself become a
+new stream; RBAC then decides per subscriber. Opening a round patches the
+QuizSession with the caller's own token, which is why the refusal a participant
+sees is the API server's own.
+
+Operators reach `/room` through `/auth/login?connector=github`, allowlisted by
+`OIDC_CONNECTOR_CHOICES`. The default path is unchanged and still sends a room
+full of strangers straight to the Room Pass join form.
+
 Room Pass is currently an **authenticating proxy for Dex**, not an OAuth authorization
 server or standalone OpenID Provider. Dex's authproxy connector consumes a trusted
 upstream identity; Dex handles the application's OAuth/OIDC exchange. See
@@ -360,7 +380,7 @@ the previous Voter image while retaining the quiz.
 
 The restored voting flow uses the same Dex application session as coffee. Voting
 and coffee are peers in the SPA: `/` is a home page that shows the signed-in
-identity, lists the open rounds and links to the coffee shop at `/coffee`, and a
+identity, lists the open rounds and links to the coffee bar at `/coffee`, and a
 top bar carries the same two-tab navigation on every screen. The home page
 reads QuizSessions through `/public/rounds`; `/answer/:session` reads a fresh round
 and posts answers with its UID/resourceVersion and the session CSRF token. The

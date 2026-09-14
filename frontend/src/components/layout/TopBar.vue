@@ -20,15 +20,18 @@ const route = useRoute()
 const tabs = [
   { key: 'quizzes', to: '/', label: 'Quizzes' },
   { key: 'coffee', to: '/coffee', label: 'Coffee' },
+  { key: 'room', to: '/room', label: 'Room' },
 ] as const
 
 // By route name, not by path prefix: /answer/:session and /thanks live at the
 // root but belong to a half each, and RouterLink's own active matching would
 // light up "Quizzes" for every route in the app because its path is "/".
 const coffeeRoutes = new Set(['order', 'thanks', 'admin'])
-const activeTab = computed(() =>
-  coffeeRoutes.has(String(route.name ?? '')) ? 'coffee' : 'quizzes',
-)
+const activeTab = computed(() => {
+  const name = String(route.name ?? '')
+  if (name === 'room') return 'room'
+  return coffeeRoutes.has(name) ? 'coffee' : 'quizzes'
+})
 
 const widthClass = computed(() => shellWidthClass(props.width))
 </script>

@@ -1272,3 +1272,67 @@ p {
 .results-back {
   margin-top: 1.2rem;
 }
+
+.identity-technical {
+  margin-top: 0.8rem;
+  font-size: 0.82rem;
+  color: rgb(var(--muted));
+}
+
+.identity-technical summary {
+  cursor: pointer;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+}
+
+.identity-technical p {
+  margin: 0.5rem 0;
+  max-width: 44rem;
+}
+
+.identity-technical code {
+  display: block;
+  padding: 0.5rem 0.7rem;
+  border-radius: 12px;
+  background: rgb(var(--line) / 0.05);
+  color: rgb(var(--ink));
+  overflow-wrap: anywhere;
+}
+
+/* The projector view: the code has to read across a room. */
+
+.room-qr {
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.room-qr__code {
+  width: min(16rem, 60vw);
+  padding: 0.8rem;
+  border-radius: 20px;
+  background: white;
+  line-height: 0;
+}
+
+.room-qr__code svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.room-qr__meta {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.room-qr__value {
+  font-family: var(--font-display);
+  font-size: clamp(2.6rem, 9vw, 4.4rem);
+  line-height: 1;
+  letter-spacing: 0.1em;
+}

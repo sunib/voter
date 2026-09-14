@@ -35,6 +35,12 @@ type config struct {
 
 	CoffeeConfigName string `envconfig:"COFFEE_CONFIG_NAME" default:"testnet-coffee"`
 
+	// RoomName is the Room whose rotating join code the operator page renders as
+	// a QR. Naming it here rather than taking it from the URL keeps the stream
+	// pinned to one object: a reader who can see rooms still cannot point this
+	// endpoint at somebody else's.
+	RoomName string `envconfig:"ROOM_NAME" default:"demo"`
+
 	// ConfigButlerGitTargetName names the ConfigButler GitTarget whose open
 	// commit window should be finalized after a successful CoffeeConfig patch.
 	// Set to "" to disable the save-message side effect entirely.

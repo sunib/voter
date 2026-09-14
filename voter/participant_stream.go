@@ -28,6 +28,24 @@ var scopePolicy = gateway.ScopePolicy{
 			Resource: "coffeeconfigs",
 			Scope:    gateway.ResourceScopeNamespaced,
 		},
+		// Rounds opening and closing reach every phone in the room without a
+		// reload. Participants already hold get/list/watch on these.
+		{
+			Group:    "examples.configbutler.ai",
+			Resource: "quizsessions",
+			Scope:    gateway.ResourceScopeNamespaced,
+		},
+		// The operator page's QR code follows the join code as it rotates.
+		// Allowlisting the KIND is not permission to read one: the join code is
+		// operator-only credential material living in the Room's status, and a
+		// participant's RBAC grants nothing on rooms at all. That refusal is
+		// Kubernetes', not this allowlist's, which is the whole point of having
+		// both -- see room-pass/cmd/room-qr for why this material is guarded.
+		{
+			Group:    "roompass.configbutler.ai",
+			Resource: "rooms",
+			Scope:    gateway.ResourceScopeNamespaced,
+		},
 	},
 }
 
@@ -48,7 +66,11 @@ func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 	if streams == nil {
 		panic("participant stream handlers require a stream runtime")
 	}
-	pinned := coffeeConfigScope{namespace: deps.defaultNS, name: cfg.CoffeeConfigName}
+	pinned := streamAllowlist{
+		{Group: "examples.configbutler.ai", Version: "v1alpha1", Resource: "coffeeconfigs", Namespace: deps.defaultNS, Name: cfg.CoffeeConfigName},
+		{Group: "examples.configbutler.ai", Version: "v1alpha1", Resource: "quizsessions", Namespace: deps.defaultNS},
+		{Group: "roompass.configbutler.ai", Version: "v1alpha1", Resource: "rooms", Namespace: deps.defaultNS, Name: cfg.RoomName},
+	}
 
 	g := &gateway.Gateway{
 		Auth: gateway.AuthorizerFunc(func(ctx context.Context, p gateway.Principal, scope gateway.Scope) error {
@@ -133,15 +155,27 @@ func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 	}))
 }
 
-// coffeeConfigScope pins the one object this stream serves. scopePolicy above
-// says which KIND may be streamed at all; this says WHICH ONE.
-type coffeeConfigScope struct{ namespace, name string }
+// streamAllowlist pins the exact objects this stream serves. scopePolicy above
+// says which KINDS may be streamed at all; this says WHICH ONES of them, so a
+// newly granted RBAC verb never silently widens what the endpoint will carry.
+//
+// An entry whose name is empty admits that whole collection in the namespace,
+// and a single object within it. That is deliberate for quizsessions, where the
+// point is watching rounds appear and change state; it is not a second grant,
+// because every subscriber is still access-reviewed as itself.
+type streamAllowlist []gateway.Scope
 
-func (a coffeeConfigScope) check(scope gateway.Scope) error {
-	if scope.Namespace != a.namespace || scope.Name != a.name || scope.Version != "v1alpha1" {
-		return gateway.Forbidden("stream is restricted to the configured CoffeeConfig")
+func (a streamAllowlist) check(scope gateway.Scope) error {
+	for _, allowed := range a {
+		switch {
+		case scope.Group != allowed.Group, scope.Resource != allowed.Resource:
+		case scope.Version != allowed.Version, scope.Namespace != allowed.Namespace:
+		case allowed.Name != "" && scope.Name != allowed.Name:
+		default:
+			return nil
+		}
 	}
-	return nil
+	return gateway.Forbidden("stream is restricted to this demo's own objects")
 }
 
 // The client here MUST authenticate as the participant. Using the shared

@@ -60,6 +60,7 @@ func registerOIDCHandlers(mux *http.ServeMux, p *oidcProvider, cfg config, names
 			// just means the browser never has to guess.
 			"namespace":        namespace,
 			"coffeeConfigName": cfg.CoffeeConfigName,
+			"roomName":         cfg.RoomName,
 		})
 	})
 

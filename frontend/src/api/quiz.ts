@@ -28,4 +28,10 @@ export interface RoundResults {
   total: number
   questions: { question: NonNullable<QuizSessionSpec['questions']>[number]; count: number; choices: Record<string, number>; sum: number; text: string[] }[]
 }
+/** Open or close a round. There is no client-side permission check on purpose:
+ *  the backend patches with the caller's own token, so a participant gets the
+ *  API server's own 403 and the page shows it. */
+export const setRoundState = (name: string, state: 'live' | 'closed') =>
+  request<Record<string, unknown>>(`/${encodeURIComponent(name)}/state`, { state })
+
 export const getRoundResults = (name: string) => request<RoundResults>(`/${encodeURIComponent(name)}/results`)

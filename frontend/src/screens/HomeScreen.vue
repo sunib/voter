@@ -6,6 +6,7 @@
 import { computed, onMounted, ref } from 'vue'
 
 import AppShell from '../components/layout/AppShell.vue'
+import { useLiveResources } from '../api/liveResources'
 import { listRounds } from '../api/quiz'
 import { currentSession, getSession, type Session } from '../api/session'
 import type { QuizSession } from '../api/types'
@@ -17,11 +18,31 @@ const rounds = ref<QuizSession[]>([])
 const error = ref('')
 const busy = ref(false)
 
+// The list arrives twice on purpose. The REST read is the first paint, and the
+// fallback for an identity the stream cannot serve; the watch is what makes a
+// round opening on the operator's screen reach this phone without a refresh.
+const live = useLiveResources({
+  group: 'examples.configbutler.ai',
+  version: 'v1alpha1',
+  resource: 'quizsessions',
+  namespace: currentSession()?.namespace ?? '',
+})
+
+// Drafts are the presenter's scratch space: a round only exists for the room
+// once it is live, and stays listed once closed so results survive.
+const allRounds = computed<QuizSession[]>(() => {
+  const streamed = live.items.value as unknown as QuizSession[]
+  const source = live.synced() && streamed.length ? streamed : rounds.value
+  return source
+    .filter((round) => round.spec.state !== 'draft')
+    .sort((a, b) => (a.metadata.name ?? '').localeCompare(b.metadata.name ?? ''))
+})
+
 const openRounds = computed(() =>
-  rounds.value.filter((round) => round.spec.state === 'live'),
+  allRounds.value.filter((round) => round.spec.state === 'live'),
 )
 const closedRounds = computed(() =>
-  rounds.value.filter((round) => round.spec.state === 'closed'),
+  allRounds.value.filter((round) => round.spec.state === 'closed'),
 )
 
 const displayName = computed(() => session.value?.displayName?.trim() ?? '')
@@ -32,13 +53,7 @@ async function refresh() {
   busy.value = true
   error.value = ''
   try {
-    // Drafts are the presenter's scratch space: a round only exists for the
-    // room once it is live, and stays listed once closed so results survive.
     rounds.value = (await listRounds()).items
-      .filter((round) => round.spec.state !== 'draft')
-      .sort((a, b) =>
-        (a.metadata.name ?? '').localeCompare(b.metadata.name ?? ''),
-      )
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Could not load quizzes.'
   } finally {
@@ -62,7 +77,6 @@ onMounted(async () => {
         }}</span>
         <h1 class="identity-card__name">{{ displayName || 'Loading…' }}</h1>
         <div v-if="session" class="identity-card__facts">
-          <span class="pill">{{ session.username }}</span>
           <span v-if="session.email" class="pill">{{ session.email }}</span>
           <span v-for="group in groups" :key="group" class="pill pill--good">
             {{ group }}
@@ -74,6 +88,19 @@ onMounted(async () => {
         here. It came from Room Pass through Dex — the browser never asserted
         it.
       </p>
+      <!-- Folded away, and labelled for what it is. A room participant's
+           Kubernetes username is Dex's opaque subject, so leading with it read
+           as "your name is gibberish" when it is really the string RBAC
+           matches on. -->
+      <details v-if="session" class="identity-technical">
+        <summary>Technical identity</summary>
+        <p>
+          Kubernetes authorizes the username below, not your display name. For a
+          room participant it is Dex's opaque subject — deliberately so: nobody
+          can collide with it by typing your name into the join form.
+        </p>
+        <code>{{ session.username }}</code>
+      </details>
     </section>
 
     <section class="panel">
@@ -155,7 +182,7 @@ onMounted(async () => {
     <section class="panel">
       <div class="coffee-invite">
         <div class="coffee-invite__copy">
-          <h2>Coffee shop</h2>
+          <h2>Coffee bar</h2>
           <p class="hero-copy">
             Order a coffee while someone edits the menu live on stage. Prices
             and vouchers come from the same cluster objects your votes are
@@ -163,7 +190,7 @@ onMounted(async () => {
           </p>
         </div>
         <RouterLink class="button" to="/coffee"
-          >Open the coffee shop</RouterLink
+          >Open the coffee bar</RouterLink
         >
       </div>
     </section>

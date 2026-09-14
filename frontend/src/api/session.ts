@@ -18,6 +18,8 @@ export interface Session {
    *  to guess (or be told by a URL). */
   namespace: string
   coffeeConfigName: string
+  /** The Room whose join code the operator page renders. */
+  roomName: string
 }
 
 // The CSRF token the backend issued for this session.

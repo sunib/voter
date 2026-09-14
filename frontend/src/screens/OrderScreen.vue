@@ -175,7 +175,7 @@ watch(
 </script>
 
 <template>
-  <AppShell title="Coffee shop">
+  <AppShell title="Coffee bar">
     <section v-if="live && !live.synced.value" class="panel" role="status">
       <p>
         {{

@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import { getSession } from './api/session'
 import HomeScreen from './screens/HomeScreen.vue'
+import RoomScreen from './screens/RoomScreen.vue'
 import OrderScreen from './screens/OrderScreen.vue'
 import AdminScreen from './screens/AdminScreen.vue'
 import VoteResultsScreen from './screens/VoteResultsScreen.vue'
@@ -35,6 +36,13 @@ export const router = createRouter({
       path: '/coffee',
       name: 'order',
       component: OrderScreen,
+    },
+    // The operator's page. No route guard beyond "signed in": what an identity
+    // may see here is Kubernetes' answer, and the screen renders the refusal.
+    {
+      path: '/room',
+      name: 'room',
+      component: RoomScreen,
     },
     {
       path: '/admin',
