@@ -72,7 +72,7 @@ metadata:
   namespace: room-pass
 spec:
   title: ConfigButler demo
-  attributionNote: It labels your changes in Git and is never a real mailbox.
+  attributionNote: It labels your changes in Git.
   endsAt: "2026-09-16T16:00:00Z" # illustrative; choose the actual event time
   enrollment: Open
   stopped: false

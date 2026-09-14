@@ -44,6 +44,10 @@ type RoomSpec struct {
 	// a Git commit, write it to an audit log, nothing at all -- is not Room
 	// Pass's to claim. Empty means the join page claims nothing beyond the
 	// address being unroutable.
+	//
+	// It is appended to a sentence that already ends "...it is never a real
+	// mailbox", so say only what Room Pass cannot: "It labels your changes in
+	// Git." Repeating the mailbox clause reads as a stutter on the page.
 	// +kubebuilder:validation:MaxLength=200
 	// +kubebuilder:validation:Pattern="^[^<>\\x00-\\x1f\\x7f]*$"
 	// +optional

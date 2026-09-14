@@ -67,7 +67,7 @@ spec:
   title: Room Pass local demo
   # The example client writes to a ConfigMap, so this is what this Room claims.
   # Room Pass itself claims only that the address is unroutable.
-  attributionNote: It labels the change you are about to make and is never a real mailbox.
+  attributionNote: It labels the change you are about to make in the cluster.
   endsAt: "$ends_at"
   enrollment: Open
   maxParticipants: 300
