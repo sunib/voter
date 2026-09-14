@@ -24,6 +24,9 @@ binding and conditional-save controller are tested, copyable examples, not packa
 exports. Voter may own thin binding/request glue while the core owns reconciliation.
 Proposal 0005 is discussion; 0006 sequences follow-ups. Neither makes upstream watch
 continuation, replay, version notifications or a generic writer released capabilities.
+What using the library has taught us, including the places Voter works around it
+and the ones where we think it is right as it stands, is collected for its
+maintainers in [docs/krm-stream-feedback.md](docs/krm-stream-feedback.md).
 
 ## Identity flow and Room Pass's product boundary
 

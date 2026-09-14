@@ -123,6 +123,25 @@ describe('CoffeeConfig library integration', () => {
     ])
   })
 
+  // Pinned because a screen marks FIELDS: the library flashes a remote change
+  // inside a list at the list's own path, so a per-field flash lookup finds
+  // nothing to highlight. See docs/krm-stream-feedback.md.
+  it('flashes a remote change inside a list at the list, not at the field', async () => {
+    const { live, event } = await fixture()
+    const moved = object('2')
+    moved.spec.products = [
+      { sku: 'a', name: 'A', priceCents: 425, enabled: true },
+    ]
+    await event({ type: 'modified', object: moved, redacted: [] })
+
+    // resourceVersion moves on every event; spec.products is the interesting
+    // one -- the whole list, never spec.products.0.priceCents.
+    expect(live.flashed.value.map((path) => path.join('.'))).toEqual([
+      'metadata.resourceVersion',
+      'spec.products',
+    ])
+  })
+
   it('names one field when one price is edited', async () => {
     const { live } = await fixture()
     live.setValue(['spec', 'products', 0, 'priceCents'], 275)
