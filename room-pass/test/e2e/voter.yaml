@@ -9,10 +9,26 @@ kind: Role
 metadata:
   name: voter
   namespace: room-pass
+# Must mirror the platform repo's voter Role. krm-stream shares ONE watch per
+# scope and fans it out, so the watch is opened as this ServiceAccount and only
+# THEN is each subscriber authorized as itself. A scope the application will
+# serve but this Role does not cover fails for everyone -- including an
+# identity whose own RBAC allows it, because there is no watch to join.
+#
+# That ordering is also why a refused participant still gets a clean FORBIDDEN:
+# the subscriber review runs BEFORE the shared watch, so their refusal never
+# depends on what is below.
 rules:
   - apiGroups: [examples.configbutler.ai]
     resources: [coffeeconfigs]
     resourceNames: [demo-coffee]
+    verbs: [list, watch]
+  - apiGroups: [examples.configbutler.ai]
+    resources: [quizsessions]
+    verbs: [list, watch]
+  - apiGroups: [roompass.configbutler.ai]
+    resources: [rooms]
+    resourceNames: [demo]
     verbs: [list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
