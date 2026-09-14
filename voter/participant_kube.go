@@ -118,14 +118,35 @@ func subtleCompare(a, b string) int {
 // authenticated user may call it (system:basic-user), including a participant
 // whose only other permission is to patch one CoffeeConfig.
 func kubernetesUsername(ctx context.Context, cfg config, idToken string) (string, []string, error) {
-	clients, err := newParticipantClients(cfg, idToken)
+	review, err := selfSubjectReview(ctx, cfg, idToken)
 	if err != nil {
 		return "", nil, err
+	}
+	return review.Status.UserInfo.Username, review.Status.UserInfo.Groups, nil
+}
+
+// selfSubjectReview posts an empty SelfSubjectReview with the participant's own
+// token and returns what comes back: the username, uid, groups and extras the
+// apiserver derived from that token. It is the whole of "who am I" as far as
+// Kubernetes is concerned -- there is no other object describing a login.
+//
+// TypeMeta is filled in on the way out because client-go's typed clients clear
+// it on decode. The apiVersion/kind restored here are the ones this request was
+// sent to, not a guess, so the YAML a participant reads is the object the
+// apiserver answered with.
+func selfSubjectReview(ctx context.Context, cfg config, idToken string) (*authenticationv1.SelfSubjectReview, error) {
+	clients, err := newParticipantClients(cfg, idToken)
+	if err != nil {
+		return nil, err
 	}
 	review, err := clients.typed.AuthenticationV1().SelfSubjectReviews().Create(
 		ctx, &authenticationv1.SelfSubjectReview{}, metav1.CreateOptions{})
 	if err != nil {
-		return "", nil, fmt.Errorf("self subject review: %w", err)
+		return nil, fmt.Errorf("self subject review: %w", err)
 	}
-	return review.Status.UserInfo.Username, review.Status.UserInfo.Groups, nil
+	review.TypeMeta = metav1.TypeMeta{
+		APIVersion: authenticationv1.SchemeGroupVersion.String(),
+		Kind:       "SelfSubjectReview",
+	}
+	return review, nil
 }

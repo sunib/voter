@@ -7,10 +7,13 @@ package main
 // the browser could use as a Kubernetes credential.
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"time"
+
+	"sigs.k8s.io/yaml"
 )
 
 func registerOIDCHandlers(mux *http.ServeMux, p *oidcProvider, cfg config, namespace string) {
@@ -63,6 +66,48 @@ func registerOIDCHandlers(mux *http.ServeMux, p *oidcProvider, cfg config, names
 			"roomName":         cfg.RoomName,
 		})
 	})
+
+	// GET /auth/whoami -- the apiserver's own answer about this login, as YAML.
+	//
+	// The home screen links the Kubernetes username to this. It deliberately
+	// does NOT render what the session cookie remembers: it spends a fresh
+	// SelfSubjectReview with THIS browser's token, so what an audience reads is
+	// what the apiserver says right now, groups and extras included. There is
+	// no other object to show -- a login is not stored anywhere in Kubernetes,
+	// it is derived per request from the token -- and every authenticated
+	// identity may ask (system:basic-user), so this works for a participant
+	// whose only other grant is patching one CoffeeConfig.
+	mux.HandleFunc("/auth/whoami", requireParticipant(cfg, func(w http.ResponseWriter, r *http.Request, s participantSession) {
+		noStore(w)
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+
+		review, err := selfSubjectReview(ctx, cfg, s.IDToken)
+		if err != nil {
+			// JSON, like every other Kubernetes-backed route: a failure here is
+			// an expired token or an unreachable apiserver, and the SPA reads
+			// those the same way whatever the success body looks like.
+			writeParticipantKubeError(w, err)
+			return
+		}
+		out, err := yaml.Marshal(review)
+		if err != nil {
+			http.Error(w, "could not render the review", http.StatusInternalServerError)
+			return
+		}
+
+		// text/plain, not application/yaml: this URL is opened as a link from
+		// the home page, and browsers download the latter instead of showing
+		// it. nosniff keeps the tab from treating the body as anything else.
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		_, _ = w.Write(out)
+	}))
 
 	// POST /auth/logout -- CSRF-protected, because it is state-changing.
 	//

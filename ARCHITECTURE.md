@@ -92,11 +92,15 @@ a new repository must not unexpectedly create new identities.
 
 ## Trust boundaries
 
-Voter owns `/auth/login`, `/auth/callback`, `/auth/session` and `/auth/logout`.
-It uses established OIDC libraries. The signed/encrypted, Secure HttpOnly cookie
+Voter owns `/auth/login`, `/auth/callback`, `/auth/session`, `/auth/whoami` and
+`/auth/logout`. It uses established OIDC libraries. The signed/encrypted, Secure HttpOnly cookie
 contains the ID token; JavaScript receives identity metadata and a CSRF token only.
 Persistent keys preserve established sessions across restarts; pending logins are
-process-local. Cookie custody does not make XSS harmless: same-origin script can
+process-local. `/auth/whoami` is the home page's "show me the real object" link:
+it spends a fresh SelfSubjectReview with the reader's own token and returns the
+apiserver's answer as YAML. Nothing is stored to read instead — a Kubernetes
+identity is derived per request, never persisted — so that review is the only
+login object there is. Cookie custody does not make XSS harmless: same-origin script can
 still perform actions as the user even though it cannot read the token.
 
 Direct REST reads and writes use the session's token against a fixed API server with

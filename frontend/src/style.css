@@ -664,6 +664,35 @@ p {
   color: rgb(var(--muted));
 }
 
+/* A pill carrying a machine value rather than a status word. Uppercase and
+   letter-spacing are for one-word badges; an email address or a base64 Dex
+   subject needs neither, and has to be allowed to wrap. */
+.pill--fact {
+  text-transform: none;
+  letter-spacing: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.pill__label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.68rem;
+  color: rgb(var(--muted));
+}
+
+.pill--link {
+  color: rgb(var(--accent));
+  background: rgb(var(--accent) / 0.12);
+  text-decoration: none;
+}
+
+.pill--link:hover,
+.pill--link:focus-visible {
+  background: rgb(var(--accent) / 0.2);
+}
+
 .inline-list {
   margin: 0.7rem 0 0;
   padding-left: 1.1rem;
@@ -1298,6 +1327,57 @@ p {
   background: rgb(var(--line) / 0.05);
   color: rgb(var(--ink));
   overflow-wrap: anywhere;
+}
+
+/* Inside a sentence, a code span must not become a block. */
+.identity-technical code.inline-code {
+  display: inline;
+  padding: 0.05rem 0.3rem;
+  border-radius: 6px;
+}
+
+/* The whole /auth/session payload, one row per field. Labels are the JSON key
+   names on purpose: somebody reading this on stage should be able to open the
+   endpoint and find the same words. */
+.tech-facts {
+  margin: 0.7rem 0;
+  display: grid;
+  gap: 0.15rem;
+}
+
+.tech-facts__row {
+  display: grid;
+  grid-template-columns: minmax(0, 11rem) minmax(0, 1fr);
+  gap: 0.3rem 0.8rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 10px;
+  background: rgb(var(--line) / 0.05);
+}
+
+.tech-facts__row dt {
+  color: rgb(var(--muted));
+}
+
+.tech-facts__row dd {
+  margin: 0;
+  color: rgb(var(--ink));
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .tech-facts__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.tech-facts__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.1rem;
+}
+
+.tech-facts__links a {
+  color: rgb(var(--accent));
 }
 
 /* The projector view: the code has to read across a room. */

@@ -52,7 +52,57 @@ const closedRounds = computed(() =>
 
 const displayName = computed(() => session.value?.displayName?.trim() ?? '')
 const initial = computed(() => displayName.value.slice(0, 1) || '?')
-const groups = computed(() => session.value?.groups ?? [])
+const kubeUsername = computed(() => session.value?.username?.trim() ?? '')
+
+function formatExpiry(epochSeconds: number): string {
+  if (!epochSeconds) {
+    return 'unknown'
+  }
+  const when = new Date(epochSeconds * 1000)
+  const minutes = Math.round((when.getTime() - Date.now()) / 60000)
+  const left =
+    minutes <= 0
+      ? 'expired'
+      : minutes < 60
+        ? `in ${minutes} min`
+        : `in ${Math.round(minutes / 60)} h`
+  return `${when.toLocaleString()} (${left})`
+}
+
+// The CSRF token is shown by length and first characters only. It is not a
+// Kubernetes credential and it is useless without the HttpOnly cookie, so this
+// is not a secrecy claim -- it keeps a 43-character random string off a
+// projector. The raw JSON link below shows it in full for anyone who wants it.
+function abbreviate(token: string): string {
+  return token === ''
+    ? '(none)'
+    : `${token.slice(0, 6)}… (${token.length} chars)`
+}
+
+// Every field /auth/session hands this browser, in the order the endpoint
+// returns them. Built as data rather than markup so adding a field to the
+// response is one line here, not a new row of template.
+const technicalFacts = computed(() => {
+  const s = session.value
+  if (s === null) {
+    return []
+  }
+  return [
+    { label: 'authenticated', value: String(s.authenticated) },
+    { label: 'username', value: s.username || '(the review failed)' },
+    { label: 'displayName', value: s.displayName },
+    { label: 'email', value: s.email || '(none)' },
+    {
+      label: 'groups',
+      value: s.groups.length ? s.groups.join(', ') : '(none)',
+    },
+    { label: 'csrfToken', value: abbreviate(s.csrfToken) },
+    { label: 'expiresAt', value: formatExpiry(s.expiresAt) },
+    { label: 'namespace', value: s.namespace },
+    { label: 'coffeeConfigName', value: s.coffeeConfigName },
+    { label: 'roomName', value: s.roomName },
+  ]
+})
 
 async function refresh() {
   busy.value = true
@@ -82,29 +132,73 @@ onMounted(async () => {
         }}</span>
         <h1 class="identity-card__name">{{ displayName || 'Loading…' }}</h1>
         <div v-if="session" class="identity-card__facts">
-          <span v-if="session.email" class="pill">{{ session.email }}</span>
-          <span v-for="group in groups" :key="group" class="pill pill--good">
-            {{ group }}
+          <span v-if="session.email" class="pill pill--fact">
+            <span class="pill__label">email</span>
+            {{ session.email }}
           </span>
+          <!-- The Kubernetes name links to the apiserver's own answer about
+               this login. It is a real object, fetched with this browser's
+               token, not a page about one. -->
+          <a
+            v-if="kubeUsername"
+            class="pill pill--fact pill--link"
+            href="/auth/whoami"
+            target="_blank"
+            rel="noopener"
+          >
+            <span class="pill__label">kubernetes</span>
+            {{ kubeUsername }}
+            <i class="pi pi-external-link" aria-hidden="true" />
+          </a>
         </div>
       </div>
       <p class="identity-card__note">
-        This is the name Kubernetes sees on every vote and every order you make
-        here. It came from Room Pass through Dex — the browser never asserted
-        it.
+        The display name is a label. The Kubernetes name beside it is the one on
+        every vote and every order you make here, and it is what RBAC matches on
+        — it came from Room Pass through Dex, and the browser never asserted
+        either of them.
       </p>
-      <!-- Folded away, and labelled for what it is. A room participant's
-           Kubernetes username is Dex's opaque subject, so leading with it read
-           as "your name is gibberish" when it is really the string RBAC
-           matches on. -->
+      <!-- Folded away because it is the whole payload, not because it is
+           secret. The two facts worth reading at a glance -- the address the
+           login carries and the name Kubernetes matches on -- are above; this
+           is for the person who wants to see every field the endpoint
+           returned. -->
       <details v-if="session" class="identity-technical">
         <summary>Technical identity</summary>
         <p>
-          Kubernetes authorizes the username below, not your display name. For a
-          room participant it is Dex's opaque subject — deliberately so: nobody
-          can collide with it by typing your name into the join form.
+          Everything this browser was told about itself, exactly as
+          <code class="inline-code">/auth/session</code> returned it. Kubernetes
+          authorizes <code class="inline-code">username</code>, not your display
+          name; for a room participant that is Dex's opaque subject —
+          deliberately so, since nobody can collide with it by typing your name
+          into the join form.
         </p>
-        <code>{{ session.username }}</code>
+        <dl class="tech-facts">
+          <div
+            v-for="fact in technicalFacts"
+            :key="fact.label"
+            class="tech-facts__row"
+          >
+            <dt>{{ fact.label }}</dt>
+            <dd>{{ fact.value }}</dd>
+          </div>
+        </dl>
+        <p class="tech-facts__links">
+          <a href="/auth/whoami" target="_blank" rel="noopener">
+            Your login object as YAML
+            <i class="pi pi-external-link" aria-hidden="true" />
+          </a>
+          <a href="/auth/session" target="_blank" rel="noopener">
+            The raw JSON, CSRF token and all
+            <i class="pi pi-external-link" aria-hidden="true" />
+          </a>
+        </p>
+        <p>
+          The YAML is a live SelfSubjectReview: the API server answering, with
+          your token, about your token. There is no stored login object to read
+          — an identity in Kubernetes is derived per request, never persisted —
+          so that answer is the closest thing to one that exists.
+        </p>
       </details>
     </section>
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/gorilla/securecookie"
 	"golang.org/x/oauth2"
+	authenticationv1 "k8s.io/api/authentication/v1"
 )
 
 func testConfig() config {
@@ -431,6 +432,74 @@ func TestSessionReportsTheAPIServersUsername(t *testing.T) {
 			}
 		})
 	}
+}
+
+// /auth/whoami is what the home page links the Kubernetes username to, so the
+// promise it makes is strong: this is the apiserver's answer, fetched with the
+// reader's own token. A rendering of the cookie's remembered username would
+// look identical on screen and prove nothing.
+func TestWhoAmIServesTheAPIServersOwnAnswer(t *testing.T) {
+	cfg := authorizationFixture(t)
+	var seenToken string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/selfsubjectreviews") {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		seenToken = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(authenticationv1.SelfSubjectReview{
+			Status: authenticationv1.SelfSubjectReviewStatus{UserInfo: authenticationv1.UserInfo{
+				Username: "demo:CgQxMjM0Eglyb29tLXBhc3M",
+				UID:      "uid-1",
+				Groups:   []string{"demo:voter-audience", "system:authenticated"},
+			}},
+		})
+	}))
+	defer upstream.Close()
+	cfg.KubernetesAPIServer = upstream.URL
+
+	mux := http.NewServeMux()
+	registerOIDCHandlers(mux, nil, cfg, "voter")
+
+	t.Run("anonymous browsers get nothing", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/auth/whoami", nil))
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("code = %d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("a participant reads their own review", func(t *testing.T) {
+		req := authorizedRequest(t, cfg, http.MethodGet, "participant-token")
+		req.URL.Path = "/auth/whoami"
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("code = %d: %s", rec.Code, rec.Body.String())
+		}
+		if seenToken != "participant-token" {
+			t.Errorf("review used %q, not the participant's own token", seenToken)
+		}
+		// text/plain, because a browser downloads application/yaml instead of
+		// showing it, and this URL exists to be opened in a tab.
+		if ct := rec.Header().Get("Content-Type"); ct != "text/plain; charset=utf-8" {
+			t.Errorf("Content-Type = %q", ct)
+		}
+		body := rec.Body.String()
+		// client-go clears TypeMeta on decode, so without restoring it the
+		// YAML would be a headless blob rather than a Kubernetes object.
+		for _, want := range []string{
+			"apiVersion: authentication.k8s.io/v1",
+			"kind: SelfSubjectReview",
+			"username: demo:CgQxMjM0Eglyb29tLXBhc3M",
+			"demo:voter-audience",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("YAML is missing %q:\n%s", want, body)
+			}
+		}
+	})
 }
 
 // A scanned QR code hands the room code to Room Pass over a cookie, because
