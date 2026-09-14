@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, type EffectScope } from 'vue'
 import type { StreamEvent } from '@configbutler/krm-stream'
+import { leafChanges } from './fieldChanges'
 import { useLiveCoffeeConfig } from './liveCoffeeConfig'
 
 const object = (rv = '1', shopName = 'Base', uid = 'coffee') => ({
@@ -71,6 +72,65 @@ afterEach(() => {
 })
 
 describe('CoffeeConfig library integration', () => {
+  // The reported symptom: change one price on the coffee screen and every
+  // field appears changed. The cause is not the array being mangled -- it is
+  // that a merge patch replaces a list whole, so the library reports the edit
+  // at the list, and a screen prefix-matching that marks everything beneath it.
+  // Pinned here against the real store, because the fix in the screen is only
+  // correct as long as this is what the store actually says.
+  it('reports an edit inside a list at the list, and leafChanges narrows it', async () => {
+    const { live } = await fixture()
+    live.setValue(
+      ['spec', 'products'],
+      [
+        { sku: 'a', name: 'A', priceCents: 1, enabled: true },
+        { sku: 'b', name: 'B', priceCents: 2, enabled: true },
+      ],
+    )
+    live.setValue(['spec', 'products', 1, 'priceCents'], 350)
+
+    expect(live.changes.value.map((change) => change.path)).toEqual([
+      ['spec', 'products'],
+    ])
+    expect(
+      leafChanges(live.changes.value).map((change) => change.path.join('.')),
+    ).toEqual(['spec.products.1'])
+  })
+
+  // The screen's Revert button now addresses the field it is next to, not the
+  // whole list it sits in. Reverting one price must leave the other product
+  // exactly where it was.
+  it('reverts one price without disturbing the rest of the menu', async () => {
+    const { live, event } = await fixture()
+    const menu = object()
+    menu.spec.products = [
+      { sku: 'a', name: 'A', priceCents: 300, enabled: true },
+      { sku: 'b', name: 'B', priceCents: 350, enabled: true },
+    ]
+    menu.metadata.resourceVersion = '2'
+    await event({ type: 'modified', object: menu, redacted: [] })
+
+    live.setValue(['spec', 'products', 0, 'priceCents'], 275)
+    live.setValue(['spec', 'products', 1, 'name'], 'Renamed')
+    live.takeTheirs(['spec', 'products', 0, 'priceCents'])
+
+    expect(
+      leafChanges(live.changes.value).map((change) => change.path.join('.')),
+    ).toEqual(['spec.products.1.name'])
+    expect(live.draft.value?.spec.products).toEqual([
+      { sku: 'a', name: 'A', priceCents: 300, enabled: true },
+      { sku: 'b', name: 'Renamed', priceCents: 350, enabled: true },
+    ])
+  })
+
+  it('names one field when one price is edited', async () => {
+    const { live } = await fixture()
+    live.setValue(['spec', 'products', 0, 'priceCents'], 275)
+    expect(
+      leafChanges(live.changes.value).map((change) => change.path.join('.')),
+    ).toEqual(['spec.products.0.priceCents'])
+  })
+
   it('uses one stream-seeded store and keeps later edits when a receipt arrives', async () => {
     const { live, event, host, requests } = await fixture()
     expect(requests).toHaveLength(0)

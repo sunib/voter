@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { get, isPrefix, type Path } from '@configbutler/krm-stream'
+import { leafChanges } from '../api/fieldChanges'
 import { formatConflictValue, humanizePath } from '../adminFormatters'
 import { formatMoney, getVoucherUsage } from '../api/coffee'
 import { useLiveCoffeeConfig } from '../api/liveCoffeeConfig'
@@ -55,13 +56,19 @@ const conflicts = computed<Record<string, FieldConflict>>(() =>
   ),
 )
 const currency = computed(() => draftConfig.value?.spec.currency ?? 'EUR')
-const dirtyFieldCount = computed(() => live.changes.value.length)
+// The library reports an edit inside a list as one change at the list, because
+// that is what it will save. This screen counts and marks FIELDS, so it reopens
+// those containers first -- otherwise changing one price marks every field of
+// every product dirty and offers to "Save 1 Change" while the whole menu is
+// lit up. See api/fieldChanges.ts.
+const fieldChanges = computed(() => leafChanges(live.changes.value))
+const dirtyFieldCount = computed(() => fieldChanges.value.length)
 const conflictCount = computed(() => live.conflicts.value.length)
 const cleanDirtyCount = computed(() =>
   Math.max(0, dirtyFieldCount.value - conflictCount.value),
 )
 const dirtySummaryEntries = computed(() =>
-  live.changes.value.map((change) => {
+  fieldChanges.value.map((change) => {
     const path = change.path.join('.')
     return {
       path,
@@ -276,7 +283,7 @@ function serverValueFor(path: string): unknown {
 }
 
 function isDirtyPath(path: string): boolean {
-  return live.changes.value.some((change) =>
+  return fieldChanges.value.some((change) =>
     isPrefix(change.path, fieldPath(path)),
   )
 }
