@@ -50,7 +50,12 @@ func main() {
 		}
 		time.Sleep(time.Second)
 	}
-	oauth := oauth2.Config{ClientID: "room-pass-demo", Endpoint: provider.Endpoint(), RedirectURL: origin + "/app/callback", Scopes: []string{"openid", "profile", "email", "groups"}}
+	// "federated:id" is not optional here. The API server's claimValidationRules
+	// require federated_claims.connector_id to decide which identity namespace a
+	// token belongs to, and Dex only emits that claim for this scope. Without it
+	// Dex still issues a perfectly valid ID token and every Kubernetes call then
+	// fails with a bare 401.
+	oauth := oauth2.Config{ClientID: "room-pass-demo", Endpoint: provider.Endpoint(), RedirectURL: origin + "/app/callback", Scopes: []string{"openid", "profile", "email", "groups", "federated:id"}}
 	verifier := provider.Verifier(&oidc.Config{ClientID: oauth.ClientID})
 	hash, _ := hex.DecodeString(id())
 	block, _ := hex.DecodeString(id())
