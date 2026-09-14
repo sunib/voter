@@ -2,8 +2,10 @@ package e2e
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -35,6 +37,28 @@ import (
 
 const issuer = "https://login.roompass.test:18443"
 const join = "https://demo.roompass.test:18443"
+
+// participantName carries a per-run id because the display name IS the
+// identity: Room Pass derives the Participant's object name from it, and a
+// second enrollment under the same name is refused with "That name is already
+// taken in this room". Nothing deletes the Participant when a run fails partway
+// -- only the ConfigMap has a t.Cleanup -- so a fixed name made the NEXT run
+// fail on the leftover instead of on whatever actually broke, hiding the first
+// failure behind a second, fake one.
+//
+// Computed once per process, not per call: the run enrolls once and then has to
+// come back as the same participant to prove identity survives a restart.
+var participantName = "Ada Demo " + runID()
+
+func runID() string {
+	b := make([]byte, 4)
+	if _, e := rand.Read(b); e != nil {
+		// A collision only costs the rerun this is here to protect, and a test
+		// binary that cannot read randomness has larger problems than a name.
+		return "fallback"
+	}
+	return hex.EncodeToString(b)
+}
 
 type flow struct {
 	t        *testing.T
@@ -72,7 +96,7 @@ func (f *flow) login(enroll bool) (string, map[string]any) {
 			f.t.Fatal("no published code")
 		}
 		form.Set("code", room.Status.JoinCode.Code)
-		form.Set("name", "Ada Demo")
+		form.Set("name", participantName)
 	}
 	req, _ := http.NewRequest("POST", join+"/join", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -106,7 +130,7 @@ func (f *flow) login(enroll bool) (string, map[string]any) {
 	if e = verified.Claims(&claims); e != nil {
 		f.t.Fatal(e)
 	}
-	if claims["name"] != "Ada Demo" || !strings.HasSuffix(fmt.Sprint(claims["email"]), "@demo.invalid") || fmt.Sprint(claims["groups"]) != "[demo:room-pass-test]" {
+	if claims["name"] != participantName || !strings.HasSuffix(fmt.Sprint(claims["email"]), "@demo.invalid") || fmt.Sprint(claims["groups"]) != "[demo:room-pass-test]" {
 		f.t.Fatalf("wrong identity claims: %v", claims)
 	}
 	// The whole shared-issuer containment argument rests on this claim: the
@@ -296,7 +320,7 @@ func TestRealDexAndKubernetes(t *testing.T) {
 				continue
 			}
 			if event.Stage == "ResponseComplete" && event.Verb == "create" && event.ResponseObject.Metadata.Name == cm.Name {
-				auditOK = event.User.Username == "demo:"+fmt.Sprint(first["sub"]) && fmt.Sprint(event.User.Extra["configbutler.ai/claims/display-name"]) == "[Ada Demo]" && fmt.Sprint(event.User.Extra["configbutler.ai/claims/email"]) == "["+fmt.Sprint(first["email"])+"]"
+				auditOK = event.User.Username == "demo:"+fmt.Sprint(first["sub"]) && fmt.Sprint(event.User.Extra["configbutler.ai/claims/display-name"]) == "["+participantName+"]" && fmt.Sprint(event.User.Extra["configbutler.ai/claims/email"]) == "["+fmt.Sprint(first["email"])+"]"
 			}
 		}
 		if auditOK {
@@ -360,7 +384,7 @@ func TestRealDexAndKubernetes(t *testing.T) {
 	}
 	b, _ = io.ReadAll(r.Body)
 	r.Body.Close()
-	if r.StatusCode != 200 || !strings.Contains(string(b), "Welcome, Ada Demo") {
+	if r.StatusCode != 200 || !strings.Contains(string(b), "Welcome, "+participantName) {
 		t.Fatalf("interactive callback: %d %s", r.StatusCode, b)
 	}
 	form = url.Values{}
