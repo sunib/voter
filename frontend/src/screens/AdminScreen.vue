@@ -347,7 +347,7 @@ onBeforeUnmount(clearAllFlashes)
       <a
         v-if="state.status === 'terminal'"
         class="button"
-        href="/auth/login?returnTo=/admin"
+        href="/auth/login?return=%2Fadmin"
         >Sign in again</a
       >
       <button

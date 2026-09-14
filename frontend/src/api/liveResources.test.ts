@@ -132,3 +132,52 @@ it('reports not-synced until the snapshot is complete', async () => {
   await event({ type: 'synced' })
   await vi.waitFor(() => expect(live.synced()).toBe(true))
 })
+
+// The three answers a failing stream can give, and why they must stay apart.
+// A participant refused the Room is the demo working; the application's own
+// ServiceAccount lacking a watch is the demo broken. Both arrive here as a
+// terminal stream, and the first version of this code reported them the same
+// way -- which is how a cluster-admin was told they lacked permission.
+it('separates a refusal from a fault, keeping the code and the message', async () => {
+  const { live, event } = await fixture()
+  await event({
+    type: 'error',
+    code: 'FORBIDDEN',
+    message: 'rooms.roompass.configbutler.ai "demo" is forbidden',
+    terminal: true,
+  })
+  await vi.waitFor(() => expect(live.errorCode.value).toBe('FORBIDDEN'))
+  expect(live.denied()).toBe(true)
+  expect(live.faulted()).toBe(false)
+  expect(live.expired()).toBe(false)
+  // The message is what names the object; the code alone is not actionable.
+  expect(live.error.value).toContain('is forbidden')
+})
+
+it('reports a broken shared watch as a fault, not as a refusal', async () => {
+  const { live, event } = await fixture()
+  await event({
+    type: 'error',
+    code: 'INTERNAL',
+    message: 'watch failed',
+    terminal: true,
+  })
+  await vi.waitFor(() => expect(live.errorCode.value).toBe('INTERNAL'))
+  expect(live.faulted()).toBe(true)
+  expect(live.denied()).toBe(false)
+  expect(live.expired()).toBe(false)
+})
+
+it('reports an expired credential as neither refused nor broken', async () => {
+  const { live, event } = await fixture()
+  await event({
+    type: 'error',
+    code: 'UNAUTHENTICATED',
+    message: 'token expired',
+    terminal: true,
+  })
+  await vi.waitFor(() => expect(live.errorCode.value).toBe('UNAUTHENTICATED'))
+  expect(live.expired()).toBe(true)
+  expect(live.denied()).toBe(false)
+  expect(live.faulted()).toBe(false)
+})

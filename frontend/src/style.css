@@ -1336,3 +1336,45 @@ p {
   line-height: 1;
   letter-spacing: 0.1em;
 }
+
+.stream-diagnostics {
+  margin-top: 1.1rem;
+  font-size: 0.82rem;
+  color: rgb(var(--muted));
+}
+
+.stream-diagnostics summary {
+  cursor: pointer;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+}
+
+.stream-diagnostics dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.35rem 0.9rem;
+  margin: 0.7rem 0;
+}
+
+.stream-diagnostics dt {
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.stream-diagnostics dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.stream-diagnostics code {
+  color: rgb(var(--ink));
+}
+
+.stream-diagnostics p {
+  margin-top: 0.6rem;
+  overflow-wrap: anywhere;
+}

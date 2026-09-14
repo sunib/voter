@@ -12,6 +12,7 @@ import {
   readOnlyPolicy,
   resourceStreamURL,
   type ConnectionState,
+  type ErrorCode,
   type KRMObject,
   type ManagedStreamHandle,
 } from '@configbutler/krm-stream'
@@ -38,7 +39,14 @@ export function useLiveResources(scope: LiveScope) {
     status: 'connecting',
     retries: 0,
   })
+  // The gateway reports a CODE, a message and whether it is terminal -- three
+  // separate things, and collapsing them loses the only ones worth showing. The
+  // first version of this kept the code alone, so a broken shared watch reached
+  // the operator's screen as the single word "INTERNAL" underneath a heading
+  // that told them they lacked permission.
   const error = ref('')
+  const errorCode = ref<ErrorCode | ''>('')
+  const terminal = ref(false)
 
   const url = resourceStreamURL('/public/stream', scope)
 
@@ -58,8 +66,10 @@ export function useLiveResources(scope: LiveScope) {
         error.value = ''
       }
     },
-    onError(e: unknown) {
-      error.value = e instanceof Error ? e.message : String(e)
+    onError(code: ErrorCode, message: string, isTerminal: boolean) {
+      errorCode.value = code
+      error.value = message || code
+      terminal.value = isTerminal
     },
   })
 
@@ -72,7 +82,19 @@ export function useLiveResources(scope: LiveScope) {
     items,
     state,
     error,
+    errorCode,
     /** True once the stream has delivered a snapshot and is following changes. */
     synced: () => state.value.status === 'live',
+    /** This identity may not read the scope. Distinct from a fault: it is the
+     *  answer Kubernetes gave, and pages are expected to render it. */
+    denied: () => errorCode.value === 'FORBIDDEN',
+    /** The session, not the permission, is the problem. */
+    expired: () => errorCode.value === 'UNAUTHENTICATED',
+    /** Terminal and not one of the two above: something is broken, not refused. */
+    faulted: () =>
+      terminal.value &&
+      errorCode.value !== '' &&
+      errorCode.value !== 'FORBIDDEN' &&
+      errorCode.value !== 'UNAUTHENTICATED',
   }
 }

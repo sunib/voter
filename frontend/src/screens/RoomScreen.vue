@@ -14,6 +14,7 @@ import { computed, ref, watch } from 'vue'
 import { toString as qrToString } from 'qrcode/lib/browser'
 
 import AppShell from '../components/layout/AppShell.vue'
+import StreamDiagnostics from '../components/layout/StreamDiagnostics.vue'
 import { useLiveResources } from '../api/liveResources'
 import { setRoundState } from '../api/quiz'
 import { currentSession } from '../api/session'
@@ -22,13 +23,14 @@ import type { KRMObject } from '@configbutler/krm-stream'
 const session = currentSession()
 const namespace = session?.namespace ?? ''
 
-const room = useLiveResources({
+const roomScope = {
   group: 'roompass.configbutler.ai',
   version: 'v1alpha1',
   resource: 'rooms',
   namespace,
   name: session?.roomName ?? 'demo',
-})
+}
+const room = useLiveResources(roomScope)
 
 const rounds = useLiveResources({
   group: 'examples.configbutler.ai',
@@ -54,10 +56,17 @@ const theRoom = computed<RoomObject | undefined>(
 )
 const joinCode = computed(() => theRoom.value?.status?.joinCode?.code ?? '')
 
-// The refusal we expect for a participant: the watch reaches a terminal state
-// because the API server said no. Anything else is a genuine fault.
-const roomDenied = computed(
-  () => room.state.value.status === 'terminal' && !theRoom.value,
+// Three different answers, and telling them apart is the whole point. A
+// participant is REFUSED, which is the demo working. An expired session is
+// neither refused nor broken. Anything else is a fault in the demo itself --
+// and the first one in production was exactly that: the shared watch could not
+// read the Room, and calling it a permission problem sent the operator looking
+// for the wrong thing.
+const roomDenied = computed(() => room.denied())
+const roomExpired = computed(() => room.expired())
+const roomFaulted = computed(() => room.faulted())
+const roomUnavailable = computed(
+  () => roomDenied.value || roomExpired.value || roomFaulted.value,
 )
 
 const sortedRounds = computed(() =>
@@ -141,16 +150,43 @@ function signInAsOperator() {
         Room Pass gave you a participant identity. Running the room needs an
         operator one.
       </p>
-      <!-- Never let the friendly sentence above be the only account of what
-           happened: a terminal stream is usually a 403, but an expired session
-           lands here too, and "you lack permission" would then be a lie. -->
-      <p v-if="room.error.value" class="error-copy">{{ room.error.value }}</p>
       <div class="hero-actions">
         <button class="button" @click="signInAsOperator">
           Sign in with GitHub
         </button>
         <RouterLink class="text-link" to="/">Back to the quizzes</RouterLink>
       </div>
+      <StreamDiagnostics :live="room" :scope="roomScope" :session="session" />
+    </section>
+
+    <section v-else-if="roomExpired" class="panel panel--danger">
+      <h2 class="panel-title">Your session has expired</h2>
+      <p class="hero-copy">
+        Nothing is wrong with your permissions — the token this page was using
+        has run out. Signing in again picks up where you left off.
+      </p>
+      <div class="hero-actions">
+        <button class="button" @click="signInAsOperator">
+          Sign in with GitHub
+        </button>
+        <RouterLink class="text-link" to="/">Back to the quizzes</RouterLink>
+      </div>
+      <StreamDiagnostics :live="room" :scope="roomScope" :session="session" />
+    </section>
+
+    <section v-else-if="roomFaulted" class="panel panel--danger">
+      <h2 class="panel-title">The room could not be loaded</h2>
+      <p class="hero-copy">
+        This is not a permissions problem: Kubernetes did not refuse you, the
+        stream failed. The most common cause is the application's own
+        ServiceAccount lacking <code>list</code>/<code>watch</code> on this
+        resource — the shared watch is opened as the application, and only then
+        is each subscriber authorized as itself.
+      </p>
+      <div class="hero-actions">
+        <RouterLink class="text-link" to="/">Back to the quizzes</RouterLink>
+      </div>
+      <StreamDiagnostics :live="room" :scope="roomScope" :session="session" />
     </section>
 
     <section v-else class="panel">
@@ -183,7 +219,7 @@ function signInAsOperator() {
       <div v-else class="empty-state">Waiting for the room's join code…</div>
     </section>
 
-    <section v-if="!roomDenied" class="panel">
+    <section v-if="!roomUnavailable" class="panel">
       <div class="section-heading">
         <h2 class="panel-title">Quizzes</h2>
         <span
