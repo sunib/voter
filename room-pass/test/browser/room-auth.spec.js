@@ -25,7 +25,16 @@ test("room login and returning enrollment work in a phone-sized browser", async 
   await page.goto("/app/login");
   await expect(page.getByLabel("Room code")).toBeVisible();
   await page.getByLabel("Room code").fill(room().status.joinCode.code);
+  // The address is derived in Go and previewed in the page's own script. This
+  // is the only place both halves run at once, so the preview is read from a
+  // real browser and compared to the object the server goes on to create.
+  const preview = page.locator("#rp-email");
+  await expect(preview).toHaveText("your-name@demo.invalid");
   await page.getByLabel("Display name").fill(testName);
+  const previewed = await preview.textContent();
+  expect(previewed).toBe(
+    `${testName.toLowerCase().replaceAll(" ", "-")}@demo.invalid`,
+  );
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(
     page.getByText(`Welcome, ${testName}.`, { exact: true }),
@@ -40,6 +49,9 @@ test("room login and returning enrollment work in a phone-sized browser", async 
   });
   const before = participants().filter((p) => p.spec.displayName === testName);
   expect(before).toHaveLength(1);
+  expect(`${before[0].metadata.name.replace(/^p-/, "")}@demo.invalid`).toBe(
+    previewed,
+  );
   await page.screenshot({
     path: testInfo.outputPath("logged-in.png"),
     fullPage: true,
@@ -185,7 +197,9 @@ test("a scanned QR code joins the room without typing a code", async ({
   // Used once. A code left in the jar is one that gets silently replayed on
   // the next join, long after it stopped being the code on the screen.
   expect(
-    (await context.cookies()).find((c) => c.name === "__Host-room-pass-joincode"),
+    (await context.cookies()).find(
+      (c) => c.name === "__Host-room-pass-joincode",
+    ),
   ).toBeUndefined();
 });
 

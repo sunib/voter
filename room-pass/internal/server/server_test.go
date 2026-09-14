@@ -2,6 +2,9 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -52,12 +55,12 @@ func TestEnrollmentConcurrencyAndLifecycle(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
-			if _, e := s.enrollParticipant(context.Background(), "bcd-fgh", "Ada"); e == nil {
+			if _, e := s.enrollParticipant(context.Background(), "bcd-fgh", fmt.Sprintf("Ada %d", i)); e == nil {
 				ok.Add(1)
 			}
-		}()
+		}(i)
 	}
 	wg.Wait()
 	if ok.Load() != 100 {
@@ -640,5 +643,163 @@ func TestWrongCodeReturnsACorrectableForm(t *testing.T) {
 	}
 	if strings.Contains(body, "<b>") {
 		t.Fatalf("echoed name was not escaped: %s", body)
+	}
+}
+
+// The address on the join page is a promise: whatever it shows while someone
+// types is the address that ends up on their commits. These pairs are the
+// contract both halves implement -- the table is also checked against the
+// page's script in test/browser/room-auth.spec.js, which runs it in a browser.
+func TestParticipantIDFoldsNamesPredictably(t *testing.T) {
+	for name, want := range map[string]string{
+		"Ada Demo":                     "ada-demo",
+		"Simon Koudijs":                "simon-koudijs",
+		"  Jan-Willem   van der Berg ": "jan-willem-van-der-berg",
+		"Renée O'Hara":                 "renee-o-hara",
+		"JOSÉ":                         "jose",
+		"Ångström":                     "angstrom",
+		"Zoë-Ann  ":                    "zoe-ann",
+		"Müller":                       "muller",
+		"ﬁona":                         "fiona",
+		"a--b":                         "a-b",
+		"--lead--":                     "lead",
+		"N1ck 2":                       "n1ck-2",
+		"🎉 Party 🎉":                    "party",
+		"日本 Taro":                      "taro",
+		"🎉":                            "",
+		"日本語":                          "",
+		"A very very long display name that goes past the forty character cap": "a-very-very-long-display-name-that-goes",
+	} {
+		if got := participantID(name); got != want {
+			t.Errorf("participantID(%q) = %q, want %q", name, got, want)
+		}
+	}
+	id := participantID("A very very long display name that goes past the forty character cap")
+	if len(id) > maxParticipantID || strings.HasPrefix(id, "-") || strings.HasSuffix(id, "-") {
+		t.Errorf("identifier is not a usable object name or local part: %q", id)
+	}
+}
+
+// A name that survives every other check but leaves nothing to build an
+// identity from has to be refused at the form, not at the Kubernetes API.
+func TestNamesWithoutUsableCharactersAreRefused(t *testing.T) {
+	if _, e := validName("🎉"); e == nil {
+		t.Error("a name with nothing to fold was accepted")
+	}
+	if _, e := validName("Ada"); e != nil {
+		t.Error(e)
+	}
+}
+
+// Names are identities now, so the second person to claim one is told, not
+// quietly seated at the first person's Participant with their own cookie.
+func TestASecondClaimOnANameIsRefused(t *testing.T) {
+	s, db := fixture(t, "http://dex.test")
+	first, e := s.enrollParticipant(context.Background(), "BCDFGH", "Ada Demo")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if first.Name != "p-ada-demo" {
+		t.Fatalf("participant object name: %q", first.Name)
+	}
+	if _, e = s.enrollParticipant(context.Background(), "BCDFGH", "ada  demo"); !errors.Is(e, errNameTaken) {
+		t.Fatalf("a colliding name enrolled anyway: %v", e)
+	}
+	ps := &api.ParticipantList{}
+	_ = db.List(context.Background(), ps)
+	if len(ps.Items) != 1 {
+		t.Fatalf("participants after the refused claim: %d", len(ps.Items))
+	}
+	if _, e = s.enrollParticipant(context.Background(), "BCDFGH", "Ada Demo 2"); e != nil {
+		t.Fatal(e)
+	}
+}
+
+// The address is the participant ID with a reserved domain, in the headers Dex
+// reads and on the page the participant reads. One derivation, no drift.
+func TestIssuedAddressMatchesTheParticipantID(t *testing.T) {
+	p := &api.Participant{}
+	p.Name = participantPrefix + participantID("Ada Demo")
+	if got := participantEmail(p); got != "ada-demo@demo.invalid" {
+		t.Errorf("participant address: %q", got)
+	}
+	if got := emailPreview("Ada Demo"); got != participantEmail(p) {
+		t.Errorf("the preview promises %q", got)
+	}
+	if got := emailPreview(""); got != "your-name@demo.invalid" {
+		t.Errorf("empty-name placeholder: %q", got)
+	}
+	if !strings.Contains(previewScript, `"your-name"`) {
+		t.Error("the page's script no longer uses the same placeholder")
+	}
+}
+
+// The preview script runs only because the CSP carries its hash. A rendered
+// page proves the two still describe the same bytes: an edit to the script that
+// forgot the policy would leave the address frozen in every real browser.
+func TestPreviewScriptIsServedUnderItsOwnCSPHash(t *testing.T) {
+	s, _ := fixture(t, "http://dex.test")
+	w := newBrowser().request(s, "GET", "https://demo.test/join", nil)
+	body := w.Body.String()
+	open := strings.Index(body, "<script>")
+	end := strings.Index(body, "</script>")
+	if open < 0 || end < open {
+		t.Fatal("the join page no longer carries the preview script")
+	}
+	sum := sha256.Sum256([]byte(body[open+len("<script>") : end]))
+	want := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+	csp := w.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "script-src "+want+";") {
+		t.Errorf("the served script is not the one the policy admits.\ncsp:  %s\nwant: %s", csp, want)
+	}
+	if strings.Contains(csp, "script-src 'unsafe-inline'") {
+		t.Error("script-src must name the hash, not fall back to unsafe-inline")
+	}
+}
+
+// Someone who has not typed anything yet still needs to see what the field is
+// for, and a browser without script has to be told something true.
+func TestJoinPageShowsTheAddressBeforeAnyScriptRuns(t *testing.T) {
+	s, _ := fixture(t, "http://dex.test")
+	b := newBrowser()
+	body := b.request(s, "GET", "https://demo.test/join", nil).Body.String()
+	if !strings.Contains(body, "your-name@demo.invalid") {
+		t.Error("the empty form does not show what the address will look like")
+	}
+	if !strings.Contains(body, "there is nothing to fill in") {
+		t.Error("the page does not say why the address cannot be typed")
+	}
+	_, rest, _ := strings.Cut(body, `name="csrf" value="`)
+	csrf, _, _ := strings.Cut(rest, `"`)
+	// A form that comes back after a bad code keeps the name, so it must also
+	// keep the address that name earns.
+	w := b.request(s, "POST", "https://demo.test/join", url.Values{
+		"csrf": {csrf}, "code": {"WRONG"},
+		"name": {"Ada Demo"}, "return": {"https://demo.test/app/"},
+	})
+	if !strings.Contains(w.Body.String(), "ada-demo@demo.invalid") {
+		t.Error("the returned form lost the address for the name it kept")
+	}
+}
+
+// A returning participant sees the identity they will reuse, including the
+// address, and is not asked for a room code the page does not even show.
+func TestReturningParticipantSeesTheirIssuedAddress(t *testing.T) {
+	s, _ := fixture(t, "http://dex.test")
+	b := newBrowser()
+	body := b.request(s, "GET", "https://demo.test/join", nil).Body.String()
+	_, rest, _ := strings.Cut(body, `name="csrf" value="`)
+	csrf, _, _ := strings.Cut(rest, `"`)
+	if w := b.request(s, "POST", "https://demo.test/join", url.Values{
+		"csrf": {csrf}, "code": {"BCDFGH"}, "name": {"Ada Demo"}, "return": {"https://demo.test/app/"},
+	}); w.Code != 303 {
+		t.Fatalf("enrollment: %d %s", w.Code, w.Body.String())
+	}
+	body = b.request(s, "GET", "https://demo.test/join", nil).Body.String()
+	if !strings.Contains(body, "ada-demo@demo.invalid") {
+		t.Errorf("the returning page hides the address it will assert: %s", body)
+	}
+	if strings.Contains(body, "Enter the room code") {
+		t.Error("the returning page asks for a code it does not show a field for")
 	}
 }

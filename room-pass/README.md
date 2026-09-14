@@ -1,7 +1,8 @@
 # Room Pass
 
-Room Pass enrolls a browser with a room code and an unverified display name, supplies
-that stable identity to Dex, and lets Kubernetes enforce RBAC. It has no quiz/coffee
+Room Pass enrolls a browser with a room code and an unverified display name, derives a
+synthetic address from that name, supplies the stable identity to Dex, and lets Kubernetes
+enforce RBAC. It has no quiz/coffee
 dependencies, database, JWT signing key, impersonation permission, or participant grants.
 
 The initial implementation serves **one Room from one replica**. Kubernetes stores the
@@ -42,7 +43,9 @@ Choose **Join the demo**, enter the projected code and a name, then press **Writ
 message to Kubernetes**. The tiny example OIDC client uses authorization code + PKCE,
 validates the token, and sends it to the real Kubernetes API. It has no ServiceAccount
 credential. The demo session lasts five minutes; signing in again in the same browser
-reuses Room Pass enrollment. No real email address is collected.
+reuses Room Pass enrollment. No real email address is collected: the join page shows the
+`name@demo.invalid` address it will issue, updating as the name is typed, so nobody has to
+wonder what will end up on the commit.
 
 Read only the code needed for projection:
 

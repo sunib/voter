@@ -189,8 +189,9 @@ spec:
   revoked: false
 ```
 
-Room Pass creates the Participant with a same-namespace Room owner reference. Its name
-contains at least 128 bits of randomness; its Kubernetes UID binds the browser cookie to
+Room Pass creates the Participant with a same-namespace Room owner reference. Its name is
+a prefix plus the display name folded to a Kubernetes-safe identifier, so the identifier
+is guessable by design; its Kubernetes UID, not its name, binds the browser cookie to
 that exact enrollment. Room reference and display name are immutable; eligibility follows
 the Room’s current `endsAt`, so extending a talk does not require rewriting Participants. Revocation
 is irreversible for the object. Derive the author email and group from server-owned
@@ -246,15 +247,29 @@ The room code proves possession, not physical attendance or one-person-one-vote.
 
 | Value | Requirement |
 |---|---|
-| Participant ID | At least 128 bits of cryptographic randomness, assigned by the server and immutable within the event |
+| Participant ID | Derived by the server from the display name, unique within the event and immutable once enrolled; public, never a credential |
 | Display name | Participant-supplied, validated and escaped; never used as an authorization key |
-| Author email | Server-generated `<participant-id>@demo.invalid`; never supplied by the participant |
+| Author email | Server-generated `<participant-id>@demo.invalid`; never supplied by the participant, and shown on the join page while the name is typed |
 | Group | Taken from event configuration, never from client input |
 | Session | Signed/encrypted cookie referencing persisted Room and Participant UIDs; no separate Session CRD |
 
 Validate display names using the existing Git-safe rules where suitable: reject control
 characters and Git author delimiters; impose a documented length bound. Do not collect
 a real email address. For the first version, the nickname remains fixed after enrollment.
+
+The participant ID is the display name lowercased, with diacritics folded onto their base
+letters, everything outside `[a-z0-9]` collapsed to single dashes, and the result bounded
+to fit both an object name and an address local part. A name that folds to nothing is
+refused at the form. The derivation runs a second time in the join page's script so the
+address can be shown as the name is typed; the two implementations agree by construction
+and are checked against each other in the browser test. The address a participant is
+shown is the address their commits carry.
+
+Because the ID is the name, **a name already enrolled in the room is refused rather than
+reused**. Handing the second claimant a session on the first claimant's Participant would
+put two browsers behind one identity and one ballot. This is a uniqueness rule, not an
+authentication one: holding a name grants nothing, since assertion still requires the
+cookie and the Participant UID behind it.
 
 The production session cookie must be Secure, HttpOnly, explicitly SameSite, and
 host-only. State-changing browser requests need CSRF protection. Use a configurable
@@ -266,14 +281,14 @@ does not resurrect an expired cookie.
 
 **Sign out clears the browser cookie; it does not revoke the Participant.** Revocation is
 an explicit operator action through `Participant.spec.revoked`. Clearing the only cookie
-also clears the browser’s proof of enrollment: joining again creates a new Participant
-and consumes another slot. We do not recover identity from a nickname or add a recovery
-credential just to hide this tradeoff. Existing retained records count toward the cap;
+also clears the browser’s proof of enrollment: the retained Participant keeps the name,
+so joining again means choosing a different one and consuming another slot. We do not
+recover identity from a nickname or add a recovery credential just to hide this tradeoff. Existing retained records count toward the cap;
 operators can raise `maxParticipants` when needed. A copied valid cookie remains usable
 until its expiry, Participant revocation, or Room shutdown.
 
 A returning valid session reuses its participant ID. Clearing cookies or switching to
-another browser can create another identity; cross-device account recovery is out of
+another browser can create another identity under another name; cross-device account recovery is out of
 scope. Device-flow users preserve identity only when they authenticate in the same
 enrolled browser. Signing out does not revoke already-issued Dex tokens.
 

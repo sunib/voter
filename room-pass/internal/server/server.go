@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"html/template"
@@ -19,7 +21,9 @@ import (
 	"github.com/gorilla/securecookie"
 	api "github.com/sunib/voter/room-pass/api/v1alpha1"
 	"github.com/sunib/voter/room-pass/internal/controller"
+	"golang.org/x/text/unicode/norm"
 	"golang.org/x/time/rate"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -214,7 +218,79 @@ func validName(raw string) (string, error) {
 			return "", errors.New("Choose a name without control characters or angle brackets.")
 		}
 	}
+	// The name has to survive participantID with something left over, because
+	// that result is the Participant's object name and the participant's whole
+	// address. A name of only emoji or punctuation passes every check above and
+	// still leaves nothing to build an identity from.
+	if participantID(v) == "" {
+		return "", errors.New("Choose a name with at least one letter or number.")
+	}
 	return v, nil
+}
+
+// participantPrefix keeps every Participant object name inside its own
+// namespace of names now that participants choose what that name is made of.
+const participantPrefix = "p-"
+
+// maxParticipantID bounds the identifier below both the RFC 1123 object-name
+// limit and the 64-byte local part of an address, with room for the prefix.
+const maxParticipantID = 40
+
+// participantID derives the Participant's object name and the local part of its
+// demo address from the display name the participant typed. The name is the
+// identity here -- no random suffix -- so the mapping must be stable, safe as a
+// Kubernetes name, safe in a Git author line, and reproducible in the browser:
+// the join page previews the address while it is being typed, and a preview
+// that disagrees with the address actually issued would be worse than no
+// preview at all.
+//
+// Diacritics fold rather than vanish ("Renée" becomes "renee") by decomposing to
+// NFKD and skipping the combining marks that step splits off. Only the
+// Combining Diacritical Marks block is skipped, because that is precisely what
+// the page's script can skip without shipping a Unicode table of its own.
+// Everything else outside [a-z0-9] collapses to a single separating dash.
+func participantID(display string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(norm.NFKD.String(display)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			if dash && b.Len() > 0 {
+				b.WriteByte('-')
+			}
+			dash = false
+			b.WriteRune(r)
+		case r >= 0x0300 && r <= 0x036F:
+		default:
+			dash = true
+		}
+	}
+	id := b.String()
+	if len(id) > maxParticipantID {
+		id = id[:maxParticipantID]
+	}
+	return strings.TrimRight(id, "-")
+}
+
+// demoEmail is the only place an author address is formed. RFC 2606 reserves
+// .invalid so the address can never resolve, which is the point: the demo needs
+// an address on its Git commits, not a mailbox.
+func demoEmail(id string) string { return id + "@demo.invalid" }
+
+func participantEmail(p *api.Participant) string {
+	return demoEmail(strings.TrimPrefix(p.Name, participantPrefix))
+}
+
+// emailPreviewPlaceholder stands in until a name has any usable character. The
+// page's script repeats this literal; changing one means changing both.
+const emailPreviewPlaceholder = "your-name"
+
+func emailPreview(name string) string {
+	id := participantID(name)
+	if id == "" {
+		id = emailPreviewPlaceholder
+	}
+	return demoEmail(id)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -228,7 +304,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// third party -- which is what no-referrer was here to protect.
 	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self'; form-action "+s.formAction+"; frame-ancestors 'none'")
+	// script-src names one hash, not 'unsafe-inline': the join page's address
+	// preview is the only script Room Pass serves, and nothing else may run.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'self' 'unsafe-inline'; script-src "+previewScriptSource+"; img-src 'self'; form-action "+s.formAction+"; frame-ancestors 'none'")
 	// Never trust client identity or forwarded routing information, even on Dex aliases.
 	for k := range r.Header {
 		low := strings.ToLower(k)
@@ -426,7 +504,24 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 
 var page = template.Must(template.New("join").Parse(pageSource))
 
-const pageSource = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Join the room</title><style>body{font:18px system-ui;margin:3rem auto;padding:0 1rem;max-width:30rem;background:#f8fafc;color:#172033}input,button{box-sizing:border-box;width:100%;padding:.8rem;margin:.4rem 0 1rem;font:inherit}button{background:#1749a5;color:white;border:0;border-radius:.4rem}label{display:block}small{line-height:1.5}.scanned{background:#e8f0fe;border-radius:.4rem;padding:.6rem .8rem;margin:.4rem 0 1rem}.error{color:#b3261e;font-weight:600}input[aria-invalid=true]{border:2px solid #b3261e;background:#fff5f5}</style><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}{{if .Form}}<form method="post" action="/join"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="handoff" value="{{.Handoff}}"><input type="hidden" name="return" value="{{.Return}}">{{if .Enrolled}}<p>You’re already enrolled as <strong>{{.EnrolledName}}</strong>. Continue with the same demo identity.</p>{{else}}{{if .Code}}<p class="scanned">Room code <strong>{{.Code}}</strong>, from the code you scanned. <input type="hidden" name="code" value="{{.Code}}"></p>{{else}}<label>Room code<input name="code" required maxlength="24" autocomplete="off" autocapitalize="characters" placeholder="BCDFGH"{{if .CodeInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "code"}} autofocus{{end}}></label>{{end}}<label>Display name<input name="name" required maxlength="64" autocomplete="nickname" value="{{.Name}}"{{if .NameInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "name"}} autofocus{{end}}></label>{{end}}<button>Continue</button></form>{{end}}{{if .Enrolled}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out of this browser</button></form>{{end}}<small>Your name is a demo label, not a verified identity. Demo changes may appear in Git with this name and a generated email address.</small></html>`
+// previewScript keeps the address on the join page in step with the name box as
+// it is typed. It is the browser half of participantID and must agree with it
+// character for character, including the placeholder and the 40-character cap:
+// the whole point of showing the address is that it is the one the participant
+// will get. No regular expressions and no Unicode tables, so the two halves
+// stay comparable by eye.
+const previewScript = `(function(){var n=document.getElementById("rp-name"),o=document.getElementById("rp-email");if(!n||!o){return}function slug(v){var s=v.normalize("NFKD").toLowerCase(),out="",dash=false,i,c;for(i=0;i<s.length;i++){c=s.charAt(i);if((c>="a"&&c<="z")||(c>="0"&&c<="9")){if(dash&&out.length>0){out+="-"}dash=false;out+=c}else if(c<"\u0300"||c>"\u036f"){dash=true}}if(out.length>40){out=out.slice(0,40)}while(out.length>0&&out.charAt(out.length-1)==="-"){out=out.slice(0,-1)}return out}function show(){var s=slug(n.value);o.textContent=(s||"your-name")+"@demo.invalid"}n.addEventListener("input",show);show()}())`
+
+// previewScriptSource is the CSP source that admits exactly the script above and
+// nothing else. Hashing the same constant the page renders means an edit to the
+// script can never leave the policy pointing at the old one; a rendered page is
+// checked against this header in the tests.
+var previewScriptSource = func() string {
+	sum := sha256.Sum256([]byte(previewScript))
+	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+}()
+
+var pageSource = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Join the room</title><style>body{font:18px system-ui;margin:3rem auto;padding:0 1rem;max-width:30rem;background:#f8fafc;color:#172033}input,button{box-sizing:border-box;width:100%;padding:.8rem;margin:.4rem 0 1rem;font:inherit}button{background:#1749a5;color:white;border:0;border-radius:.4rem}label{display:block}small{line-height:1.5}.scanned{background:#e8f0fe;border-radius:.4rem;padding:.6rem .8rem;margin:.4rem 0 1rem}.error{color:#b3261e;font-weight:600}input[aria-invalid=true]{border:2px solid #b3261e;background:#fff5f5}.issued{color:#64748b;font-size:.8em;line-height:1.45;margin:-.7rem 0 1.4rem}.issued .line{display:block;font-size:1.15em;margin-bottom:.35rem}.addr{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#475569;word-break:break-all}</style><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}{{if .Form}}<form method="post" action="/join"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="handoff" value="{{.Handoff}}"><input type="hidden" name="return" value="{{.Return}}">{{if .Enrolled}}<p>You’re already enrolled as <strong>{{.EnrolledName}}</strong>. Continue with the same demo identity.</p><p class="issued"><span class="line">You are joining as <span class="addr">{{.EnrolledEmail}}</span></span>Room Pass built that address from your name, which is why there was nothing to fill in: it labels your changes in Git and is never a real mailbox.</p>{{else}}{{if .Code}}<p class="scanned">Room code <strong>{{.Code}}</strong>, from the code you scanned. <input type="hidden" name="code" value="{{.Code}}"></p>{{else}}<label>Room code<input name="code" required maxlength="24" autocomplete="off" autocapitalize="characters" placeholder="BCDFGH"{{if .CodeInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "code"}} autofocus{{end}}></label>{{end}}<label>Display name<input id="rp-name" name="name" required maxlength="64" autocomplete="nickname" value="{{.Name}}"{{if .NameInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "name"}} autofocus{{end}}></label><p class="issued"><span class="line">You will join as <output id="rp-email" for="rp-name" class="addr">{{.Email}}</output></span>Room Pass builds that address from your name, so there is nothing to fill in: it labels your changes in Git and is never a real mailbox.</p>{{end}}<button>Continue</button></form>{{end}}{{if .Enrolled}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out of this browser</button></form>{{end}}<small>Your name is a demo label, not a verified identity. Demo changes may appear in Git with this name and the address shown above.</small><script>` + previewScript + `</script></html>`
 
 func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" && r.Method != "POST" {
@@ -479,12 +574,13 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	// enrolled. Someone returning to this page has no other way to see which
 	// identity they are about to continue as -- and the whole point of the demo
 	// is that their name ends up on a Git commit.
-	enrolledName := ""
+	enrolledName, enrolledEmail := "", ""
 	if enrolled {
 		_, p, e := s.identity(r.Context(), ss)
 		enrolled = e == nil
 		if enrolled {
 			enrolledName = p.Spec.DisplayName
+			enrolledEmail = participantEmail(p)
 		}
 	}
 	// A code carried here by a scanned QR code. Only ever a prefill: the POST
@@ -497,6 +593,11 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	message := "Enter the room code and choose a display name."
 	if scanned != "" {
 		message = "Choose a display name to join."
+	}
+	if enrolled {
+		// Neither field is on offer to someone already enrolled; asking for a
+		// code above a form that has none is just confusing.
+		message = "Welcome back."
 	}
 	form := true
 	if !controller.Active(room, s.now()) {
@@ -529,7 +630,10 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(status)
-		_ = page.Execute(w, map[string]any{"Title": room.Spec.Title, "Message": message, "Form": form, "CSRF": csrf, "Handoff": handoff, "Return": dest, "Enrolled": enrolled, "EnrolledName": enrolledName, "Code": scanned, "Error": failure, "Name": name, "Focus": focus, "CodeInvalid": field == "code", "NameInvalid": field == "name"})
+		// Email is what the script would compute for the name already in the
+		// box, so a browser with script disabled and a form that came back with
+		// a typed name both still show the address that is actually on offer.
+		_ = page.Execute(w, map[string]any{"Title": room.Spec.Title, "Message": message, "Form": form, "CSRF": csrf, "Handoff": handoff, "Return": dest, "Enrolled": enrolled, "EnrolledName": enrolledName, "EnrolledEmail": enrolledEmail, "Code": scanned, "Error": failure, "Name": name, "Email": emailPreview(name), "Focus": focus, "CodeInvalid": field == "code", "NameInvalid": field == "name"})
 	}
 	if r.Method == "GET" {
 		render(200, "", "", "")
@@ -561,8 +665,11 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		ss, e = s.enrollParticipant(r.Context(), r.FormValue("code"), name)
 		if e != nil {
 			field := ""
-			if errors.Is(e, errBadCode) {
+			switch {
+			case errors.Is(e, errBadCode):
 				field = "code"
+			case errors.Is(e, errNameTaken):
+				field = "name"
 			}
 			render(403, e.Error(), field, name)
 			return
@@ -594,9 +701,13 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, dest, 303)
 }
 
-// The one enrollment failure the participant can fix by retyping, so it is the only
-// one that marks the code field rather than the form as a whole.
+// An enrollment failure the participant can fix by retyping, so it marks the
+// code field rather than the form as a whole.
 var errBadCode = errors.New("That code is invalid or joining has closed. Check the presenter’s current code.")
+
+// The other one: a name already enrolled in this room. Both mark the field the
+// participant can actually change.
+var errNameTaken = errors.New("That name is already taken in this room. Please choose another.")
 
 func (s *Server) enrollParticipant(ctx context.Context, code, name string) (session, error) {
 	result := "storage_error"
@@ -629,18 +740,19 @@ func (s *Server) enrollParticipant(ctx context.Context, code, name string) (sess
 		result = "full"
 		return session{}, errors.New("This room is full. Please ask the presenter.")
 	}
-	id, e := randomID()
-	if e != nil {
-		return session{}, errors.New("Enrollment temporarily unavailable")
-	}
-	p := &api.Participant{ObjectMeta: metav1.ObjectMeta{Name: "p-" + id, Namespace: room.Namespace, OwnerReferences: []metav1.OwnerReference{{APIVersion: api.GroupVersion.String(), Kind: "Room", Name: room.Name, UID: room.UID}}}, Spec: api.ParticipantSpec{RoomRef: api.RoomRef{Name: room.Name, UID: string(room.UID)}, DisplayName: name}}
+	p := &api.Participant{ObjectMeta: metav1.ObjectMeta{Name: participantPrefix + participantID(name), Namespace: room.Namespace, OwnerReferences: []metav1.OwnerReference{{APIVersion: api.GroupVersion.String(), Kind: "Room", Name: room.Name, UID: room.UID}}}, Spec: api.ParticipantSpec{RoomRef: api.RoomRef{Name: room.Name, UID: string(room.UID)}, DisplayName: name}}
 	if e = s.db.Create(ctx, p); e != nil {
-		// A lost create response is resolved at the original name, never a second ID.
-		found := &api.Participant{}
-		if getErr := s.db.Get(ctx, client.ObjectKeyFromObject(p), found); getErr != nil || found.Spec != p.Spec {
+		if !apierrors.IsAlreadyExists(e) {
 			return session{}, errors.New("Enrollment could not be confirmed. Please retry.")
 		}
-		p = found
+		// The name is the identity now, so a name already present is someone
+		// else's enrollment and must not be handed out twice: two browsers
+		// sharing one Participant would be one voter with two ballots. Say so
+		// on the name field rather than adopting the object. The cost is that a
+		// create whose response was lost also reports the name as taken -- rare
+		// next to two people called Jan, and the safe way to be wrong.
+		result = "name_taken"
+		return session{}, errNameTaken
 	}
 	result = "enrolled"
 	return session{RoomUID: string(room.UID), Name: p.Name, UID: string(p.UID), Expires: s.now().Add(s.cfg.CookieLifetime).Unix()}, nil
@@ -709,11 +821,10 @@ func (s *Server) complete(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Enrollment unavailable", 403)
 		return
 	}
-	id = strings.TrimPrefix(p.Name, "p-")
-	r.Header.Set("X-Remote-User-Id", id)
+	r.Header.Set("X-Remote-User-Id", strings.TrimPrefix(p.Name, participantPrefix))
 	r.Header.Set("X-Remote-User", p.Spec.DisplayName)
 	r.Header.Set("X-Remote-User-Name", p.Spec.DisplayName)
-	r.Header.Set("X-Remote-User-Email", id+"@demo.invalid")
+	r.Header.Set("X-Remote-User-Email", participantEmail(p))
 	r.Header.Set("X-Remote-Group", room.Spec.AudienceGroup)
 	r.Header.Del("Cookie")
 	r.Header.Del("Authorization")
