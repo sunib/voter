@@ -1,12 +1,9 @@
 <script setup lang="ts">
-import BuildAgeBadge from './components/layout/BuildAgeBadge.vue'
-import SessionIdentityBadge from './components/layout/SessionIdentityBadge.vue'
+// Chrome lives in AppShell now, not here: every signed-in screen renders the
+// same top bar, so the identity and build badges ride along with it instead of
+// floating over the page in a fixed corner.
 </script>
 
 <template>
-  <div class="app-badges">
-    <SessionIdentityBadge />
-    <BuildAgeBadge />
-  </div>
   <RouterView />
 </template>

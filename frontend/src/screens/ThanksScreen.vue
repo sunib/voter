@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
+import AppShell from '../components/layout/AppShell.vue'
 import { formatMoney } from '../api/coffee'
 import { useCartStore } from '../stores/cart'
 
@@ -10,7 +11,7 @@ const order = computed(() => cart.lastOrder)
 </script>
 
 <template>
-  <main class="page-shell page-shell--centered">
+  <AppShell title="Order confirmation">
     <section class="hero-card hero-card--compact">
       <p class="eyebrow">Order confirmation</p>
       <h1>{{ order?.status === 'placed' ? 'Coffee order placed' : 'Order finished' }}</h1>
@@ -23,9 +24,9 @@ const order = computed(() => cart.lastOrder)
         </template>
       </p>
       <div class="hero-actions">
-        <RouterLink class="button" to="/">Order another coffee</RouterLink>
-        <RouterLink class="button button--secondary" to="/admin">Admin view</RouterLink>
+        <RouterLink class="button" to="/coffee">Order another coffee</RouterLink>
+        <RouterLink class="button button--secondary" to="/">Back to quizzes</RouterLink>
       </div>
     </section>
-  </main>
+  </AppShell>
 </template>

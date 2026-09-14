@@ -1,9 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { getSession } from './api/session'
+import HomeScreen from './screens/HomeScreen.vue'
 import OrderScreen from './screens/OrderScreen.vue'
 import AdminScreen from './screens/AdminScreen.vue'
-import RoundsScreen from './screens/RoundsScreen.vue'
 import VoteResultsScreen from './screens/VoteResultsScreen.vue'
 import AnswerScreen from './screens/AnswerScreen.vue'
 import LoginScreen from './screens/LoginScreen.vue'
@@ -12,7 +12,10 @@ import ThanksScreen from './screens/ThanksScreen.vue'
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/vote', name: 'vote', component: RoundsScreen },
+    // The round list is no longer a page of its own -- it is the first section
+    // of the home page. Kept as a redirect because it is printed in the demo
+    // notes and is the returnTo of any login link still in the wild.
+    { path: '/vote', redirect: '/' },
     { path: '/answer/:session/results', name: 'vote-results', component: VoteResultsScreen, props: true },
     {
       path: '/login',
@@ -25,6 +28,11 @@ export const router = createRouter({
     // Claiming it here made client-side navigation shadow the real join form.
     {
       path: '/',
+      name: 'home',
+      component: HomeScreen,
+    },
+    {
+      path: '/coffee',
       name: 'order',
       component: OrderScreen,
     },

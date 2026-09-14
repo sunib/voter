@@ -6,6 +6,7 @@ import { formatMoney, getVoucherUsage } from '../api/coffee'
 import { useLiveCoffeeConfig } from '../api/liveCoffeeConfig'
 import { currentSession } from '../api/session'
 import AdminNav from '../components/admin/AdminNav.vue'
+import AppShell from '../components/layout/AppShell.vue'
 import FieldStateMarker from '../components/admin/FieldStateMarker.vue'
 
 type FieldState = 'clean' | 'dirty' | 'conflict'
@@ -327,7 +328,7 @@ onBeforeUnmount(clearAllFlashes)
 </script>
 
 <template>
-  <main class="page-shell page-shell--wide">
+  <AppShell title="Menu editor" width="wide">
     <section class="hero-card hero-card--compact">
       <p class="eyebrow">Admin</p>
       <h1>Live coffee config</h1>
@@ -1369,5 +1370,5 @@ onBeforeUnmount(clearAllFlashes)
         </div>
       </section>
     </template>
-  </main>
+  </AppShell>
 </template>

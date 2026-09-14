@@ -1,22 +1,22 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { getSession } from '../../api/session'
+import { currentSession, getSession } from '../../api/session'
 
 const route = useRoute()
 
-const displayName = ref('')
+// The router guard calls getSession() before every protected navigation, so
+// the answer is already in hand by the time this renders. Starting from the
+// cached session keeps the top bar from flickering blank on each screen change
+// and saves a round trip per navigation; the fetch below is only the fallback
+// for the first paint after a reload.
+const displayName = ref(currentSession()?.displayName.trim() ?? '')
 
 const visible = computed(
   () => route.name !== 'login' && displayName.value.trim().length > 0,
 )
 
 async function loadSession() {
-  if (route.name === 'login') {
-    displayName.value = ''
-    return
-  }
-
   // getSession returns null when signed out rather than throwing: "not logged
   // in" is an expected answer for a badge, not an error.
   const session = await getSession()
@@ -28,6 +28,11 @@ watch(
   () => {
     if (route.name === 'login') {
       displayName.value = ''
+      return
+    }
+    const cached = currentSession()?.displayName.trim() ?? ''
+    if (cached !== '') {
+      displayName.value = cached
       return
     }
     if (displayName.value.trim() !== '') {

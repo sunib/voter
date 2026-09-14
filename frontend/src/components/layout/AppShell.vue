@@ -1,15 +1,23 @@
 <script setup lang="ts">
-import TopBar from './TopBar.vue'
+import { computed } from 'vue'
 
-defineProps<{ title?: string }>()
+import TopBar from './TopBar.vue'
+import type { ShellWidth } from './shellWidth'
+import { shellWidthClass } from './shellWidth'
+
+const props = withDefaults(
+  defineProps<{ title?: string; width?: ShellWidth }>(),
+  { title: undefined, width: 'default' },
+)
+
+const widthClass = computed(() => shellWidthClass(props.width))
 </script>
 
 <template>
   <div class="min-h-screen">
-    <TopBar :title="title" />
-    <main class="mx-auto w-full max-w-md px-4 pb-10 pt-6">
+    <TopBar :title="title" :width="width" />
+    <main class="page-shell" :class="widthClass">
       <slot />
     </main>
   </div>
 </template>
-

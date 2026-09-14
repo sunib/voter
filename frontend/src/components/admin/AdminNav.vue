@@ -20,7 +20,7 @@ function isActive(name: string): boolean {
 
 <template>
   <nav class="admin-nav" aria-label="Admin sections">
-    <RouterLink to="/" class="admin-back" aria-label="Back to order">
+    <RouterLink to="/coffee" class="admin-back" aria-label="Back to the coffee shop">
       <svg
         class="admin-back__icon"
         viewBox="0 0 24 24"

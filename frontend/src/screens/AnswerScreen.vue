@@ -90,7 +90,7 @@ async function submit() {
 </script>
 
 <template>
-  <AppShell :title="title">
+  <AppShell :title="title" width="narrow">
     <div class="space-y-4">
       <div class="flex items-center justify-between">
         <SessionStateBanner :state="state" />

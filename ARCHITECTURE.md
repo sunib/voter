@@ -358,7 +358,10 @@ the previous Voter image while retaining the quiz.
 
 ## Voting rounds
 
-The restored voting flow uses the same Dex application session as coffee. `/vote`
+The restored voting flow uses the same Dex application session as coffee. Voting
+and coffee are peers in the SPA: `/` is a home page that shows the signed-in
+identity, lists the open rounds and links to the coffee shop at `/coffee`, and a
+top bar carries the same two-tab navigation on every screen. The home page
 reads QuizSessions through `/public/rounds`; `/answer/:session` reads a fresh round
 and posts answers with its UID/resourceVersion and the session CSRF token. The
 backend rereads the round, requires `state: live`, checks the question version,

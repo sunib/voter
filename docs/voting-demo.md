@@ -1,10 +1,12 @@
 # Run a voting round
 
-Use the same room code and login as the coffee demo. Open `/vote` on the Voter
-host, choose **Answer questions**, answer, and submit. The confirmation opens
-results. The presenter can open `/answer/demo-round-1/results` and select
-**Refresh results** as votes arrive. Attendees can switch between Coffee and Vote
-using the top navigation. Results do not refresh automatically.
+Use the same room code and login as the coffee demo. Open the Voter host's home
+page, choose **Answer questions** on the round, answer, and submit. The
+confirmation opens results. The presenter can open `/answer/demo-round-1/results`
+and select **Refresh results** as votes arrive. The home page lists every open
+round and links to the coffee shop; the **Quizzes** and **Coffee** tabs in the top
+bar move between the two halves from any screen. Results do not refresh
+automatically.
 
 ## Prepare, close and repeat
 
@@ -15,8 +17,8 @@ them. The Voter repository sample is a template, not a second reconciler.
 
 1. Before sharing a round, choose its title, questions and a new `metadata.name`.
    Set `spec.state: live` to accept votes. `draft` blocks voting and is hidden from
-   the round list; `closed` remains visible for results.
-2. Let Flux reconcile and verify the questions at `/vote`.
+   the home page; `closed` stays listed there for results.
+2. Let Flux reconcile and verify the questions on the home page.
 3. Share the round link, collect votes, and refresh the presenter results page.
 4. To close, change `spec.state` to `closed` in Git and push. A request that read
    the live state just before closure can still finish; this is not an atomic cutoff.

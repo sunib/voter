@@ -22,13 +22,14 @@ test('two participants vote, see durable results, and cannot vote twice or after
     contexts.push(context);
     const page = await context.newPage();
     page.on('pageerror', error => { throw error; });
-    await page.goto(`${APP}/vote`);
+    await page.goto(`${APP}/`);
     const displayName = `${name}-${label}`;
     names.push(displayName);
     await page.getByLabel('Room code').fill(JSON.parse(kube('get', 'room', 'demo', '-o', 'json')).status.joinCode.code);
     await page.getByLabel('Display name').fill(displayName);
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
-    await page.waitForURL(`${APP}/vote`);
+    await page.waitForURL(`${APP}/`);
+    // The round list is a section of the home page now, not a /vote page of its own.
     const card = page.getByRole('article').filter({ has: page.getByRole('heading', { name, exact: true }) });
     await card.getByRole('link', { name: 'Answer questions' }).click();
     await expect(page.getByRole('heading', { name: 'Which approach?' })).toBeVisible();

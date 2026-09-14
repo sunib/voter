@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+
+import AppShell from '../components/layout/AppShell.vue'
 import {
   buildStorefrontFromConfig,
   formatMoney,
@@ -173,7 +175,7 @@ watch(
 </script>
 
 <template>
-  <main class="page-shell">
+  <AppShell title="Coffee shop">
     <section v-if="live && !live.synced.value" class="panel" role="status">
       <p>
         {{
@@ -199,8 +201,8 @@ watch(
         {{ storefront?.shop.bannerText ?? 'Scan the QR code, pick a coffee, and see what the voucher really does at submit time.' }}
       </p>
       <div class="hero-actions">
-        <RouterLink class="button button--secondary" to="/admin">Admin</RouterLink>
         <span class="pill" :class="`pill--${voucherTone}`">{{ voucherHeadline }}</span>
+        <RouterLink class="button button--secondary" to="/admin">Edit the menu</RouterLink>
       </div>
       <p v-if="storefront?.voucher.displayMessage" class="voucher-copy">
         {{ storefront.voucher.displayMessage }}
@@ -282,5 +284,5 @@ watch(
       </div>
       <p v-if="submitError" class="error-copy">{{ submitError }}</p>
     </section>
-  </main>
+  </AppShell>
 </template>
