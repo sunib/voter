@@ -347,9 +347,9 @@ matches the published digest. Public build metadata reports `55e287d` and `gitDi
 Room Pass remains on `d7d38ba` because its source was unchanged.
 
 The live sample quiz, “How do you change Kubernetes configuration today?”, is available
-at [demo-round-1](https://voter.koudijs.dev/answer/demo-round-1), with
-[results](https://voter.koudijs.dev/answer/demo-round-1/results) and the
-[coffee editor](https://voter.koudijs.dev/admin) using the same room login.
+at [demo-round-1](https://demo.koudijs.dev/answer/demo-round-1), with
+[results](https://demo.koudijs.dev/answer/demo-round-1/results) and the
+[coffee editor](https://demo.koudijs.dev/admin) using the same room login.
 Room `demo` is open through **2026-09-30 18:00 UTC** at this verification.
 Chromium checked all three routes through the room-code form without page errors.
 Authenticated editing and voting were covered in the fixture and CI; this deployment

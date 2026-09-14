@@ -4,7 +4,7 @@ A participant scans one code and lands on a chosen page of the application,
 signed in, having typed only a display name.
 
 ```
-QR  ->  https://voter.koudijs.dev/auth/login?code=BCDFGH&return=/answer/round-1
+QR  ->  https://demo.koudijs.dev/auth/login?code=BCDFGH&return=/answer/round-1
         |
         |  application stores the destination in its login transaction,
         |  sets __Host-room-pass-joincode, redirects to Dex
@@ -17,7 +17,7 @@ QR  ->  https://voter.koudijs.dev/auth/login?code=BCDFGH&return=/answer/round-1
         enrollment -> /room-pass/complete -> Dex -> application callback
         |
         v
-        https://voter.koudijs.dev/answer/round-1
+        https://demo.koudijs.dev/answer/round-1
 ```
 
 ## The two halves and why they travel differently

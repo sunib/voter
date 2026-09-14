@@ -29,11 +29,11 @@ test("room login and returning enrollment work in a phone-sized browser", async 
   // is the only place both halves run at once, so the preview is read from a
   // real browser and compared to the object the server goes on to create.
   const preview = page.locator("#rp-email");
-  await expect(preview).toHaveText("your-name@demo.invalid");
+  await expect(preview).toHaveText("your-name@koudijs.dev.test");
   await page.getByLabel("Display name").fill(testName);
   const previewed = await preview.textContent();
   expect(previewed).toBe(
-    `${testName.toLowerCase().replaceAll(" ", "-")}@demo.invalid`,
+    `${testName.toLowerCase().replaceAll(" ", "-")}@koudijs.dev.test`,
   );
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(
@@ -49,7 +49,7 @@ test("room login and returning enrollment work in a phone-sized browser", async 
   });
   const before = participants().filter((p) => p.spec.displayName === testName);
   expect(before).toHaveLength(1);
-  expect(`${before[0].metadata.name.replace(/^p-/, "")}@demo.invalid`).toBe(
+  expect(`${before[0].metadata.name.replace(/^p-/, "")}@koudijs.dev.test`).toBe(
     previewed,
   );
   await page.screenshot({

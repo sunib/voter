@@ -130,7 +130,7 @@ func (f *flow) login(enroll bool) (string, map[string]any) {
 	if e = verified.Claims(&claims); e != nil {
 		f.t.Fatal(e)
 	}
-	if claims["name"] != participantName || !strings.HasSuffix(fmt.Sprint(claims["email"]), "@demo.invalid") || fmt.Sprint(claims["groups"]) != "[demo:room-pass-test]" {
+	if claims["name"] != participantName || !strings.HasSuffix(fmt.Sprint(claims["email"]), "@koudijs.dev.test") || fmt.Sprint(claims["groups"]) != "[demo:room-pass-test]" {
 		f.t.Fatalf("wrong identity claims: %v", claims)
 	}
 	// The whole shared-issuer containment argument rests on this claim: the

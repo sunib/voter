@@ -21,7 +21,7 @@ func testConfig() config {
 	return config{
 		ParticipantCookieName:   "__Host-voter-session",
 		SessionCookieMaxAgeSecs: 7200,
-		AppOrigin:               "https://voter.koudijs.dev",
+		AppOrigin:               "https://demo.koudijs.dev",
 	}
 }
 
@@ -53,7 +53,7 @@ func TestSessionRoundTripsAndCarriesToken(t *testing.T) {
 	now := time.Now()
 	got, ok := roundTrip(t, cfg, sc, participantSession{
 		IDToken: "header.payload.signature", Subject: "abc123",
-		DisplayName: "Robin", Email: "abc123@demo.invalid",
+		DisplayName: "Robin", Email: "abc123@koudijs.dev.test",
 		Groups: []string{"demo:voter-audience"}, TokenExpiry: now.Add(time.Hour).Unix(),
 	}, now, now.Add(time.Minute))
 	if !ok {
@@ -191,11 +191,11 @@ func TestCSRFEnforcement(t *testing.T) {
 		token   string
 		wantErr bool
 	}{
-		{"valid", "https://voter.koudijs.dev", "the-expected-token", false},
+		{"valid", "https://demo.koudijs.dev", "the-expected-token", false},
 		{"no origin header is allowed if token matches", "", "the-expected-token", false},
 		{"foreign origin", "https://evil.example", "the-expected-token", true},
-		{"missing token", "https://voter.koudijs.dev", "", true},
-		{"wrong token", "https://voter.koudijs.dev", "guessed", true},
+		{"missing token", "https://demo.koudijs.dev", "", true},
+		{"wrong token", "https://demo.koudijs.dev", "guessed", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

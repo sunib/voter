@@ -8,7 +8,7 @@ not a real browser, and because the fix has a configuration consequence.
 
 **No for the current deployment, yes before anyone changes its topology.**
 
-Today `voter.koudijs.dev` serves both the application and the join form —
+Today `demo.koudijs.dev` serves both the application and the join form —
 Traefik routes `/bind`, `/join`, `/logout` on that host to Room Pass. The
 application origin and the join origin are therefore the same origin, the old
 header covered it as `'self'` by coincidence, and browser login works. That is

@@ -48,7 +48,7 @@ function headerOf(name: string): string | null {
 
 beforeEach(() => {
   calls = []
-  vi.stubGlobal('window', { location: { origin: 'https://voter.koudijs.dev' } })
+  vi.stubGlobal('window', { location: { origin: 'https://demo.koudijs.dev' } })
 })
 
 afterEach(() => {
@@ -62,7 +62,7 @@ async function signIn(csrfToken = 'csrf-from-session') {
     authenticated: true,
     username: 'demo:abc',
     displayName: 'Someone',
-    email: 'someone@demo.invalid',
+    email: 'someone@koudijs.dev.test',
     groups: ['demo:voter-audience'],
     csrfToken,
     expiresAt: 0,

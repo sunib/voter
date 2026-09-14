@@ -272,11 +272,20 @@ func participantID(display string) string {
 	return strings.TrimRight(id, "-")
 }
 
-// demoEmail is the only place an address is formed. RFC 2606 reserves .invalid
-// so the address can never resolve, which is the point: the application behind
-// Room Pass needs an address-shaped identifier, not a mailbox. What it does
-// with it is its own business -- see Room.spec.attributionNote.
-func demoEmail(id string) string { return id + "@demo.invalid" }
+// demoEmail is the only place an address is formed. The domain says both where
+// the identity came from and that it is not a mailbox: RFC 2606 reserves .test,
+// so koudijs.dev.test cannot be registered by anyone, ever. The application
+// behind Room Pass needs an address-shaped identifier, not somewhere to send
+// mail. What it does with it is its own business -- see
+// Room.spec.attributionNote.
+//
+// .test rather than .invalid is a deliberate readability choice: a participant
+// reads this address on the join page before choosing a name, and "test" says
+// "not a real address" where "invalid" reads as "something went wrong". The
+// trade is that .test carries no promise of an NXDOMAIN the way .invalid does
+// -- RFC 6761 6.2 expects .test names to resolve inside a private network -- so
+// nothing may treat "it does not resolve" as a control.
+func demoEmail(id string) string { return id + "@koudijs.dev.test" }
 
 func participantEmail(p *api.Participant) string {
 	return demoEmail(strings.TrimPrefix(p.Name, participantPrefix))
@@ -511,7 +520,7 @@ var page = template.Must(template.New("join").Parse(pageSource))
 // the whole point of showing the address is that it is the one the participant
 // will get. No regular expressions and no Unicode tables, so the two halves
 // stay comparable by eye.
-const previewScript = `(function(){var n=document.getElementById("rp-name"),o=document.getElementById("rp-email");if(!n||!o){return}function slug(v){var s=v.normalize("NFKD").toLowerCase(),out="",dash=false,i,c;for(i=0;i<s.length;i++){c=s.charAt(i);if((c>="a"&&c<="z")||(c>="0"&&c<="9")){if(dash&&out.length>0){out+="-"}dash=false;out+=c}else if(c<"\u0300"||c>"\u036f"){dash=true}}if(out.length>40){out=out.slice(0,40)}while(out.length>0&&out.charAt(out.length-1)==="-"){out=out.slice(0,-1)}return out}function show(){var s=slug(n.value);o.textContent=(s||"your-name")+"@demo.invalid"}n.addEventListener("input",show);show()}())`
+const previewScript = `(function(){var n=document.getElementById("rp-name"),o=document.getElementById("rp-email");if(!n||!o){return}function slug(v){var s=v.normalize("NFKD").toLowerCase(),out="",dash=false,i,c;for(i=0;i<s.length;i++){c=s.charAt(i);if((c>="a"&&c<="z")||(c>="0"&&c<="9")){if(dash&&out.length>0){out+="-"}dash=false;out+=c}else if(c<"\u0300"||c>"\u036f"){dash=true}}if(out.length>40){out=out.slice(0,40)}while(out.length>0&&out.charAt(out.length-1)==="-"){out=out.slice(0,-1)}return out}function show(){var s=slug(n.value);o.textContent=(s||"your-name")+"@koudijs.dev.test"}n.addEventListener("input",show);show()}())`
 
 // previewScriptSource is the CSP source that admits exactly the script above and
 // nothing else. Hashing the same constant the page renders means an edit to the

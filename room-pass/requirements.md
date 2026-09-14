@@ -253,7 +253,7 @@ The room code proves possession, not physical attendance or one-person-one-vote.
 |---|---|
 | Participant ID | Derived by the server from the display name, unique within the event and immutable once enrolled; public, never a credential |
 | Display name | Participant-supplied, validated and escaped; never used as an authorization key |
-| Author email | Server-generated `<participant-id>@demo.invalid`; never supplied by the participant, and shown on the join page while the name is typed |
+| Author email | Server-generated `<participant-id>@koudijs.dev.test`; never supplied by the participant, and shown on the join page while the name is typed |
 | Group | Taken from event configuration, never from client input |
 | Session | Signed/encrypted cookie referencing persisted Room and Participant UIDs; no separate Session CRD |
 
@@ -308,7 +308,7 @@ The initial identity contract is:
 X-Remote-User-Id:    <participant ID>
 X-Remote-User:       <display name>
 X-Remote-User-Name:  <display name>
-X-Remote-User-Email: <participant ID>@demo.invalid
+X-Remote-User-Email: <participant ID>@koudijs.dev.test
 X-Remote-Group:     <configured event group>
 ```
 

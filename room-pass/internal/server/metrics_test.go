@@ -56,7 +56,7 @@ func TestMetricsReflectOutcomesWithoutIdentityLabels(t *testing.T) {
 			t.Errorf("missing %s in scrape:\n%s", want, body)
 		}
 	}
-	for _, secret := range []string{"private-name", "SECRET", "secret-handoff", "BCDFGH", "demo.invalid"} {
+	for _, secret := range []string{"private-name", "SECRET", "secret-handoff", "BCDFGH", "koudijs.dev.test"} {
 		if strings.Contains(body, secret) {
 			t.Errorf("metrics leaked %q", secret)
 		}

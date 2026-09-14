@@ -720,13 +720,13 @@ func TestASecondClaimOnANameIsRefused(t *testing.T) {
 func TestIssuedAddressMatchesTheParticipantID(t *testing.T) {
 	p := &api.Participant{}
 	p.Name = participantPrefix + participantID("Ada Demo")
-	if got := participantEmail(p); got != "ada-demo@demo.invalid" {
+	if got := participantEmail(p); got != "ada-demo@koudijs.dev.test" {
 		t.Errorf("participant address: %q", got)
 	}
 	if got := emailPreview("Ada Demo"); got != participantEmail(p) {
 		t.Errorf("the preview promises %q", got)
 	}
-	if got := emailPreview(""); got != "your-name@demo.invalid" {
+	if got := emailPreview(""); got != "your-name@koudijs.dev.test" {
 		t.Errorf("empty-name placeholder: %q", got)
 	}
 	if !strings.Contains(previewScript, `"your-name"`) {
@@ -763,7 +763,7 @@ func TestJoinPageShowsTheAddressBeforeAnyScriptRuns(t *testing.T) {
 	s, _ := fixture(t, "http://dex.test")
 	b := newBrowser()
 	body := b.request(s, "GET", "https://demo.test/join", nil).Body.String()
-	if !strings.Contains(body, "your-name@demo.invalid") {
+	if !strings.Contains(body, "your-name@koudijs.dev.test") {
 		t.Error("the empty form does not show what the address will look like")
 	}
 	if !strings.Contains(body, "there is nothing to fill in") {
@@ -777,7 +777,7 @@ func TestJoinPageShowsTheAddressBeforeAnyScriptRuns(t *testing.T) {
 		"csrf": {csrf}, "code": {"WRONG"},
 		"name": {"Ada Demo"}, "return": {"https://demo.test/app/"},
 	})
-	if !strings.Contains(w.Body.String(), "ada-demo@demo.invalid") {
+	if !strings.Contains(w.Body.String(), "ada-demo@koudijs.dev.test") {
 		t.Error("the returned form lost the address for the name it kept")
 	}
 }
@@ -839,7 +839,7 @@ func TestReturningParticipantSeesTheirIssuedAddress(t *testing.T) {
 		t.Fatalf("enrollment: %d %s", w.Code, w.Body.String())
 	}
 	body = b.request(s, "GET", "https://demo.test/join", nil).Body.String()
-	if !strings.Contains(body, "ada-demo@demo.invalid") {
+	if !strings.Contains(body, "ada-demo@koudijs.dev.test") {
 		t.Errorf("the returning page hides the address it will assert: %s", body)
 	}
 	if strings.Contains(body, "Enter the room code") {

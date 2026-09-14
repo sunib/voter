@@ -1,4 +1,4 @@
-// One-off rehearsal against PRODUCTION (voter.koudijs.dev): enrol through Room
+// One-off rehearsal against PRODUCTION (demo.koudijs.dev): enrol through Room
 // Pass the way an attendee does, change a price in the editor, press save, and
 // let the Git sink answer the only question the fixture cannot -- whose name
 // ends up on the commit.
@@ -25,7 +25,7 @@ const kube = (...args) => execFileSync("kubectl", args, { encoding: "utf8" });
 const joinCode = () =>
   kube("-n", "voter", "get", "room", "demo", "-o", "jsonpath={.status.joinCode.code}").trim();
 
-const APP = "https://voter.koudijs.dev";
+const APP = "https://demo.koudijs.dev";
 const displayName = process.argv[2] ?? "Ada Lovelace";
 
 const browser = await chromium.launch();

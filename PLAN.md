@@ -183,9 +183,9 @@ production rollout was verified through Flux, the ready pod digest, public build
 and anonymous browser smoke checks; authenticated tests ran in the fixture, and no
 production QuizSubmissions were created.
 
-The existing live quiz is [demo-round-1](https://voter.koudijs.dev/answer/demo-round-1),
+The existing live quiz is [demo-round-1](https://demo.koudijs.dev/answer/demo-round-1),
 “How do you change Kubernetes configuration today?” Its
-[results](https://voter.koudijs.dev/answer/demo-round-1/results) are available after room
+[results](https://demo.koudijs.dev/answer/demo-round-1/results) are available after room
 login. Room `demo` is open through **2026-09-30 18:00 UTC** at this verification.
 
 | Earlier upstream request | 0.3.0 finding | Voter decision |
@@ -431,7 +431,7 @@ A future native OIDC provider is a separate product decision, not a prerequisite
       runtime integration is through Dex/OIDC, not Go imports from Room Pass. Remove
       the in-tree source after the external release and consumer smoke tests pass.
 - [ ] Separate demo policy from the component: `demo:` group validation and
-      `@demo.invalid` identity formatting are current assumptions. Define an
+      `@koudijs.dev.test` identity formatting are current assumptions. Define an
       operator-controlled allowed group namespace/allowlist with a restrictive default,
       immutable identity settings and synthetic attribution semantics. Do not simply
       remove validation or let room authors choose privileged groups.

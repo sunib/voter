@@ -117,7 +117,7 @@ flowchart TB
         A1["Attendee"] -->|"cookie the app issued itself"| A2["Voter"]
         A2 -->|"ServiceAccount token +<br/>Impersonate-User: alice<br/>Impersonate-Extra: email"| A3["kube-apiserver authenticates<br/>the SERVICE ACCOUNT"]
         A3 --> A4["audit: user = voter-sa<br/>impersonatedUser = alice"]
-        A4 --> A5["git commit<br/>Author: Alice (alice@demo.invalid)<br/><b>a string the app chose</b>"]
+        A4 --> A5["git commit<br/>Author: Alice (alice@koudijs.dev.test)<br/><b>a string the app chose</b>"]
     end
 
     subgraph NEW["Now — the attendee's own ID token"]
@@ -125,7 +125,7 @@ flowchart TB
         B1["Attendee"] -->|"ID token, signed by Dex"| B2["Voter"]
         B2 -->|"forwards the token unchanged"| B3["kube-apiserver authenticates<br/>the ATTENDEE"]
         B3 --> B4["audit: user = demo:SUBJECT<br/>extras from CEL over the token"]
-        B4 --> B5["git commit<br/>Author: Alice (alice@demo.invalid)<br/><b>derived from the signed claim</b>"]
+        B4 --> B5["git commit<br/>Author: Alice (alice@koudijs.dev.test)<br/><b>derived from the signed claim</b>"]
     end
 ```
 
@@ -187,7 +187,7 @@ Right now, nothing: the `voter` namespace has no ResourceQuota, no LimitRange, a
 has no ValidatingAdmissionPolicy. The Role is narrow, but it is not bounded in volume.
 
 **"Is the email real?"**
-For room participants it is synthetic — `<participant-id>@demo.invalid` — and exists only so
+For room participants it is synthetic — `<participant-id>@koudijs.dev.test` — and exists only so
 commits get an author. Display names and emails are attribution, never identity.
 
 **"Why one Dex instead of two issuers?"**

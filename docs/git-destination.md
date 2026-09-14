@@ -74,7 +74,7 @@ The chain, all of it now carrying real data:
 1. A participant joins through Room Pass and types a display name — validated to
    1–64 bytes, no control characters, no angle brackets, otherwise free text.
 2. Room Pass sets `X-Remote-User-Name` to that name and `X-Remote-User-Email` to
-   `<participant-id>@demo.invalid`, a synthetic address with no mailbox behind it.
+   `<participant-id>@koudijs.dev.test`, a synthetic address with no mailbox behind it.
 3. The apiserver's authentication config maps those into
    `configbutler.ai/claims/display-name` and `configbutler.ai/claims/email`,
    alongside the username `demo:<opaque-dex-subject>`.
@@ -96,7 +96,7 @@ Real commits in `clusters/k8s.koudijs.dev/voter`, newest first:
 
 ```
 2d4374f  author: github:simonkoudijs@gmail.com   chore: 2 changes from github:simonkoudijs@gmail.com
-1be209a  author: Simon <80ea3a9f…@demo.invalid>  chore: 1 change from demo:CkA4MGVh…room-pass
+1be209a  author: Simon <80ea3a9f…@koudijs.dev.test>  chore: 1 change from demo:CkA4MGVh…room-pass
 9bfce70  author: ConfigButler Bot                chore: reconcile 1 coffeeconfigs
 ```
 
