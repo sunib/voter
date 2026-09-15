@@ -4,8 +4,9 @@ This is the implementation plan, not a claim that the target design is deployed.
 [ARCHITECTURE.md](ARCHITECTURE.md) defines the boundaries and target data flow.
 
 Voter is on krm-stream **0.4.0**; the released primitives are integrated and
-deployed. Cluster facts were last verified **2026-09-15**, when the demo moved to
-three GitTargets and the voter/room-pass images to `sha-359c09b`.
+deployed. Cluster facts were last verified **2026-09-15**, with three GitTargets
+(`demo1` 4/4 streams, `demo2` 2/2, `gitops-reverser-config` 5/5), voter on
+`sha-d9f3d93` and room-pass on `sha-359c09b`.
 
 **This file keeps only actionable work.** A section is deleted when its last item
 closes, and completed increments live in Git history rather than here -- which is
@@ -242,11 +243,16 @@ an unrelated OIDC application through Dex, and upgrade without changing identiti
 
 ## 5. Complete the demo and deploy through GitOps
 
-- [ ] Install/configure ConfigButler through `external/k8s` and provision its Git target.
-      Represent Kubernetes save, CommitRequest acceptance and observed Git commit as
-      separate states. The deployed receipt names request acceptance `commitRequested`;
-      end-to-end commit observation is still missing.
-      Show the resulting commit reference and verify actor attribution end to end.
+- [x] Install ConfigButler through `external/k8s` and provision its Git targets.
+      One GitProvider (`k8s-audit-trail`) and three GitTargets, all Succeeded.
+      Actor attribution is verified end to end in both directions: a participant's
+      vote and an operator's RoleBinding both commit with the human as **Author**
+      and the bot as **Committer**.
+- [ ] Observe the commit, rather than only requesting it. The receipt still names
+      request acceptance `commitRequested`; there is no state that means the commit
+      landed, and no commit reference is shown back to the user. Kubernetes save,
+      CommitRequest acceptance and observed Git commit are three states and the UI
+      currently distinguishes two.
 - [ ] Use ConfigButler's public APIs for durable change history and commit observation;
       a krm-stream watch is current state, not an audit/history database. General
       commit-controller behavior belongs in that project, not Voter.
@@ -316,14 +322,8 @@ implementation starts. Paths below are relative to `external/k8s/k8s.koudijs.dev
       against real RBAC; audit additive `system:authenticated` grants and object scope.
 - [ ] Review the named LinkedIn cluster-admin binding, placeholder GitHub team grants,
       oauth2-proxy email-domain policy, Grafana rules and all shared-Dex clients.
-      Remove bare-email operator bindings only after verifying prefixed OIDC identity.
-- [ ] Recheck the previously stalled FluxInstance. Prior diagnosis: operator 0.48.0
-      against floating Flux 2.9.5 CRD shape. In the newer external operator checkout,
-      `internal/builder/templates.go` gates `/spec/versions/1/...` Receiver/Alert patches
-      on `VersionInfo.Minor <= 8`; the prior diagnosis was that 0.48.0 predates that
-      gate while distribution `2.x` floated to 2.9.5. Review a compatible pinned pair
-      in `2-gitops/clusters/course-cluster/operator.yaml`.
-      A Ready application Kustomization does not prove the FluxInstance is healthy.
+      The bare-email operator bindings are already gone (2026-09-11, `6a6f881`);
+      every ClusterRoleBinding subject is connector-prefixed, verified 2026-09-15.
 - [ ] Finish legacy `room` acceptance removal in `1-talos/values.yaml` and the rendered
       authenticator; generate or remove the stale authentication reference YAML. Batch
       authenticator rollout safely, one control-plane node at a time.

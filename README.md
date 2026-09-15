@@ -35,6 +35,8 @@ https://demo.koudijs.dev/auth/login?connector=github&return=%2Froom
 - [k8s-front adoption](docs/k8s-front-adoption.md): Voter-specific recommendation,
   pilot prerequisites and the boundary between prototype work and deployment.
 - [Authorization](docs/authorization.md): who can do what, and what is proven.
+- [Talk checklist](docs/talk-checklist.md): where authorization actually lives —
+  application, RBAC and admission, and the honest limits of each.
 - [Room Pass](room-pass/README.md): the enrollment component and local fixture.
 - [Frontend](FRONTEND.md): UI design notes.
 

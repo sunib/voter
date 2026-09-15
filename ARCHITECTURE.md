@@ -108,15 +108,31 @@ a new repository must not unexpectedly create new identities.
 
 ## Trust boundaries
 
-Voter owns `/auth/login`, `/auth/callback`, `/auth/session`, `/auth/whoami` and
-`/auth/logout`. It uses established OIDC libraries. The signed/encrypted, Secure HttpOnly cookie
+Voter owns `/auth/login`, `/auth/callback`, `/auth/session`, `/auth/whoami`,
+`/auth/rules` and `/auth/logout`. It uses established OIDC libraries. The signed/encrypted, Secure HttpOnly cookie
 contains the ID token; JavaScript receives identity metadata and a CSRF token only.
 Persistent keys preserve established sessions across restarts; pending logins are
 process-local. `/auth/whoami` is the identity page's "show me the real object"
 link: it spends a fresh SelfSubjectReview with the reader's own token and returns
 the apiserver's answer as YAML. Nothing is stored to read instead — a Kubernetes
 identity is derived per request, never persisted — so that review is the only
-login object there is. Cookie custody does not make XSS harmless: same-origin script can
+login object there is.
+
+`/auth/rules` is its companion and answers the next question: a
+`SelfSubjectRulesReview`, in the application's namespace, with the same token.
+Every authenticated identity may ask -- `system:basic-user` grants it to
+`system:authenticated` -- so it needs no grant of its own, and it reports RBAC
+and only RBAC. Admission is invisible to it, as it is to `kubectl auth can-i`;
+see [talk-checklist.md](docs/talk-checklist.md). The SPA polls it rather than
+watching, because a participant holds no permission on RBAC objects and the
+stream's scope allowlist deliberately does not list them.
+
+Neither endpoint is a permission model. Screens use the answer to EXPLAIN a
+refusal in advance, never to gate the attempt: the buttons stay live and the
+API server produces the real 403. Where the two disagree, the API server is
+right.
+
+Cookie custody does not make XSS harmless: same-origin script can
 still perform actions as the user even though it cannot read the token.
 
 Direct REST reads and writes use the session's token against a fixed API server with
@@ -410,7 +426,8 @@ The restored voting flow uses the same Dex application session as coffee. Voting
 and coffee are peers in the SPA: `/` is a home page that shows the signed-in
 identity, lists the open rounds and links to the coffee bar at `/coffee`, and a
 top bar carries the same two-tab navigation on every screen. The badge in that
-bar is a link to `/me`, which reports the whole `/auth/session` payload and is
+bar is a link to `/me`, which reports the whole `/auth/session` payload, renders
+the permission grid from `/auth/rules`, and is
 the only place the app offers to sign out -- quietly, and next to a warning,
 because signing out clears this app's cookie while Dex and Room Pass keep
 theirs. The home page
