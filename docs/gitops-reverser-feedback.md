@@ -254,3 +254,85 @@ Pinned by the cluster's own record: the conditions come from `kubectl -n voter
 get commitrequest coffee-save-xbdxw -o yaml`, the trace from `kubectl -n
 gitops-reverser logs deploy/gitops-reverser`, and the batching from the Talos
 `apiServer.extraArgs` this cluster boots with.
+
+---
+
+## 3. `branchWorkerQueueSize` is a constant, and the workload it is sized against is not the one that overruns it
+
+**2026-09-15 · suggested change · `internal/git/branch_worker.go:36` · against 0.46.0**
+
+We load-tested the demo for a conference talk: 200 distinct participants, each
+logging in through Dex and creating one `QuizSubmission` with **their own**
+token, spread over 60 seconds, against a three-node Talos cluster. Two
+GitTargets (`demo1`, `demo2`) share one GitProvider and branch, so they share
+one branch worker — which the metric confirms, a single series for both:
+
+```
+gitopsreverser_git_queue_depth{branch="main",provider_name="k8s-audit-trail",provider_namespace="voter"} 0
+```
+
+The vote burst was comfortable. Peak `git_queue_depth` **44 of 100**, no drops,
+`git_commits_total{author_kind="user",message_source="live"}` +400 (two targets ×
+200 ballots), fully drained ~12s after the last ballot.
+
+Then we cleaned up — `kubectl delete` of the 203 submissions, batches of 40, no
+pacing — and the same queue overran:
+
+```
+gitopsreverser_git_queue_drops_total{branch="main",kind="write",provider_name="k8s-audit-trail",provider_namespace="voter"} 20
+```
+
+200 ballots over 60s is ~3.3 write requests/s, paced by humans and by an app.
+203 deletes × 2 targets, unpaced, is hundreds per second. **The queue is
+comfortable with a room and fragile against a script**, and the depth that a
+realistic workload reaches tells you very little about the depth an
+administrative one will.
+
+**Why we think the constant is the wrong shape, not just the wrong number.**
+A slot is a whole `WriteRequest` (`internal/git/types.go:306`), not an event, so
+the sizing input is *how many concurrent write requests a bounded burst can
+produce* — and that is a deployment property: roughly (concurrent writers) ×
+(GitTargets sharing one branch worker). Ours is a room capped at 300 across two
+targets, so ~600. A cluster with six targets on one branch has a different
+number again. We do not think one compile-time value can be right for both, and
+today there is no flag and no Helm value to say so.
+
+There is a second-order version of the same problem: because the worker is keyed
+by `(GitProvider namespace, name, branch)`, adding a GitTarget to an existing
+branch silently halves the per-target headroom, with nothing to warn the operator
+that they have changed a capacity they cannot see.
+
+**The failure is quiet in the place it matters.** The enqueue is non-blocking
+with a `default:` that drops the write (`internal/git/branch_worker.go:546-570`).
+Convergence is genuinely fine — mark-and-sweep healed ours, the GitTarget
+reported `RenderMatchesLive=True`, and the mirrored file was byte-correct
+afterwards. But the *live, attributed* commit for those 20 writes never
+happened. For a product whose value is "who changed what, as it happened",
+eventual state with a missing live commit is precisely the loss a user would
+care about, and the only signals are a counter and an `Error` log line.
+
+**What we are asking for**, in order:
+
+1. **Make it configurable** — a flag and a Helm value. This is the part that
+   generalises; the default alone does not.
+2. **Raise the default**, and say what it is sized for. We intend to run 1000
+   locally, on the reasoning that a bounded burst which cannot exceed the queue
+   cannot drop at all, whatever its arrival shape.
+3. **Document the sizing input and its cost.** Worth stating explicitly that
+   `--branch-buffer-max-size` does *not* cover the channel — it bounds the
+   window and pending writes *after* dequeue — so queue depth × payload is
+   additional memory. Negligible for our ~1–2KB CRDs; not negligible for a
+   cluster mirroring large ConfigMaps or Secrets.
+4. Secondary: consider surfacing sustained drops on `GitTarget` status, not only
+   in metrics. An operator who is not scraping has no way to learn that history
+   went missing.
+
+**What we are not asking for.** Not backpressure on the enqueue: a slow or
+unreachable Git remote must not stall the watch path, and dropping-then-healing
+is the right trade. Not removal of the drop path. Not a larger default *instead*
+of configurability — a bigger constant would have fixed our cluster and left the
+next one guessing.
+
+Pinned by the controller's own `/metrics` before and after each burst, and by a
+harness that drives the real login and ballot path rather than the API directly
+(`room-pass/test/loadtest/main.go` in the Voter repository).

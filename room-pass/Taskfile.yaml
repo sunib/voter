@@ -110,6 +110,19 @@ tasks:
     cmds:
       - ROOM_PASS_LOAD=1 ROOM_PASS_EDGE_IP="$(docker network inspect k3d-room-pass-e2e --format '{{"{{"}}(index .IPAM.Config 0).Gateway{{"}}"}}')" go test -v -count=1 -run TestSharedNATEnrollment ./test/e2e
 
+  voteload:
+    desc: >-
+      Rehearse a whole room voting for real: N participants each log in through
+      Dex/Room Pass and cast a ballot with their own token. Writes to whatever
+      cluster KUBECONFIG points at and produces two commits per ballot -- read
+      docs/demo-day-readiness.ignore.md before pointing it at the demo cluster.
+    cmds:
+      - go run ./test/loadtest -round "{{.ROUND}}" -users "{{.USERS}}" -window "{{.WINDOW}}" {{.CLI_ARGS}}
+    vars:
+      USERS: '{{.USERS | default "200"}}'
+      WINDOW: '{{.WINDOW | default "60s"}}'
+      ROUND: '{{.ROUND | default ""}}'
+
   test-network:
     desc: Test Dex NetworkPolicy with real pods in a disposable k3d cluster
     cmds:
