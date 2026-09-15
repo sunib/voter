@@ -99,9 +99,9 @@ Voter owns `/auth/login`, `/auth/callback`, `/auth/session`, `/auth/whoami` and
 `/auth/logout`. It uses established OIDC libraries. The signed/encrypted, Secure HttpOnly cookie
 contains the ID token; JavaScript receives identity metadata and a CSRF token only.
 Persistent keys preserve established sessions across restarts; pending logins are
-process-local. `/auth/whoami` is the home page's "show me the real object" link:
-it spends a fresh SelfSubjectReview with the reader's own token and returns the
-apiserver's answer as YAML. Nothing is stored to read instead — a Kubernetes
+process-local. `/auth/whoami` is the identity page's "show me the real object"
+link: it spends a fresh SelfSubjectReview with the reader's own token and returns
+the apiserver's answer as YAML. Nothing is stored to read instead — a Kubernetes
 identity is derived per request, never persisted — so that review is the only
 login object there is. Cookie custody does not make XSS harmless: same-origin script can
 still perform actions as the user even though it cannot read the token.
@@ -388,7 +388,11 @@ the previous Voter image while retaining the quiz.
 The restored voting flow uses the same Dex application session as coffee. Voting
 and coffee are peers in the SPA: `/` is a home page that shows the signed-in
 identity, lists the open rounds and links to the coffee bar at `/coffee`, and a
-top bar carries the same two-tab navigation on every screen. The home page
+top bar carries the same two-tab navigation on every screen. The badge in that
+bar is a link to `/me`, which reports the whole `/auth/session` payload and is
+the only place the app offers to sign out -- quietly, and next to a warning,
+because signing out clears this app's cookie while Dex and Room Pass keep
+theirs. The home page
 reads QuizSessions through `/public/rounds`; `/answer/:session` reads a fresh round
 and posts answers with its UID/resourceVersion and the session CSRF token. The
 backend rereads the round, requires `state: live`, checks the question version,
