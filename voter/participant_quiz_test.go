@@ -179,7 +179,7 @@ func TestOnlyRoomPassSessionsMayVote(t *testing.T) {
 		t.Errorf("an operator must still read results: %d %s", rec.Code, rec.Body)
 	}
 	// And a participant is unaffected. Cast before the round is closed below.
-	if rec := as(roomConnector, "POST", "/public/rounds/demo", ballot); rec.Code != 201 {
+	if rec := as(testParticipantConnector, "POST", "/public/rounds/demo", ballot); rec.Code != 201 {
 		t.Errorf("a Room Pass participant was refused: %d %s", rec.Code, rec.Body)
 	}
 	if rec := as("github", "POST", "/public/rounds/demo/state", `{"state":"closed"}`); rec.Code != 200 {

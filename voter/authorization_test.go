@@ -26,7 +26,7 @@ func authorizationFixture(t *testing.T) config {
 
 func authorizedRequest(t *testing.T, cfg config, method, token string) *http.Request {
 	t.Helper()
-	return authorizedRequestAs(t, cfg, method, token, roomConnector)
+	return authorizedRequestAs(t, cfg, method, token, testParticipantConnector)
 }
 
 // authorizedRequestAs builds a session for a named Dex connector. Voting is

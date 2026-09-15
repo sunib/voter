@@ -11,10 +11,18 @@ const room = () =>
 const participants = () =>
   JSON.parse(kube("-n", "room-pass", "get", "participants", "-o", "json"))
     .items;
+// What the participant TYPES. Room Pass stores the folded form -- spaces become
+// dashes -- because that value has to be legal as a Kubernetes label value, a
+// path segment in the mirrored audit trail, and the tail of an object name.
+// Keeping both here is the point: the gap between them is the fold, and this is
+// the only place it runs in a real browser against the real server.
 const testName = `Browser test ${Date.now()}`;
+const storedName = testName.replaceAll(" ", "-");
 
 test.afterEach(() => {
-  for (const p of participants().filter((p) => p.spec.displayName === testName))
+  for (const p of participants().filter(
+    (p) => p.spec.displayName === storedName,
+  ))
     kube("-n", "room-pass", "delete", "participant", p.metadata.name);
 });
 
@@ -32,12 +40,14 @@ test("room login and returning enrollment work in a phone-sized browser", async 
   await expect(preview).toHaveText("your-name@koudijs.dev.test");
   await page.getByLabel("Display name").fill(testName);
   const previewed = await preview.textContent();
-  expect(previewed).toBe(
-    `${testName.toLowerCase().replaceAll(" ", "-")}@koudijs.dev.test`,
-  );
+  expect(previewed).toBe(`${storedName.toLowerCase()}@koudijs.dev.test`);
+  // The name preview is the other half of the same fold, and the half a
+  // participant actually reads: it is what they will be called in a Git commit
+  // they cannot edit, shown before they commit to it.
+  await expect(page.locator("#rp-display")).toHaveText(storedName);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(
-    page.getByText(`Welcome, ${testName}.`, { exact: true }),
+    page.getByText(`Welcome, ${storedName}.`, { exact: true }),
   ).toBeVisible();
   const cookies = await context.cookies();
   const enrollment = cookies.find((c) => c.name === "__Host-rp-session");
@@ -47,7 +57,9 @@ test("room login and returning enrollment work in a phone-sized browser", async 
     path: "/",
     sameSite: "Lax",
   });
-  const before = participants().filter((p) => p.spec.displayName === testName);
+  const before = participants().filter(
+    (p) => p.spec.displayName === storedName,
+  );
   expect(before).toHaveLength(1);
   expect(`${before[0].metadata.name.replace(/^p-/, "")}@koudijs.dev.test`).toBe(
     previewed,
@@ -58,14 +70,16 @@ test("room login and returning enrollment work in a phone-sized browser", async 
   });
   await page.getByRole("link", { name: "Sign in again" }).click();
   await expect(
-    page.getByText(`You’re already enrolled as ${testName}.`, { exact: false }),
+    page.getByText(`You’re already enrolled as ${storedName}.`, {
+      exact: false,
+    }),
   ).toBeVisible();
   await expect(page.getByLabel("Room code")).toHaveCount(0);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(
-    page.getByText(`Welcome, ${testName}.`, { exact: true }),
+    page.getByText(`Welcome, ${storedName}.`, { exact: true }),
   ).toBeVisible();
-  const after = participants().filter((p) => p.spec.displayName === testName);
+  const after = participants().filter((p) => p.spec.displayName === storedName);
   expect(after.map((p) => p.metadata.uid)).toEqual(
     before.map((p) => p.metadata.uid),
   );
@@ -84,22 +98,23 @@ test("invalid room code does not enroll and is corrected in place", async ({
     }),
   ).toBeVisible();
   expect(
-    participants().filter((p) => p.spec.displayName === testName),
+    participants().filter((p) => p.spec.displayName === storedName),
   ).toHaveLength(0);
-  // The form stays put with the code marked and the typed name kept, so a
-  // mistyped code is retyped rather than started over.
+  // The form stays put with the code marked and the name kept, so a mistyped
+  // code is retyped rather than started over. What comes back is the FOLDED
+  // name, which is also the first place a participant sees the fold applied.
   await expect(page.getByLabel("Room code")).toHaveAttribute(
     "aria-invalid",
     "true",
   );
-  await expect(page.getByLabel("Display name")).toHaveValue(testName);
+  await expect(page.getByLabel("Display name")).toHaveValue(storedName);
   await page.getByLabel("Room code").fill(room().status.joinCode.code);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(
-    page.getByText(`Welcome, ${testName}.`, { exact: true }),
+    page.getByText(`Welcome, ${storedName}.`, { exact: true }),
   ).toBeVisible();
   expect(
-    participants().filter((p) => p.spec.displayName === testName),
+    participants().filter((p) => p.spec.displayName === storedName),
   ).toHaveLength(1);
 });
 
@@ -118,7 +133,7 @@ test("a tampered form CSRF token does not enroll", async ({ page }) => {
     page.getByText("Invalid form. Reload and try again.", { exact: true }),
   ).toBeVisible();
   expect(
-    participants().filter((p) => p.spec.displayName === testName),
+    participants().filter((p) => p.spec.displayName === storedName),
   ).toHaveLength(0);
 });
 
@@ -188,10 +203,10 @@ test("a scanned QR code joins the room without typing a code", async ({
   await page.getByLabel("Display name").fill(testName);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(
-    page.getByText(`Welcome, ${testName}.`, { exact: true }),
+    page.getByText(`Welcome, ${storedName}.`, { exact: true }),
   ).toBeVisible();
   expect(
-    participants().filter((p) => p.spec.displayName === testName),
+    participants().filter((p) => p.spec.displayName === storedName),
   ).toHaveLength(1);
 
   // Used once. A code left in the jar is one that gets silently replayed on
@@ -211,6 +226,6 @@ test("a forged join code is still just a wrong code", async ({ page }) => {
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page.getByText(/invalid or joining has closed/i)).toBeVisible();
   expect(
-    participants().filter((p) => p.spec.displayName === testName),
+    participants().filter((p) => p.spec.displayName === storedName),
   ).toHaveLength(0);
 });

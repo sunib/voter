@@ -56,7 +56,10 @@ const names = [];
  *  contexts apart, and so a failure names which browser was which. */
 async function signIn(browser, label, prepare = async () => {}) {
   const displayName = `Stream ${label} ${Date.now()}`;
-  names.push(displayName);
+  // Room Pass STORES the folded name, so the cleanup below has to look for that
+  // and not for what was typed -- otherwise every run leaks a Participant and
+  // the room eventually hits maxParticipants.
+  names.push(displayName.replaceAll(" ", "-"));
 
   const context = await browser.newContext({
     ignoreHTTPSErrors: true,

@@ -69,6 +69,18 @@ type config struct {
 	// GitHub on a deployment that defaults to the room connector. An allowlist
 	// rather than free text: the value goes into a redirect to the issuer.
 	OIDCConnectorChoices []string `envconfig:"OIDC_CONNECTOR_CHOICES"`
+	// ParticipantConnectorID is the Dex connector id a ballot must come through.
+	// Dex reports it in federated_claims.connector_id, sets it itself, and no
+	// caller can forge it -- the apiserver keys the "demo:" username prefix off
+	// the same value.
+	//
+	// Configuration rather than a constant because it names a deployment's own
+	// Dex, and a wrong value is silent in the worst way: every participant is
+	// refused with "join through Room Pass" while looking perfectly signed in.
+	// The default matches both this cluster and the e2e fixture, so neither has
+	// to set it; it exists so renaming the connector is an env var and not a
+	// rebuild.
+	ParticipantConnectorID string `envconfig:"PARTICIPANT_CONNECTOR_ID" default:"room-pass"`
 
 	// AppOrigin is this application's own origin, used for CSRF origin checks.
 	// Never derived from X-Forwarded-* headers.

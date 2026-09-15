@@ -16,7 +16,9 @@ test('two participants vote, see durable results, and cannot vote twice or after
     ],
   }};
   execFileSync('kubectl', ['--kubeconfig', kubeconfig, 'create', '-f', '-'], { input: JSON.stringify(round) });
-  const uid = JSON.parse(kube('get', 'quizsession', name, '-o', 'json')).metadata.uid;
+  // Ballots are selected by the round's NAME, not its UID: the label the app
+  // writes is what the results page and the Git mirror both read.
+  const roundSelector = `voter.configbutler.ai/round=${name}`;
   async function signIn(label) {
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
     contexts.push(context);
@@ -89,7 +91,8 @@ test('two participants vote, see durable results, and cannot vote twice or after
         credentials: 'include',
         headers: { 'content-type': 'application/json', 'x-csrf-token': session.csrfToken },
         body: JSON.stringify({
-          uid: round.round.metadata.uid,
+          // No uid: the handler sets DisallowUnknownFields, so sending one is a
+          // 400 and would hide the 409 this is actually testing for.
           resourceVersion: round.round.metadata.resourceVersion,
           answers: [{ questionId: 'choice', singleChoice: 'GitOps' }],
         }),
@@ -102,11 +105,11 @@ test('two participants vote, see durable results, and cannot vote twice or after
     // A reload must not resurrect the form either.
     await carol.reload();
     await expect(carol.getByRole('button', { name: 'Submit', exact: true })).toBeDisabled();
-    const quizSubmissions = JSON.parse(kube('get', 'quizsubmissions', '-l', `voter.configbutler.ai/round-uid=${uid}`, '-o', 'json')).items;
+    const quizSubmissions = JSON.parse(kube('get', 'quizsubmissions', '-l', roundSelector, '-o', 'json')).items;
     expect(quizSubmissions).toHaveLength(2);
   } finally {
     for (const context of contexts) await context.close();
-    kube('delete', 'quizsubmissions', '-l', `voter.configbutler.ai/round-uid=${uid}`);
+    kube('delete', 'quizsubmissions', '-l', roundSelector);
     kube('delete', 'quizsession', name);
     const participants = JSON.parse(kube('get', 'participants', '-o', 'json')).items;
     for (const p of participants) if (names.includes(p.spec.displayName)) kube('delete', 'participant', p.metadata.name);

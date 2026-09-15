@@ -30,12 +30,6 @@ var quizSubmissions = schema.GroupVersionResource{Group: "examples.configbutler.
 // is written up, with what keeps it closed and how to recover, as entry 1 of
 // docs/deliberate-simplifications.md. Staleness is unaffected: the vote handler's
 // resourceVersion check catches a recreated round as surely as an edited one.
-// roomConnector is the Dex connector id Room Pass logins carry. The apiserver's
-// own authentication config keys the "demo:" username prefix off the same value,
-// so this is the application agreeing with the cluster rather than inventing a
-// second notion of who a participant is.
-const roomConnector = "room"
-
 const (
 	roundLabel     = "voter.configbutler.ai/round"
 	submitterLabel = "voter.configbutler.ai/submitter"
@@ -217,7 +211,7 @@ func registerParticipantQuizHandlers(mux *http.ServeMux, deps handlerDeps) {
 		// the demo rather than an oversight: the operator is cluster-admin, so
 		// the API server has no objection at all to the same write made with
 		// kubectl. Entry 4 of docs/deliberate-simplifications.md.
-		if s.Connector != roomConnector {
+		if s.Connector != deps.cfg.ParticipantConnectorID {
 			writeJSON(w, 403, map[string]string{
 				"error": "Voting is for people who joined through Room Pass. Scan the QR code to join the room.",
 				"code":  "NotAParticipant",

@@ -18,11 +18,18 @@ import (
 	authenticationv1 "k8s.io/api/authentication/v1"
 )
 
+// The Dex connector id the fixtures authenticate through. Matches the default
+// in config.go, and both the cluster and the e2e fixture.
+const testParticipantConnector = "room-pass"
+
 func testConfig() config {
 	return config{
 		ParticipantCookieName:   "__Host-voter-session",
 		SessionCookieMaxAgeSecs: 7200,
-		AppOrigin:               "https://demo.koudijs.dev",
+		// envconfig supplies this default in the real binary; a hand-built
+		// config has to say it, or every ballot in a test is refused.
+		ParticipantConnectorID: testParticipantConnector,
+		AppOrigin:              "https://demo.koudijs.dev",
 	}
 }
 
