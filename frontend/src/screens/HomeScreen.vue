@@ -1,19 +1,19 @@
 <script setup lang="ts">
-// The demo's front door. It used to be the coffee storefront, with voting
-// hidden behind a "Vote" link and its own list page. Both halves are peers, so
-// the round list that lived at /vote is now simply the first section here and
-// coffee is the second -- one page fewer to explain from the stage.
+// The quiz half of the demo, and only that.
+//
+// This page used to open with a badge repeating the name already in the top
+// bar, and close with an invitation to the coffee bar that is already a tab up
+// there. Both were there when the page was the front door and coffee was hidden
+// behind a link. Neither is true any more, and a room looking at a projector
+// should see the rounds, not a second copy of the navigation.
 import { computed, onMounted, ref } from 'vue'
 
 import AppShell from '../components/layout/AppShell.vue'
 import { useLiveResources } from '../api/liveResources'
 import { listRounds } from '../api/quiz'
-import { currentSession, getSession, type Session } from '../api/session'
+import { currentSession } from '../api/session'
 import type { QuizSession } from '../api/types'
 
-// Seeded from the session the router guard just fetched, so the name is on
-// screen in the first paint rather than after a round trip.
-const session = ref<Session | null>(currentSession())
 const rounds = ref<QuizSession[]>([])
 const error = ref('')
 const busy = ref(false)
@@ -50,10 +50,6 @@ const closedRounds = computed(() =>
   allRounds.value.filter((round) => round.spec.state === 'closed'),
 )
 
-const displayName = computed(() => session.value?.displayName?.trim() ?? '')
-const initial = computed(() => displayName.value.slice(0, 1) || '?')
-const kubeUsername = computed(() => session.value?.username?.trim() ?? '')
-
 async function refresh() {
   busy.value = true
   error.value = ''
@@ -66,63 +62,14 @@ async function refresh() {
   }
 }
 
-onMounted(async () => {
-  session.value = await getSession()
-  await refresh()
-})
+onMounted(refresh)
 </script>
 
 <template>
-  <AppShell title="Home">
-    <section class="hero-card">
-      <p class="eyebrow">Signed in</p>
-      <div class="identity-card">
-        <span class="identity-card__avatar" aria-hidden="true">{{
-          initial
-        }}</span>
-        <h1 class="identity-card__name">{{ displayName || 'Loading…' }}</h1>
-        <div v-if="session" class="identity-card__facts">
-          <span v-if="session.email" class="pill pill--fact">
-            <span class="pill__label">email</span>
-            {{ session.email }}
-          </span>
-          <!-- The Kubernetes name links to the apiserver's own answer about
-               this login. It is a real object, fetched with this browser's
-               token, not a page about one. -->
-          <a
-            v-if="kubeUsername"
-            class="pill pill--fact pill--link"
-            href="/auth/whoami"
-            target="_blank"
-            rel="noopener"
-          >
-            <span class="pill__label">kubernetes</span>
-            {{ kubeUsername }}
-            <i class="pi pi-external-link" aria-hidden="true" />
-          </a>
-        </div>
-      </div>
-      <p class="identity-card__note">
-        The display name is a label. The Kubernetes name beside it is the one on
-        every vote and every order you make here, and it is what RBAC matches on
-        — it came from Room Pass through Dex, and the browser never asserted
-        either of them.
-      </p>
-      <!-- The ten-field payload used to sit here, folded away, in front of
-           somebody who came to answer a quiz. It lives on its own page now,
-           reached from the badge carrying your name in the top bar -- and from
-           here, because a link is cheaper than knowing where to look. -->
-      <p class="identity-card__more">
-        <RouterLink :to="{ name: 'identity' }">
-          Everything this browser knows about you
-          <span aria-hidden="true">→</span>
-        </RouterLink>
-      </p>
-    </section>
-
+  <AppShell title="Quizzes">
     <section class="panel">
       <div class="section-heading">
-        <h2>Quizzes</h2>
+        <h1>Quizzes</h1>
         <button class="text-link" :disabled="busy" @click="refresh">
           {{ busy ? 'Loading…' : 'Refresh' }}
         </button>
@@ -194,20 +141,6 @@ onMounted(async () => {
           </article>
         </div>
       </template>
-    </section>
-
-    <section class="panel">
-      <div class="coffee-invite">
-        <div class="coffee-invite__copy">
-          <h2>Coffee bar</h2>
-          <p class="hero-copy">
-            Order a coffee while someone edits the menu live on stage. Prices
-            and vouchers come from the same cluster objects your votes are
-            written to.
-          </p>
-        </div>
-        <RouterLink class="button" to="/coffee">Open the coffee bar</RouterLink>
-      </div>
     </section>
   </AppShell>
 </template>
