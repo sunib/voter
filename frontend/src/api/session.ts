@@ -72,11 +72,23 @@ export async function getSession(): Promise<Session | null> {
 
 /** Clears the application session. It does NOT revoke the Dex token or remove
  *  the Room Pass enrolment — saying otherwise would be a lie the demo cannot
- *  back up. CSRF-protected, because it is state-changing. */
-export async function logout(csrfToken: string): Promise<void> {
-  await fetch('/auth/logout', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'x-csrf-token': csrfToken },
-  })
+ *  back up. CSRF-protected, because it is state-changing.
+ *
+ *  The cache above is dropped whether the request succeeded or threw: the
+ *  cookie may well be gone either way, and currentSession() handing out a name
+ *  and a CSRF token for a session that no longer exists is worse than handing
+ *  out nothing. A caller that needs certainty calls getSession() again. */
+export async function logout(token: string): Promise<void> {
+  try {
+    await fetch('/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'x-csrf-token': token },
+    })
+  } finally {
+    // Named `token`, not `csrfToken`: a parameter of that name would shadow the
+    // module's cache and this line would clear the argument instead of it.
+    csrfToken = ''
+    lastSession = null
+  }
 }

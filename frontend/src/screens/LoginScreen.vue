@@ -11,11 +11,16 @@
 // A full page navigation, not a fetch: /auth/login answers with a 302 to the
 // issuer, and a redirect chain to a different origin cannot be followed from
 // inside XHR.
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
 const failed = ref(false)
+// Arriving here from the sign-out button, rather than from a guard. The
+// difference matters: Dex and Room Pass still hold their own sessions, so
+// bouncing to /auth/login would hand the same identity straight back and the
+// sign-out would look broken. Say what happened and let them choose.
+const signedOut = computed(() => route.query.signedout === '1')
 
 function loginUrl(): string {
   const params = new URLSearchParams()
@@ -25,7 +30,8 @@ function loginUrl(): string {
   if (next.startsWith('/') && !next.startsWith('//')) {
     params.set('return', next)
   }
-  const connector = typeof route.query.connector === 'string' ? route.query.connector : ''
+  const connector =
+    typeof route.query.connector === 'string' ? route.query.connector : ''
   if (connector !== '') {
     params.set('connector', connector)
   }
@@ -38,6 +44,9 @@ function go() {
 }
 
 onMounted(() => {
+  if (signedOut.value) {
+    return
+  }
   // Guard against a redirect loop: if we are back here immediately after being
   // sent to login, show the button instead of bouncing forever.
   const key = 'voter:login-redirected-at'
@@ -54,7 +63,20 @@ onMounted(() => {
 
 <template>
   <main class="login">
-    <template v-if="failed">
+    <template v-if="signedOut">
+      <h1>Signed out</h1>
+      <p>
+        The application's session cookie is gone. Your Dex login and your Room
+        Pass enrolment are not — this demo cannot revoke either — so signing in
+        again will normally return you to the same participant without a code.
+      </p>
+      <p>
+        If it asks for a room code and you do not have one, the presenter's
+        screen has the current one.
+      </p>
+      <button type="button" @click="go">Sign in again</button>
+    </template>
+    <template v-else-if="failed">
       <h1>Sign in</h1>
       <p>The demo could not start your session automatically.</p>
       <button type="button" @click="go">Try again</button>

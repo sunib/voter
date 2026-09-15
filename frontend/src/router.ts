@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 
 import { getSession } from './api/session'
 import HomeScreen from './screens/HomeScreen.vue'
+import IdentityScreen from './screens/IdentityScreen.vue'
 import RoomScreen from './screens/RoomScreen.vue'
 import OrderScreen from './screens/OrderScreen.vue'
 import AdminScreen from './screens/AdminScreen.vue'
@@ -17,7 +18,12 @@ export const router = createRouter({
     // of the home page. Kept as a redirect because it is printed in the demo
     // notes and is the returnTo of any login link still in the wild.
     { path: '/vote', redirect: '/' },
-    { path: '/answer/:session/results', name: 'vote-results', component: VoteResultsScreen, props: true },
+    {
+      path: '/answer/:session/results',
+      name: 'vote-results',
+      component: VoteResultsScreen,
+      props: true,
+    },
     {
       path: '/login',
       name: 'login',
@@ -36,6 +42,13 @@ export const router = createRouter({
       path: '/coffee',
       name: 'order',
       component: OrderScreen,
+    },
+    // Reached from the badge carrying your name in the top bar. Guarded like
+    // every other page: it reports on a session, so there has to be one.
+    {
+      path: '/me',
+      name: 'identity',
+      component: IdentityScreen,
     },
     // The operator's page. No route guard beyond "signed in": what an identity
     // may see here is Kubernetes' answer, and the screen renders the refusal.

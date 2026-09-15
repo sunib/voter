@@ -45,16 +45,20 @@ watch(
 </script>
 
 <template>
-  <div
+  <!-- A link, not a label: this is the one element carrying your name on every
+       screen, so it is where somebody looks to ask what "signed in" means here.
+       It leads to /me, which answers in full. -->
+  <RouterLink
     v-if="visible"
-    class="session-badge"
-    :title="`Signed in as ${displayName}`"
-    aria-label="Current user"
+    to="/me"
+    class="session-badge session-badge--link"
+    :title="`Signed in as ${displayName} — open your identity`"
+    aria-label="Your identity"
   >
     <span class="session-badge__icon-wrap" aria-hidden="true">
       <i class="pi pi-user session-badge__icon" />
     </span>
     <span class="session-badge__label">signed in</span>
     <strong class="session-badge__name">{{ displayName }}</strong>
-  </div>
+  </RouterLink>
 </template>

@@ -1302,38 +1302,14 @@ p {
   margin-top: 1.2rem;
 }
 
-.identity-technical {
-  margin-top: 0.8rem;
-  font-size: 0.82rem;
-  color: rgb(var(--muted));
-}
-
-.identity-technical summary {
-  cursor: pointer;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  font-size: 0.72rem;
-}
-
-.identity-technical p {
-  margin: 0.5rem 0;
-  max-width: 44rem;
-}
-
-.identity-technical code {
-  display: block;
-  padding: 0.5rem 0.7rem;
-  border-radius: 12px;
-  background: rgb(var(--line) / 0.05);
-  color: rgb(var(--ink));
-  overflow-wrap: anywhere;
-}
-
-/* Inside a sentence, a code span must not become a block. */
-.identity-technical code.inline-code {
-  display: inline;
+/* A code span inside a sentence. The <details> block this used to live in is
+   gone -- the payload has its own page now -- so it is no longer scoped to it. */
+.inline-code {
   padding: 0.05rem 0.3rem;
   border-radius: 6px;
+  background: rgb(var(--line) / 0.08);
+  color: rgb(var(--ink));
+  overflow-wrap: anywhere;
 }
 
 /* The whole /auth/session payload, one row per field. Labels are the JSON key
@@ -1378,6 +1354,60 @@ p {
 
 .tech-facts__links a {
   color: rgb(var(--accent));
+}
+
+.identity-card__more {
+  margin-top: 0.7rem;
+  font-size: 0.86rem;
+}
+
+.identity-card__more a {
+  color: rgb(var(--accent));
+}
+
+/* The sign-out panel is deliberately the quietest thing on the page.
+   Everything here works against the press: muted heading, no accent, no fill,
+   and a button that reads as a footnote rather than an action. Red would be
+   wrong -- danger colouring is still a colour that pulls the eye, and this is
+   not dangerous so much as pointless mid-demo. */
+.sign-out {
+  border-style: dashed;
+  background: transparent;
+  box-shadow: none;
+}
+
+.sign-out__heading {
+  font-size: 1rem;
+  color: rgb(var(--muted));
+}
+
+.sign-out__copy {
+  margin: 0 0 0.6rem;
+  max-width: 44rem;
+  font-size: 0.84rem;
+  color: rgb(var(--muted));
+}
+
+.sign-out__button {
+  margin-top: 0.3rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid rgb(var(--line) / 0.25);
+  border-radius: 8px;
+  background: transparent;
+  color: rgb(var(--muted));
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.sign-out__button:hover:not(:disabled) {
+  border-color: rgb(var(--line) / 0.45);
+  color: rgb(var(--ink));
+}
+
+.sign-out__button:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 /* The projector view: the code has to read across a room. */
