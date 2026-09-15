@@ -252,8 +252,11 @@ an unrelated OIDC application through Dex, and upgrade without changing identiti
       commit-controller behavior belongs in that project, not Voter.
 - [ ] Keep the demo explicitly single-replica/process-scoped for orders and voucher
       counts for now. Before promising durable orders or enabling replicas > 1, choose
-      shared persistence with atomic redemption enforcement. Do not build the admin
-      order history on transient counters or put coffee persistence in krm-stream.
+      shared persistence with atomic redemption enforcement. Do not put coffee
+      persistence in krm-stream, and do not build a durable-looking order HISTORY on
+      transient state. The live feed on `/admin/orders` is the allowed shape of this:
+      it shows what this process has seen, says on the page that it is one replica
+      since its last restart, and keeps only the last 100.
 - [x] Restore voting as an explicit demo requirement: participant-token round reads,
       validated, create-only QuizSubmission, one per identity/round UID and aggregated results.
       Submitted answers cannot be edited through Voter; retries never overwrite them.
@@ -267,6 +270,13 @@ an unrelated OIDC application through Dex, and upgrade without changing identiti
       revision, live round and login path. Room Pass image remains unchanged.
 - [x] Remove unsupported admin-order/history affordances from active navigation;
       restoring voting does not imply implementing unrelated legacy screens.
+- [x] Reinstate `/admin/orders`, this time with a backend behind it: a bounded
+      in-memory order log, `GET /public/orders` and a hand-written SSE feed, recording
+      refusals as well as placements. It sits beside the Config tab to make the
+      classification argument concrete — the CoffeeConfig is a Kubernetes object that
+      reaches Git, and an order is an event that deliberately reaches neither. The
+      feed exposes display names only. The ConfigHistory screen stays deleted; it
+      would need durable history that nothing here provides.
 - [x] Deploy the first tested increment (`d7d38ba`) through GitOps (`5d3d176`);
       verify Flux revision, ready pods, pinned digests and the public login path.
 - [x] Add QR-code joining: the presenter projects `task room-pass:present`, a scan

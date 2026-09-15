@@ -5,9 +5,10 @@ API, with participant identity carried into audit events and ConfigButler's Git
 workflow.
 
 Login works, and so does the coffee journey: browse the menu, order, hit the
-depleted voucher, edit the CoffeeConfig. Voting and conditional live editing also
-work. Shared-stream capacity and observed Git commits remain release gates; see
-[PLAN.md](PLAN.md) for implementation and deployment status.
+depleted voucher, edit the CoffeeConfig, and watch every order — placed or
+refused — land on the live feed at `/admin/orders`. Voting and conditional live
+editing also work. Shared-stream capacity and observed Git commits remain
+release gates; see [PLAN.md](PLAN.md) for implementation and deployment status.
 
 ## How access works
 
@@ -19,6 +20,10 @@ Kubernetes authentication, RBAC and admission decide what that person can do.
 Being able to log in does not imply being allowed to edit. Room attendees receive
 explicit demo group grants. Other identities need their own matching grants.
 Opening GitHub login to everyone is a proposed change, not the current configuration.
+
+## Login url for room admin
+
+https://demo.koudijs.dev/auth/login?connector=github&return=%2Froom
 
 ## Read next
 

@@ -86,6 +86,7 @@ func main() {
 		cfg:       cfg,
 		defaultNS: applicationNamespace(cfg),
 		vouchers:  newVoucherLedger(),
+		orders:    newOrderLog(),
 	}
 
 	mux := http.NewServeMux()
@@ -98,6 +99,7 @@ func main() {
 	registerOIDCHandlers(mux, oidcClient, cfg, deps.defaultNS)
 	registerParticipantCoffeeHandlers(mux, deps)
 	registerParticipantStorefrontHandlers(mux, deps)
+	registerParticipantOrderFeedHandlers(mux, deps)
 	registerParticipantQuizHandlers(mux, deps)
 	registerParticipantStreamHandlers(mux, deps)
 	// Last: it owns "/" and therefore everything unclaimed above.

@@ -31,6 +31,10 @@ type handlerDeps struct {
 	// vouchers counts redemptions per voucher code for this process. See
 	// coffee_vouchers.go for why this is in memory and what that costs.
 	vouchers *voucherLedger
+
+	// orders is the in-memory feed of what the room actually ordered. Not a
+	// custom resource, and deliberately so -- coffee_orders.go says why.
+	orders *orderLog
 }
 
 // participantClientsFor is the single place handlers obtain Kubernetes clients,

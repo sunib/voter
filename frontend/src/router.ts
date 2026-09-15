@@ -6,6 +6,7 @@ import IdentityScreen from './screens/IdentityScreen.vue'
 import RoomScreen from './screens/RoomScreen.vue'
 import OrderScreen from './screens/OrderScreen.vue'
 import AdminScreen from './screens/AdminScreen.vue'
+import AdminOrdersScreen from './screens/AdminOrdersScreen.vue'
 import VoteResultsScreen from './screens/VoteResultsScreen.vue'
 import AnswerScreen from './screens/AnswerScreen.vue'
 import LoginScreen from './screens/LoginScreen.vue'
@@ -62,10 +63,13 @@ export const router = createRouter({
       name: 'admin',
       component: AdminScreen,
     },
+    // The other half of the coffee story: what the room ordered. Deliberately
+    // not a Kubernetes resource, which is why it is a page and not a tab on the
+    // config editor's object. See screens/AdminOrdersScreen.vue.
     {
       path: '/admin/orders',
       name: 'admin-orders',
-      redirect: '/admin',
+      component: AdminOrdersScreen,
     },
     {
       path: '/admin/commits',

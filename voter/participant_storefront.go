@@ -97,12 +97,12 @@ func registerParticipantStorefrontHandlers(mux *http.ServeMux, deps handlerDeps)
 	}))
 
 	// POST /public/orders
-	mux.HandleFunc("/public/orders", requireParticipant(cfg, func(w http.ResponseWriter, r *http.Request, s participantSession) {
+	//
+	// Registered by method, because GET on this same path is the order feed --
+	// a different file, a different story, and deliberately not a Kubernetes
+	// object. See participant_orders.go.
+	mux.HandleFunc("POST /public/orders", requireParticipant(cfg, func(w http.ResponseWriter, r *http.Request, s participantSession) {
 		noStore(w)
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
 
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxOrderBytes+1))
 		if err != nil {
@@ -128,7 +128,14 @@ func registerParticipantStorefrontHandlers(mux *http.ServeMux, deps handlerDeps)
 			return
 		}
 
-		writeJSON(w, http.StatusOK, placeCoffeeOrder(cc, req, deps.vouchers, s.Subject))
+		response, record := placeCoffeeOrder(cc, req, deps.vouchers, orderActor{
+			Subject:     s.Subject,
+			DisplayName: s.DisplayName,
+		})
+		// Recorded whether it was placed or refused. The feed is a log of what
+		// the room did, and a refusal is something the room did.
+		deps.orders.record(record)
+		writeJSON(w, http.StatusOK, response)
 	}))
 }
 
@@ -148,16 +155,35 @@ func (d handlerDeps) readCoffeeConfig(ctx context.Context, idToken string) (coff
 	return toCoffeeConfig(obj)
 }
 
+// orderActor is who submitted an order, reduced to the two things the ordering
+// decision and the feed are allowed to see. The ID token stays out: nothing
+// below this point talks to Kubernetes.
+type orderActor struct {
+	// Subject identifies the participant in the LOG, where an operator reading
+	// pod output needs to tell two people with the same first name apart.
+	Subject string
+	// DisplayName is what the feed shows, and the only identity that leaves
+	// this process toward other participants' screens.
+	DisplayName string
+}
+
 // placeCoffeeOrder is the whole ordering decision, and it is deliberately a
 // pure function of (config, request, ledger) so it can be tested without a
 // Kubernetes API at all.
+//
+// It returns two things. The RESPONSE is what the person who ordered gets back.
+// The RECORD is what the room's feed gets, and it is not the same object: a
+// rejected order tells its author a failure message and tells the feed which
+// items were refused, so that the screen on the wall can say what was lost.
+// Building both here rather than reconstructing one from the other keeps a
+// single reading of the request.
 //
 // Order of checks matters. Pricing and availability come first, because a
 // participant who ordered something unavailable should hear about that rather
 // than about a voucher. Depletion is checked LAST and only for an order that
 // would otherwise have succeeded -- otherwise a rejected order would burn an
 // allowance nobody drank.
-func placeCoffeeOrder(cc coffeeConfig, req coffeeOrderRequest, ledger *voucherLedger, subject string) coffeeOrderResponse {
+func placeCoffeeOrder(cc coffeeConfig, req coffeeOrderRequest, ledger *voucherLedger, who orderActor) (coffeeOrderResponse, coffeeOrderRecord) {
 	prepared, failure := prepareCoffeeOrder(cc, req)
 	if failure != nil {
 		return coffeeOrderResponse{
@@ -165,7 +191,7 @@ func placeCoffeeOrder(cc coffeeConfig, req coffeeOrderRequest, ledger *voucherLe
 			Status:   coffeeOrderRejected,
 			Currency: prepared.Currency,
 			Failure:  failure,
-		}
+		}, rejectedOrderRecord(prepared, who, failure)
 	}
 
 	// A voucher was named, exists, is enabled and applies to something in this
@@ -174,17 +200,18 @@ func placeCoffeeOrder(cc coffeeConfig, req coffeeOrderRequest, ledger *voucherLe
 		used, ok := ledger.redeem(prepared.Voucher.Code, prepared.Voucher.MaximumUsage)
 		if !ok {
 			log.Printf("order: voucher depleted code=%s used=%d max=%d sub=%s",
-				prepared.Voucher.Code, used, prepared.Voucher.MaximumUsage, subject)
+				prepared.Voucher.Code, used, prepared.Voucher.MaximumUsage, who.Subject)
+			depleted := &coffeeOrderFailure{
+				Code: coffeeFailureVoucherDepleted,
+				// Names the real cause. The audience is about to watch
+				// someone fix exactly this field.
+				Message: "This voucher has been used the maximum number of times.",
+			}
 			return coffeeOrderResponse{
 				Status:   coffeeOrderRejected,
 				Currency: prepared.Currency,
-				Failure: &coffeeOrderFailure{
-					Code: coffeeFailureVoucherDepleted,
-					// Names the real cause. The audience is about to watch
-					// someone fix exactly this field.
-					Message: "This voucher has been used the maximum number of times.",
-				},
-			}
+				Failure:  depleted,
+			}, rejectedOrderRecord(prepared, who, depleted)
 		}
 	}
 
@@ -196,18 +223,19 @@ func placeCoffeeOrder(cc coffeeConfig, req coffeeOrderRequest, ledger *voucherLe
 		if prepared.Voucher != nil && ledger != nil {
 			ledger.release(prepared.Voucher.Code)
 		}
+		unnamed := &coffeeOrderFailure{
+			Code:    "OrderIdUnavailable",
+			Message: "The order could not be recorded. Please try again.",
+		}
 		return coffeeOrderResponse{
 			Status:   coffeeOrderRejected,
 			Currency: prepared.Currency,
-			Failure: &coffeeOrderFailure{
-				Code:    "OrderIdUnavailable",
-				Message: "The order could not be recorded. Please try again.",
-			},
-		}
+			Failure:  unnamed,
+		}, rejectedOrderRecord(prepared, who, unnamed)
 	}
 
 	log.Printf("order: placed id=%s sub=%s items=%d total=%d voucher=%q",
-		orderID, subject, len(prepared.Items), prepared.TotalPriceCents,
+		orderID, who.Subject, len(prepared.Items), prepared.TotalPriceCents,
 		strings.TrimSpace(prepared.VoucherCode))
 
 	return coffeeOrderResponse{
@@ -216,5 +244,30 @@ func placeCoffeeOrder(cc coffeeConfig, req coffeeOrderRequest, ledger *voucherLe
 		Currency:        prepared.Currency,
 		TotalPriceCents: prepared.TotalPriceCents,
 		Items:           prepared.Items,
+	}, coffeeOrderRecord{
+		OrderID:         orderID,
+		Who:             who.DisplayName,
+		VoucherCode:     strings.TrimSpace(prepared.VoucherCode),
+		Items:           prepared.Items,
+		Currency:        prepared.Currency,
+		TotalPriceCents: prepared.TotalPriceCents,
+		Status:          coffeeOrderPlaced,
+	}
+}
+
+// rejectedOrderRecord is the feed's version of a refusal. The total is the one
+// that WOULD have been charged, which is what makes a depleted-voucher entry
+// readable next to the orders around it -- the room can see the discount that
+// did not happen.
+func rejectedOrderRecord(prepared preparedCoffeeOrder, who orderActor, failure *coffeeOrderFailure) coffeeOrderRecord {
+	return coffeeOrderRecord{
+		Who:             who.DisplayName,
+		VoucherCode:     strings.TrimSpace(prepared.VoucherCode),
+		Items:           prepared.Items,
+		Currency:        prepared.Currency,
+		TotalPriceCents: prepared.TotalPriceCents,
+		Status:          coffeeOrderRejected,
+		FailureCode:     failure.Code,
+		FailureMessage:  failure.Message,
 	}
 }

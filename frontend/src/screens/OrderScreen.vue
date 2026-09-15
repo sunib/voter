@@ -203,6 +203,7 @@ watch(
       <div class="hero-actions">
         <span class="pill" :class="`pill--${voucherTone}`">{{ voucherHeadline }}</span>
         <RouterLink class="button button--secondary" to="/admin">Edit the menu</RouterLink>
+        <RouterLink class="text-link" to="/admin/orders">Live orders</RouterLink>
       </div>
       <p v-if="storefront?.voucher.displayMessage" class="voucher-copy">
         {{ storefront.voucher.displayMessage }}

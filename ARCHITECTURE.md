@@ -318,14 +318,22 @@ checkpoint continuation is a separate 0006 follow-up, not a second Voter watch e
 
 Voter serves the SPA and backend in one image. Current coffee endpoints are
 `GET /public/storefront`, `POST /public/orders`, `GET /public/vouchers`,
-`GET,PATCH /public/coffeeconfig` and `GET /public/stream`. Pricing and voucher enforcement
+`GET,PATCH /public/coffeeconfig`, `GET /public/stream`, and the order feed:
+`GET /public/orders` plus `GET /public/orders/stream`. Pricing and voucher enforcement
 remain server-authoritative. Changing maximumUsage affects subsequent orders.
 
-Redemptions are currently in process memory: a restart resets counts and a second
-replica would enforce a different tally. Keep one replica until shared atomic
-persistence exists. A resource watch is neither order storage nor change history.
-Voting is restored in the deployed increment described below; unsupported admin-order
-and history screens remain separate work.
+Orders are deliberately NOT Kubernetes objects, and the demo says so out loud on
+`/admin/orders`: they are an append-only ring buffer in the process, fanned out
+over hand-written SSE rather than through the krm-stream gateway, which has no
+watch to share and no object to authorize against. An order is an event, not
+configuration — nothing reviews it, reconciles toward it, or would benefit from a
+commit per coffee. The feed carries display names only, because every signed-in
+participant can read it.
+
+Redemptions and orders are both in process memory: a restart resets counts and
+forgets the feed, and a second replica would enforce a different tally. Keep one
+replica until shared atomic persistence exists. A resource watch is neither order
+storage nor change history. The config-change history screen remains separate work.
 
 ConfigButler should own durable Git history and commit completion. The UI needs three
 separate facts: Kubernetes saved, CommitRequest accepted, Git commit observed. The deployed receipt uses `commitRequested` for request acceptance and does not

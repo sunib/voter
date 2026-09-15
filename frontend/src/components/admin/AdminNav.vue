@@ -5,11 +5,20 @@ import { RouterLink, useRoute } from 'vue-router'
 const route = useRoute()
 
 const currentRouteName = computed(() => route.name)
+// Two tabs, and the pairing is the argument. "Config" is a Kubernetes object
+// under RBAC that ends up in Git; "Orders" is an array in this pod's memory
+// that ends up nowhere. Showing them side by side is how the demo says which
+// things belong in the API and which do not.
 const tabs = [
   {
     name: 'admin',
     to: '/admin',
     label: 'Config',
+  },
+  {
+    name: 'admin-orders',
+    to: '/admin/orders',
+    label: 'Orders',
   },
 ] as const
 

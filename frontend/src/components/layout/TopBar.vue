@@ -26,7 +26,7 @@ const tabs = [
 // By route name, not by path prefix: /answer/:session and /thanks live at the
 // root but belong to a half each, and RouterLink's own active matching would
 // light up "Quizzes" for every route in the app because its path is "/".
-const coffeeRoutes = new Set(['order', 'thanks', 'admin'])
+const coffeeRoutes = new Set(['order', 'thanks', 'admin', 'admin-orders'])
 const activeTab = computed(() => {
   const name = String(route.name ?? '')
   if (name === 'room') return 'room'

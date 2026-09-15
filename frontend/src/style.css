@@ -301,6 +301,17 @@ code {
   border-radius: 50%;
   background: rgb(var(--accent) / 0.12);
   pointer-events: none;
+  z-index: 0;
+}
+
+/* The blob above is generated as the card's LAST child, so being absolutely
+   positioned it paints over everything in flow -- which went unnoticed while
+   hero cards ended in a short row of buttons, and became obvious the moment one
+   ended in a wide tab strip that the blob washed across. It is decoration, so
+   it is pinned behind, and the content is lifted in front of it. */
+.hero-card > * {
+  position: relative;
+  z-index: 1;
 }
 
 .hero-card--compact {

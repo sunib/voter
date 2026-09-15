@@ -96,9 +96,15 @@ func storefrontFixture(t *testing.T, objs ...runtime.Object) (*http.ServeMux, co
 		defaultNS:  storefrontNamespace,
 		newClients: newClients,
 		vouchers:   ledger,
+		orders:     newOrderLog(),
 	}
 	mux := http.NewServeMux()
 	registerParticipantStorefrontHandlers(mux, deps)
+	// The feed shares the /public/orders path with the POST above, so a fixture
+	// that registered only one of them would not exercise the method routing
+	// that keeps them apart. Tests read the log back over HTTP rather than
+	// holding the struct, which is the same path the screen uses.
+	registerParticipantOrderFeedHandlers(mux, deps)
 	return mux, cfg, ledger, dyn
 }
 
@@ -109,8 +115,11 @@ func signedInRequest(t *testing.T, cfg config, method, target, body string) *htt
 	now := time.Now()
 	rec := httptest.NewRecorder()
 	if err := setParticipantSession(rec, cfg, sessionCookieCodec, participantSession{
-		IDToken:     "participant-token",
-		Subject:     "demo-subject",
+		IDToken: "participant-token",
+		Subject: "demo-subject",
+		// Set because the order feed shows it and shows nothing else about a
+		// participant; a fixture without one could not tell the two apart.
+		DisplayName: "Demo Attendee",
 		TokenExpiry: now.Add(time.Hour).Unix(),
 	}, now); err != nil {
 		t.Fatalf("session: %v", err)
@@ -510,8 +519,10 @@ func TestStorefrontAndOrdersRejectWrongMethods(t *testing.T) {
 	for _, tc := range []struct{ method, path string }{
 		{"POST", "/public/storefront"},
 		{"DELETE", "/public/storefront"},
-		{"GET", "/public/orders"},
+		// GET is deliberately absent: it is the order feed now. DELETE still
+		// has to be refused, and by the mux, since neither handler sees it.
 		{"DELETE", "/public/orders"},
+		{"POST", "/public/orders/stream"},
 	} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, signedInRequest(t, cfg, tc.method, tc.path, "{}"))

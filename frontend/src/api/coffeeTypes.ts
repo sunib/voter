@@ -110,3 +110,44 @@ export type CoffeeOrderResponse = {
   totalPriceCents: number
   failure?: CoffeeOrderFailure
 }
+
+/** One line of an order, as the feed reports it. */
+export type CoffeeOrderLine = {
+  sku: string
+  name: string
+  quantity: number
+  unitPriceCents: number
+  lineTotalCents: number
+  voucherApplied: boolean
+}
+
+/**
+ * One submission on the live order feed.
+ *
+ * Note what this is NOT: there is no apiVersion, no kind, no metadata, no
+ * resourceVersion. An order is an event in the Voter process, not a Kubernetes
+ * object, and the shape says so. `who` is a display name and the only thing the
+ * feed knows about a person.
+ */
+export type CoffeeOrderRecord = {
+  /** This process's own counter, and the only key a rejected order has. */
+  seq: number
+  orderId?: string
+  submittedAt: string
+  who?: string
+  voucherCode?: string
+  items?: CoffeeOrderLine[]
+  currency?: string
+  totalPriceCents: number
+  status: 'placed' | 'rejected'
+  failureCode?: string
+  failureMessage?: string
+}
+
+/** `scope: "process"` is a warning: these are one replica's orders, since its
+ *  last restart. Nothing here survives a pod restart, and nothing is in Git. */
+export type CoffeeOrdersSnapshot = {
+  orders: CoffeeOrderRecord[]
+  scope: string
+  capacity: number
+}
