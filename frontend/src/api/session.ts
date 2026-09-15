@@ -8,6 +8,11 @@
 export interface Session {
   authenticated: boolean
   username: string
+  /** The Dex connector that authenticated this login: "room" for a participant
+   *  who came through Room Pass, "github" for an operator. Voting is refused
+   *  for anything but "room", so the vote form checks it rather than letting
+   *  someone fill in a ballot and be turned away on submit. */
+  connector: string
   displayName: string
   email: string
   groups: string[]

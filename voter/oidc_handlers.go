@@ -51,7 +51,12 @@ func registerOIDCHandlers(mux *http.ServeMux, p *oidcProvider, cfg config, names
 			// used to be "demo:" + subject, which was a guess at the apiserver's
 			// claimMappings and became wrong as soon as a second connector
 			// existed. Empty if the review failed.
-			"username":    s.KubeUsername,
+			"username": s.KubeUsername,
+			// Which Dex connector authenticated this login. The SPA uses it to
+			// explain up front that voting needs a Room Pass session, rather
+			// than letting an operator fill in a ballot and be refused on
+			// submit.
+			"connector":   s.Connector,
 			"displayName": s.DisplayName,
 			"email":       s.Email,
 			"groups":      s.Groups,

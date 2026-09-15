@@ -19,9 +19,11 @@ export interface RoundView {
   voted: boolean
 }
 export const getQuizSession = (name: string) => request<RoundView>(`/${encodeURIComponent(name)}`)
+/** The backend sets DisallowUnknownFields, so this body and the handler's struct
+ *  have to change together: sending a `uid` it no longer reads is a flat 400. */
 export const createQuizSubmission = (round: QuizSession, answers: QuizSubmission['spec']['answers']) =>
   request<{ name: string }>(`/${encodeURIComponent(round.metadata.name!)}`, {
-    uid: round.metadata.uid, resourceVersion: round.metadata.resourceVersion, answers,
+    resourceVersion: round.metadata.resourceVersion, answers,
   })
 export interface RoundResults {
   round: QuizSession

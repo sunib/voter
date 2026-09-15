@@ -26,10 +26,22 @@ func authorizationFixture(t *testing.T) config {
 
 func authorizedRequest(t *testing.T, cfg config, method, token string) *http.Request {
 	t.Helper()
+	return authorizedRequestAs(t, cfg, method, token, roomConnector)
+}
+
+// authorizedRequestAs builds a session for a named Dex connector. Voting is
+// gated on that value, so a test needs to be able to arrive as an operator
+// ("github") and not only as a participant ("room").
+//
+// DisplayName is the token, which is also what a submission is named after, so
+// two tokens are two voters exactly as two Room Pass names would be.
+func authorizedRequestAs(t *testing.T, cfg config, method, token, connector string) *http.Request {
+	t.Helper()
 	now := time.Now()
 	rec := httptest.NewRecorder()
 	if err := setParticipantSession(rec, cfg, sessionCookieCodec, participantSession{
-		IDToken: token, Subject: token, TokenExpiry: now.Add(time.Hour).Unix(),
+		IDToken: token, Subject: token, DisplayName: token, Connector: connector,
+		TokenExpiry: now.Add(time.Hour).Unix(),
 	}, now); err != nil {
 		t.Fatal(err)
 	}

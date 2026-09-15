@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -21,7 +20,26 @@ import (
 var quizSessions = schema.GroupVersionResource{Group: "examples.configbutler.ai", Version: "v1alpha1", Resource: "quizsessions"}
 var quizSubmissions = schema.GroupVersionResource{Group: "examples.configbutler.ai", Version: "v1alpha1", Resource: "quizsubmissions"}
 
-const roundLabel = "voter.configbutler.ai/round-uid"
+// The two labels every ballot carries. Both are read twice over: by this
+// application, which selects results on the round and shows the submitter, and
+// by gitops-reverser, which files the mirrored document by them -- one folder
+// per round in one target, one file per person in another.
+//
+// roundLabel holds the round's NAME, not its UID. That is a deliberate trade --
+// a round recreated under the same name inherits the old one's ballots -- and it
+// is written up, with what keeps it closed and how to recover, as entry 1 of
+// docs/deliberate-simplifications.md. Staleness is unaffected: the vote handler's
+// resourceVersion check catches a recreated round as surely as an edited one.
+// roomConnector is the Dex connector id Room Pass logins carry. The apiserver's
+// own authentication config keys the "demo:" username prefix off the same value,
+// so this is the application agreeing with the cluster rather than inventing a
+// second notion of who a participant is.
+const roomConnector = "room"
+
+const (
+	roundLabel     = "voter.configbutler.ai/round"
+	submitterLabel = "voter.configbutler.ai/submitter"
+)
 
 type quizQuestion struct {
 	ID       string   `json:"id"`
@@ -112,11 +130,22 @@ func validateQuizAnswers(questions []quizQuestion, answers []quizAnswer) error {
 	return nil
 }
 
-// One QuizSubmission name per enrolled identity and round UID. Name uniqueness in
-// the API server, not application bookkeeping, is what keeps a vote single-use.
-func submissionName(roundUID, subject string) string {
-	hash := sha256.Sum256([]byte(roundUID + "\x00" + subject))
-	return fmt.Sprintf("vote-%x", hash[:])
+// One QuizSubmission name per enrolled identity and round: "<round>-<who>".
+// Name uniqueness in the API server, not application bookkeeping, is what keeps
+// a vote single-use.
+//
+// No longer a hash, so the room can read the submission list as it fills up.
+// That this still keys on IDENTITY rests on a Room Pass property rather than on
+// anything here -- enrolling under a name already taken is refused, so one
+// display name is one Participant is one Kubernetes subject. Entry 2 of
+// docs/deliberate-simplifications.md has the full argument and, more usefully,
+// what would break it.
+//
+// Lowercase because an object name is DNS-1123 where a label value may be
+// mixed; that lowering reproduces Room Pass's own participant id exactly, so
+// this name and the participant's address agree by construction.
+func submissionName(roundName, displayName string) string {
+	return roundName + "-" + strings.ToLower(displayName)
 }
 
 // The API owns voting rules and resource construction; Kubernetes authorizes
@@ -164,7 +193,7 @@ func registerParticipantQuizHandlers(mux *http.ServeMux, deps handlerDeps) {
 		if r.Method == http.MethodGet {
 			// Tell a returning voter before they fill in the form. The atomic create below
 			// stays authoritative, so a lookup failure costs only the early warning.
-			_, err := clients.dynamic.Resource(quizSubmissions).Namespace(deps.defaultNS).Get(ctx, submissionName(string(round.GetUID()), s.Subject), metav1.GetOptions{})
+			_, err := clients.dynamic.Resource(quizSubmissions).Namespace(deps.defaultNS).Get(ctx, submissionName(round.GetName(), s.DisplayName), metav1.GetOptions{})
 			writeJSON(w, 200, map[string]any{"round": round, "voted": err == nil})
 			return
 		}
@@ -177,8 +206,25 @@ func registerParticipantQuizHandlers(mux *http.ServeMux, deps handlerDeps) {
 			writeJSON(w, 409, map[string]string{"error": "This round is not open for voting."})
 			return
 		}
+		// Voting is for people who came through the door. requireParticipant
+		// checks that a session is valid, not which Dex connector issued it, so
+		// an operator on the github connector reaches this handler with a
+		// session that never passed Room Pass -- and therefore with a display
+		// name nothing folded, which would be refused as a label value and cost
+		// them their ballot with a 422 nobody could read.
+		//
+		// This is an APPLICATION rule, not an RBAC one, and the difference is
+		// the demo rather than an oversight: the operator is cluster-admin, so
+		// the API server has no objection at all to the same write made with
+		// kubectl. Entry 4 of docs/deliberate-simplifications.md.
+		if s.Connector != roomConnector {
+			writeJSON(w, 403, map[string]string{
+				"error": "Voting is for people who joined through Room Pass. Scan the QR code to join the room.",
+				"code":  "NotAParticipant",
+			})
+			return
+		}
 		var req struct {
-			UID             string       `json:"uid"`
 			ResourceVersion string       `json:"resourceVersion"`
 			Answers         []quizAnswer `json:"answers"`
 		}
@@ -192,7 +238,10 @@ func registerParticipantQuizHandlers(mux *http.ServeMux, deps handlerDeps) {
 			writeJSON(w, 400, map[string]string{"error": "Invalid vote."})
 			return
 		}
-		if req.UID == "" || req.UID != string(round.GetUID()) || req.ResourceVersion != round.GetResourceVersion() {
+		// resourceVersion alone, where this used to compare the round's UID too.
+		// A recreated round gets a fresh resourceVersion just as an edited one
+		// does, so this catches both and the UID added nothing.
+		if req.ResourceVersion == "" || req.ResourceVersion != round.GetResourceVersion() {
 			writeJSON(w, 409, map[string]string{"error": "The round changed. Reload the questions before voting."})
 			return
 		}
@@ -202,7 +251,7 @@ func registerParticipantQuizHandlers(mux *http.ServeMux, deps handlerDeps) {
 		}
 		// Atomic create keeps retries and concurrent tabs to one vote, whatever the GET
 		// reported. Recreating a round starts fresh; reopening it does not.
-		name := submissionName(req.UID, s.Subject)
+		name := submissionName(round.GetName(), s.DisplayName)
 		answers, _ := json.Marshal(req.Answers)
 		var answerObjects []any
 		_ = json.Unmarshal(answers, &answerObjects)
@@ -211,7 +260,7 @@ func registerParticipantQuizHandlers(mux *http.ServeMux, deps handlerDeps) {
 		}
 		obj := &unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": "examples.configbutler.ai/v1alpha1", "kind": "QuizSubmission",
-			"metadata": map[string]any{"name": name, "namespace": deps.defaultNS, "labels": map[string]any{roundLabel: req.UID}},
+			"metadata": map[string]any{"name": name, "namespace": deps.defaultNS, "labels": map[string]any{roundLabel: round.GetName(), submitterLabel: s.DisplayName}},
 			"spec":     map[string]any{"sessionRef": map[string]any{"group": quizSessions.Group, "kind": "QuizSession", "name": round.GetName()}, "submittedAt": time.Now().UTC().Format(time.RFC3339), "answers": answerObjects},
 		}}
 		_, err = clients.dynamic.Resource(quizSubmissions).Namespace(deps.defaultNS).Create(ctx, obj, metav1.CreateOptions{})
@@ -296,7 +345,7 @@ func registerParticipantQuizHandlers(mux *http.ServeMux, deps handlerDeps) {
 			results[i] = quizResult{Question: q, Choices: map[string]int{}, Text: []string{}}
 		}
 		total := 0
-		options := metav1.ListOptions{LabelSelector: roundLabel + "=" + string(round.GetUID()), Limit: 500}
+		options := metav1.ListOptions{LabelSelector: roundLabel + "=" + round.GetName(), Limit: 500}
 		for {
 			list, err := clients.dynamic.Resource(quizSubmissions).Namespace(deps.defaultNS).List(ctx, options)
 			if err != nil {

@@ -31,6 +31,11 @@ const draft = useDraftSubmissionStore()
 
 const busy = ref(false)
 const voted = ref(false)
+
+/** Voting is refused for any session that did not come through Room Pass, so
+ *  say so before a ballot is filled in rather than after it is submitted. The
+ *  backend refuses it either way -- this is the courtesy, not the control. */
+const mayVote = computed(() => currentSession()?.connector === 'room')
 const submitError = ref<string | null>(null)
 const loadError = ref<string | null>(null)
 
@@ -161,6 +166,24 @@ async function submit() {
                 LOADING
               </div>
               <div class="text-lg font-extrabold">Fetching questions…</div>
+            </div>
+          </div>
+        </template>
+      </Card>
+
+      <Card v-else-if="!mayVote" class="rounded-[var(--radius)]">
+        <template #content>
+          <div class="p-5">
+            <div class="space-y-3">
+              <h1 class="text-xl font-extrabold">
+                Voting is for people who joined through Room Pass.
+              </h1>
+              <p class="text-sm text-black/60">
+                You are signed in as an operator, so you can open and close
+                rounds and read the results — but a ballot has to belong to
+                someone who came through the door. Scan the room's QR code to
+                join as a participant.
+              </p>
             </div>
           </div>
         </template>

@@ -46,7 +46,7 @@ func TestVotingRound(t *testing.T) {
 		mux.ServeHTTP(rec, req)
 		return rec
 	}
-	const valid = `{"uid":"round-uid","resourceVersion":"1","answers":[{"questionId":"choice","singleChoice":"A"},{"questionId":"text","freeText":"hello"}]}`
+	const valid = `{"resourceVersion":"1","answers":[{"questionId":"choice","singleChoice":"A"},{"questionId":"text","freeText":"hello"}]}`
 	if rec := request("GET", "/public/rounds/demo", "alice", "", true); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"voted":false`) {
 		t.Fatalf("round before voting: %d %s", rec.Code, rec.Body)
 	}
@@ -54,11 +54,15 @@ func TestVotingRound(t *testing.T) {
 		name, body string
 		want       int
 	}{
-		{"required", `{"uid":"round-uid","resourceVersion":"1","answers":[]}`, 400},
+		{"required", `{"resourceVersion":"1","answers":[]}`, 400},
 		{"invalid choice", strings.Replace(valid, `"A"`, `"C"`, 1), 400},
 		{"wrong type", strings.Replace(valid, `"freeText"`, `"singleChoice"`, 1), 400},
 		{"stale round", strings.Replace(valid, `"1"`, `"0"`, 1), 409},
-		{"recreated round", strings.Replace(valid, `round-uid`, `old-uid`, 1), 409},
+		// resourceVersion carries the whole staleness check now that the round
+		// UID is gone from the body, so a client that pins nothing is refused
+		// rather than quietly voting into whatever the round has become.
+		{"unpinned round", `{"answers":[{"questionId":"choice","singleChoice":"A"}]}`, 409},
+		{"stale uid is no longer a field", strings.Replace(valid, `{"resourceVersion"`, `{"uid":"round-uid","resourceVersion"`, 1), 400},
 		{"forged metadata", strings.Replace(valid, `"answers":`, `"metadata":{},"answers":`, 1), 400},
 		{"trailing body", valid + `{}`, 400},
 		{"valid", valid, 201},
@@ -94,6 +98,16 @@ func TestVotingRound(t *testing.T) {
 	if err != nil || len(answers) != 2 || answers[0].(map[string]any)["singleChoice"] != "A" {
 		t.Fatalf("submitted answers were overwritten: %v, %v", answers, err)
 	}
+	// The name and both labels are a contract with gitops-reverser, not
+	// cosmetics: the name is what makes a second ballot collide, and the labels
+	// are what the mirror files the document by. A silent change here moves
+	// every document in the audit trail.
+	if got, want := submissions.Items[0].GetName(), "demo-alice"; got != want {
+		t.Errorf("submission name = %q, want %q", got, want)
+	}
+	if got := submissions.Items[0].GetLabels(); got[roundLabel] != "demo" || got[submitterLabel] != "alice" {
+		t.Errorf("submission labels = %v, want round=demo submitter=alice", got)
+	}
 	before := calls
 	if rec := request("POST", "/public/rounds/demo", "bob", valid, false); rec.Code != 403 || calls != before {
 		t.Fatal("missing CSRF reached Kubernetes")
@@ -120,15 +134,56 @@ func TestVotingRound(t *testing.T) {
 	if rec := request("POST", "/public/rounds/demo", "bob", valid, true); rec.Code != 409 || !strings.Contains(rec.Body.String(), "not open") {
 		t.Fatalf("closed round: %s", rec.Body)
 	}
-	// An old round's QuizSubmissions must not count after delete/recreate under the same name.
-	round.SetUID("new-uid")
-	_, err = client.Resource(quizSessions).Namespace("voter").Update(t.Context(), round, metav1.UpdateOptions{})
-	if err != nil {
-		t.Fatal(err)
+}
+
+// Voting is for people who came through Room Pass. An operator reaches these
+// handlers with a perfectly valid session -- requireParticipant checks that the
+// cookie is good, not which connector issued it -- so the refusal has to be
+// here, and it has to be narrow: the same session still has to open and close
+// rounds and read results, because that IS the operator page.
+func TestOnlyRoomPassSessionsMayVote(t *testing.T) {
+	cfg := authorizationFixture(t)
+	round := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "examples.configbutler.ai/v1alpha1", "kind": "QuizSession",
+		"metadata": map[string]any{"name": "demo", "namespace": "voter", "uid": "round-uid", "resourceVersion": "1"},
+		"spec": map[string]any{"state": "live", "questions": []any{
+			map[string]any{"id": "choice", "title": "Choose", "type": "singleChoice", "required": true, "choices": []any{"A", "B"}},
+		}},
+	}}
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{quizSessions: "QuizSessionList", quizSubmissions: "QuizSubmissionList"}, round)
+	mux := http.NewServeMux()
+	registerParticipantQuizHandlers(mux, handlerDeps{cfg: cfg, defaultNS: "voter", newClients: func(_ config, _ string) (participantClients, error) {
+		return participantClients{dynamic: client}, nil
+	}})
+	as := func(connector, method, path, body string) *httptest.ResponseRecorder {
+		req := authorizedRequestAs(t, cfg, method, "operator", connector)
+		req.URL.Path = path
+		req.Body = io.NopCloser(strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, req)
+		return rec
 	}
-	rec = request("GET", "/public/rounds/demo/results", "alice", "", true)
-	if !strings.Contains(rec.Body.String(), `"total":0`) {
-		t.Fatalf("old votes leaked: %s", rec.Body)
+	const ballot = `{"resourceVersion":"1","answers":[{"questionId":"choice","singleChoice":"A"}]}`
+
+	rec := as("github", "POST", "/public/rounds/demo", ballot)
+	if rec.Code != 403 || !strings.Contains(rec.Body.String(), "NotAParticipant") {
+		t.Fatalf("an operator was allowed to vote: %d %s", rec.Code, rec.Body)
+	}
+	// Nothing was written: the refusal happens before any Kubernetes call.
+	list, err := client.Resource(quizSubmissions).Namespace("voter").List(t.Context(), metav1.ListOptions{})
+	if err != nil || len(list.Items) != 0 {
+		t.Fatalf("a refused vote still reached Kubernetes: %v %v", list, err)
+	}
+	// ...but the operator page keeps working.
+	if rec := as("github", "GET", "/public/rounds/demo/results", ""); rec.Code != 200 {
+		t.Errorf("an operator must still read results: %d %s", rec.Code, rec.Body)
+	}
+	// And a participant is unaffected. Cast before the round is closed below.
+	if rec := as(roomConnector, "POST", "/public/rounds/demo", ballot); rec.Code != 201 {
+		t.Errorf("a Room Pass participant was refused: %d %s", rec.Code, rec.Body)
+	}
+	if rec := as("github", "POST", "/public/rounds/demo/state", `{"state":"closed"}`); rec.Code != 200 {
+		t.Errorf("an operator must still close a round: %d %s", rec.Code, rec.Body)
 	}
 }
 

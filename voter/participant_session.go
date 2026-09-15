@@ -8,9 +8,10 @@ package main
 // session id pointing at a server-side store -- which is why a backend restart
 // does not sign anyone out, as long as the keys are the same.
 //
-// Version 3 is a deliberate break from the legacy self-asserted identity
+// Version 3 was a deliberate break from the legacy self-asserted identity
 // payload (version 2). A version-2 cookie decodes to nothing here, so an old
-// browser session cannot carry a made-up identity into OIDC mode.
+// browser session cannot carry a made-up identity into OIDC mode. Version 4
+// adds the Dex connector, which voting now depends on.
 
 import (
 	"encoding/base64"
@@ -24,7 +25,11 @@ import (
 )
 
 const (
-	participantCookieVersion = 3
+	// 4: added Connector. A session minted before it carries no connector, and
+	// an empty one is refused from voting -- so the version bump is what turns a
+	// stale cookie into a clean re-login instead of a participant who is
+	// mysteriously not allowed to vote.
+	participantCookieVersion = 4
 
 	// Browsers commonly cap a single cookie at 4096 bytes including the name
 	// and attributes. A Dex ID token plus securecookie's encryption and base64
@@ -48,6 +53,13 @@ type participantSession struct {
 	// because being able to name your Kubernetes identity is not a precondition
 	// for having one.
 	KubeUsername string `json:"kubeUser,omitempty"`
+	// Connector is the Dex connector that authenticated this login, taken from
+	// federated_claims.connector_id -- which Dex sets itself and no caller can
+	// forge, and which the apiserver's own claimMappings already key the
+	// username prefix off. "room" means the participant came through Room Pass;
+	// "github" is an operator. Voting requires the former, so this is a
+	// permission input and not decoration.
+	Connector string `json:"connector,omitempty"`
 	// TokenExpiry is the ID token's own exp. The session is never allowed to
 	// outlive it, whatever the cookie's MaxAge says.
 	TokenExpiry int64 `json:"tokenExp"`

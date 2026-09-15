@@ -324,6 +324,15 @@ func (p *oidcProvider) handleCallback(w http.ResponseWriter, r *http.Request) {
 		Name   string   `json:"name"`
 		Email  string   `json:"email"`
 		Groups []string `json:"groups"`
+		// Dex emits federated_claims only for the "federated:id" scope, which
+		// this client always requests -- see the Scopes list above, and the
+		// apiserver's matching claimValidationRule, which rejects a token
+		// without it outright. connector_id is set by Dex itself and is not a
+		// claim the caller can influence, which is what makes it safe to gate
+		// voting on.
+		FederatedClaims struct {
+			ConnectorID string `json:"connector_id"`
+		} `json:"federated_claims"`
 	}
 	if err := idToken.Claims(&claims); err != nil {
 		log.Printf("oidc: id_token claims could not be decoded")
@@ -348,6 +357,7 @@ func (p *oidcProvider) handleCallback(w http.ResponseWriter, r *http.Request) {
 		Email:        claims.Email,
 		Groups:       claims.Groups,
 		KubeUsername: kubeUser,
+		Connector:    claims.FederatedClaims.ConnectorID,
 		TokenExpiry:  idToken.Expiry.Unix(),
 	}, p.now()); err != nil {
 		// The most likely cause is an oversized cookie. Fail loudly rather
