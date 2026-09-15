@@ -9,6 +9,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import AppShell from '../components/layout/AppShell.vue'
+import AuthorizationTable from '../components/AuthorizationTable.vue'
+import { useAuthorization } from '../api/useAuthorization'
 import {
   currentSession,
   getSession,
@@ -17,6 +19,9 @@ import {
 } from '../api/session'
 
 const router = useRouter()
+// Polled, not fetched once: an operator can widen the audience's grant while
+// this page is open, and the row that changes should change here too.
+const { authz, error: authzError, loading: authzLoading } = useAuthorization()
 const session = ref<Session | null>(currentSession())
 const signingOut = ref(false)
 const signOutError = ref('')
@@ -170,6 +175,34 @@ onMounted(async () => {
         your token, about your token. There is no stored login object to read —
         an identity in Kubernetes is derived per request, never persisted — so
         that answer is the closest thing to one that exists.
+      </p>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <h2>What you may do</h2>
+      </div>
+      <p class="hero-copy">
+        The same question again, asked the other way round:
+        <code class="inline-code">kubectl auth can-i --list</code>, for you,
+        answered by the API server with your own token. Nothing on this page
+        decided any of it, and nothing in this application can change it.
+      </p>
+      <AuthorizationTable
+        :authz="authz"
+        :loading="authzLoading"
+        :error="authzError"
+      />
+      <p class="tech-facts__links">
+        <a href="/auth/rules?as=yaml" target="_blank" rel="noopener">
+          The same answer as YAML
+          <i class="pi pi-external-link" aria-hidden="true" />
+        </a>
+      </p>
+      <p class="hero-copy">
+        This refreshes by itself. If someone with the rights to change it grants
+        you something while you are looking, the row appears here within a few
+        seconds — no reload, and no new sign-in.
       </p>
     </section>
 

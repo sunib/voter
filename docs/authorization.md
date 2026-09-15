@@ -58,14 +58,42 @@ the LinkedIn connector emits no groups, which would have locked out
 `linkedin:simon@configbutler.ai`. Cohort members must be added to that allowlist
 to reach their own `p<N>` app URL.
 
-The demo Role grants these operations throughout the `voter` namespace:
+The demo Role (`voter-audience`, bound to `demo:voter-audience`) grants these
+operations throughout the `voter` namespace:
 
 | Resource | Verbs |
 | --- | --- |
-| CoffeeConfigs | get, list, watch, patch, update |
+| CoffeeConfigs | get, list, watch |
 | CommitRequests | create, get, list, watch |
 | QuizSessions | get, list, watch |
 | QuizSubmissions | create, get, list, watch |
+
+**CoffeeConfigs became read-only here on 2026-09-15.** `patch` and `update` moved
+to a second Role, `voter-audience-coffee-admin`, which exists in Git but is
+**not bound**. A participant can therefore open the menu editor, read the menu,
+watch it change — and be refused by the API server on save. That refusal is the
+starting state of the demo, not a fault.
+
+The operator hands the grant out live from `/room`: a switch there creates a
+RoleBinding of that Role to the same group, with the operator's own token, and
+deletes it again on the way back. The binding is deliberately absent from the
+Flux kustomization — Flux would recreate whatever the switch deletes — and
+`gitops-reverser` mirrors it into the audit trail, so the grant is recorded in
+Git as a commit authored by whoever pulled the switch.
+
+Two consequences worth stating plainly:
+
+- The grant is to the **group**, so it reaches every enrolled participant at
+  once. There is no per-person coffee permission and none is intended.
+- While bound, any participant may `patch` the CoffeeConfig. They still cannot
+  `create` or `delete` it: the object belongs to GitOps and they only amend it.
+
+Every identity may ask what it holds. `selfsubjectrulesreviews` is granted to
+`system:authenticated` by the stock `system:basic-user` ClusterRole, so
+`/auth/rules` works for a participant whose only other grant is reading one
+CoffeeConfig — no RBAC change was needed to render the permission table on
+`/me`. The table is the API server's answer about the caller's own token; the
+application does not compute it and cannot disagree with it.
 
 The CommitRequest CRD was absent when this was first written, leaving that row
 dormant. It was installed 2026-09-11 and gitops-reverser is running, so the grant
@@ -76,9 +104,11 @@ QuizSubmissions are create-only for participants: this Role grants neither updat
 nor patch on them, and Voter exposes no editing endpoint. Broader additive grants or
 administrator access are separate; the CRD does not enforce immutable spec fields.
 
-This Role does not grant Secrets, RBAC changes, impersonation or deletion
-(`delete quizsubmissions` is denied). It is not limited to one named CoffeeConfig
-and it permits reading other submissions.
+Neither Role grants Secrets, RBAC changes, impersonation or deletion
+(`delete quizsubmissions` is denied). Participants cannot read RoleBindings
+either, which is why the grant switch simply does not appear on a participant's
+`/room` — Kubernetes withholds it, not the page. Neither Role is limited to one
+named CoffeeConfig, and reading other submissions is permitted.
 
 **There is no bound on how much an audience token may write.** The `voter`
 namespace has no ResourceQuota and no LimitRange, and the cluster has no

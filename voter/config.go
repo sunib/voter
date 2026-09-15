@@ -41,6 +41,17 @@ type config struct {
 	// endpoint at somebody else's.
 	RoomName string `envconfig:"ROOM_NAME" default:"demo"`
 
+	// AudienceCoffeeAdminRole names BOTH the Role that lets the audience edit
+	// the coffee menu and the RoleBinding the operator page creates to hand it
+	// out. One name for both, because there is exactly one of each and two
+	// names would be two things to keep in step.
+	//
+	// The Role lives in Git and is reconciled. The RoleBinding is created and
+	// deleted at runtime by operator_audience_grant.go and is deliberately NOT
+	// in the Flux kustomization -- Flux would recreate whatever the switch
+	// deletes.
+	AudienceCoffeeAdminRole string `envconfig:"AUDIENCE_COFFEE_ADMIN_ROLE" default:"voter-audience-coffee-admin"`
+
 	// ConfigButlerGitTargetName names the ConfigButler GitTarget whose open
 	// commit window should be finalized after a successful CoffeeConfig patch.
 	// Set to "" to disable the save-message side effect entirely.

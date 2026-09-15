@@ -102,6 +102,8 @@ func main() {
 	registerParticipantOrderFeedHandlers(mux, deps)
 	registerParticipantQuizHandlers(mux, deps)
 	registerParticipantStreamHandlers(mux, deps)
+	registerParticipantAuthzHandlers(mux, deps)
+	registerAudienceGrantHandlers(mux, deps)
 	// Last: it owns "/" and therefore everything unclaimed above.
 	registerHandlers(mux, deps)
 

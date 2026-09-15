@@ -10,12 +10,13 @@
 // your own token, and renders whatever Kubernetes is willing to send. A
 // participant's RBAC grants nothing on rooms, so a participant sees the refusal
 // below and no code -- the demo is better when the refusal is real.
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { toString as qrToString } from 'qrcode/lib/browser'
 
 import AppShell from '../components/layout/AppShell.vue'
 import StreamDiagnostics from '../components/layout/StreamDiagnostics.vue'
 import { useLiveResources } from '../api/liveResources'
+import { getAudienceGrant, setAudienceGrant } from '../api/authz'
 import { setRoundState } from '../api/quiz'
 import { currentSession } from '../api/session'
 import type { KRMObject } from '@configbutler/krm-stream'
@@ -121,6 +122,68 @@ async function changeState(name: string, state: 'live' | 'closed') {
   }
 }
 
+// --- what the audience may do ----------------------------------------------
+//
+// The switch creates or deletes ONE RoleBinding, with this operator's own
+// token. There is no admin check in front of it: reading the grant needs
+// permission on rolebindings, which a participant does not have, so a
+// participant simply never sees the control -- Kubernetes decided that, not
+// this component.
+//
+// It is polled as well as written, so the switch still tells the truth if the
+// binding is changed from a terminal or by a second operator.
+const grantGranted = ref(false)
+const grantVisible = ref(false)
+const grantBusy = ref(false)
+const grantError = ref('')
+const grantLoaded = ref(false)
+
+async function refreshGrant() {
+  try {
+    const state = await getAudienceGrant()
+    grantGranted.value = state.granted
+    grantVisible.value = true
+    grantError.value = ''
+  } catch (e) {
+    // 403 is the expected answer for a participant and is not an error worth
+    // showing: they are not an operator, so the control is simply not theirs.
+    // Anything else is a real fault and belongs on screen.
+    const status = (e as { status?: number }).status
+    if (status === 403 || status === 401) {
+      grantVisible.value = false
+    } else {
+      grantVisible.value = true
+      grantError.value =
+        e instanceof Error ? e.message : 'Could not read the audience grant.'
+    }
+  } finally {
+    grantLoaded.value = true
+  }
+}
+
+async function toggleGrant(next: boolean) {
+  grantBusy.value = true
+  grantError.value = ''
+  // Optimistic, then corrected by the answer. The operator is standing in
+  // front of a room; the control must move when it is pressed.
+  const previous = grantGranted.value
+  grantGranted.value = next
+  try {
+    const state = await setAudienceGrant(next)
+    grantGranted.value = state.granted
+  } catch (e) {
+    grantGranted.value = previous
+    grantError.value =
+      e instanceof Error ? e.message : 'Could not change the audience grant.'
+  } finally {
+    grantBusy.value = false
+  }
+}
+
+void refreshGrant()
+const grantTimer = setInterval(() => void refreshGrant(), 5000)
+onBeforeUnmount(() => clearInterval(grantTimer))
+
 function signInAsOperator() {
   // Allowlisted by OIDC_CONNECTOR_CHOICES, not free text; the default path
   // stays room-pass so a room full of strangers is never shown this door.
@@ -217,6 +280,53 @@ function signInAsOperator() {
         </div>
       </div>
       <div v-else class="empty-state">Waiting for the room's join code…</div>
+    </section>
+
+    <!-- Demo 2's switch. One RoleBinding, created and deleted with your own
+         token, and every phone in the room discovers the change by asking the
+         API server what it may do -- not by being told by this application. -->
+    <section v-if="!roomUnavailable && grantVisible" class="panel">
+      <div class="section-heading">
+        <h2 class="panel-title">What the audience may do</h2>
+        <span
+          class="pill"
+          :class="grantGranted ? 'pill--good' : 'pill--neutral'"
+        >
+          {{ grantGranted ? 'menu editing granted' : 'read-only' }}
+        </span>
+      </div>
+      <p class="hero-copy">
+        The room can always read the coffee menu. This grants them
+        <code class="inline-code">patch</code> on it as well, by creating a
+        RoleBinding — so the admin page stops refusing them, live, without
+        anyone signing in again.
+      </p>
+      <p v-if="grantError" role="alert" class="error-copy">{{ grantError }}</p>
+      <label class="grant-switch">
+        <input
+          type="checkbox"
+          :checked="grantGranted"
+          :disabled="grantBusy || !grantLoaded"
+          @change="toggleGrant(($event.target as HTMLInputElement).checked)"
+        />
+        <span class="grant-switch__copy">
+          <strong>Let the room edit the coffee menu</strong>
+          <span class="grant-switch__hint">
+            {{
+              grantBusy
+                ? 'Asking Kubernetes…'
+                : grantGranted
+                  ? 'RoleBinding exists. Their admin page is editable now.'
+                  : 'No RoleBinding. Their admin page explains the refusal.'
+            }}
+          </span>
+        </span>
+      </label>
+      <p class="metadata-copy">
+        Not a Flux resource, on purpose — Flux would recreate whatever this
+        deletes. gitops-reverser mirrors it to the audit trail, so the grant
+        arrives in Git as a commit in your name.
+      </p>
     </section>
 
     <section v-if="!roomUnavailable" class="panel">

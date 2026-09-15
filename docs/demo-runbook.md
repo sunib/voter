@@ -19,11 +19,18 @@ choreography.
 | 0–8 | The problem: business intent ends up in Git, stakeholders do not do pull requests | idle |
 | 8–18 | **Demo 1** — identity and authorization | **in use** |
 | 18–26 | The pattern: a typed API in front of the repo | idle |
-| 26–38 | **Demo 2** — the mirror, and the commit in their name | **in use** |
-| 38–45 | The honest checklist: where this fits, where it does not | idle |
+| 26–40 | **Demo 2** — the mirror, the live grant, and the commit in their name | **in use** |
+| 40–45 | The honest checklist: where this fits, where it does not | idle |
 
 Two phone segments, ten minutes apart, is about right. A room will pick a phone
 up twice; it will not pick it up four times.
+
+Demo 2 grew to fourteen minutes when the live grant went in, which leaves the
+closing five rather than seven. **Buy the two minutes back by dropping the
+interloper** (demo 1 step 4, already marked optional) — the closing checklist is
+where this talk's credibility lives and it should not be the thing that gets
+compressed. If you are still over, demo 2 step 2 survives being told in two
+minutes instead of three.
 
 ---
 
@@ -159,6 +166,12 @@ check the value survived.
       `clusters/k8s.koudijs.dev/demo1/submissions.yaml`.
 - [ ] Delete the test vote so the room starts clean:
       `kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=<round-1-name>`
+- [ ] **Confirm the audience grant is off.** On `/room`, *Let the room edit the
+      coffee menu* must be unticked — demo 1's refusal depends on it. If a
+      previous run left it on:
+      `kubectl -n voter delete rolebinding voter-audience-coffee-admin`
+- [ ] Open `/me` on your own phone and confirm the permission grid renders. It
+      is the first thing you point the room at in demo 1 step 3.
 - [ ] Have the audit-trail repo open in a browser tab, on the `demo1` folder,
       **not yet shown**.
 
@@ -206,12 +219,18 @@ give the game away.
 |---|---|---|
 | Vote twice in round one | "You have already voted in this round." | One `QuizSubmission` per identity per round, named `<round>-<name>`. The create is atomic, so two tabs still make one vote. |
 | A participant opens or closes a round | **403 from Kubernetes**, shown on the page | The audience Role has `get, list, watch` on `quizsessions` and no `patch`. |
-| A participant deletes the coffee menu | **403** | `coffeeconfigs: get, list, watch, patch, update` — no `create`, no `delete`. They may amend a menu GitOps owns; they may not remove it. |
+| A participant edits the coffee menu | **403 on save**, with the page saying so before they try | `coffeeconfigs: get, list, watch` — no `patch`. They may read the menu and watch it change. Editing lives in a second Role that is not bound yet; you hand it out in demo 2. |
 | A participant edits their own vote | no path to it, and **403** if attempted directly | `quizsubmissions: get, list, watch, create`. Create-only, on purpose. |
 
 Then answer the question the room is now asking — *who checked that?*
 
-Show it from the other side. In the terminal:
+**Tell them to open their own name in the top bar.** `/me` now has a permission
+grid under the identity fields: the API server's answer, about their token, on
+their phone. The missing `patch` on `coffeeconfigs` is visible as a gap in a
+column before anyone presses anything, which is a better order than being
+refused and then told why.
+
+Then show it from the other side, in the terminal:
 
 ```bash
 kubectl -n voter auth can-i patch quizsessions \
@@ -255,7 +274,7 @@ or a `git log` left on screen. Check your tabs.
 
 ## Demo 2 — the same actions, now visible in Git
 
-**Twelve minutes.** The room is still signed in from demo 1; do not make them
+**Fourteen minutes.** The room is still signed in from demo 1; do not make them
 join again.
 
 ### 1. The reveal (2 min)
@@ -319,15 +338,45 @@ pressing a button, attributed to the person who pressed it.
 Let them vote. Round two is the "would you actually run this" round, which gives
 you your closing material for free.
 
-### 4. The coffee edit, and "save now" (4 min)
+### 4. Grant the room the admin page (2 min)
 
-Go to the coffee bar. Someone orders with the `TESTNET` voucher and it fails:
+The room's admin page has been refusing them since demo 1. On `/room`, under
+**What the audience may do**, tick *Let the room edit the coffee menu*.
+
+What happens, in this order:
+
+1. A `RoleBinding` is created — by **your** token, not the application's.
+2. Every phone's `/me` grid grows a `patch` column on `coffeeconfigs`, within a
+   few seconds, with no reload and no new sign-in.
+3. Their admin page stops refusing. The banner disappears and Save starts
+   working, on the page they already had open.
+
+Say what did *not* happen: no feature flag, no application permission, no
+deploy. The application never learned anything — each phone asked Kubernetes
+what it may do and got a different answer than it did ten minutes ago.
+
+The binding is not a Flux resource, deliberately, or Flux would recreate it
+after you switched it off. It is mirrored into `demo1/authorization.yaml`, so
+the grant lands in Git as a commit in your name — show that diff if you have
+time, because "who may do what" arriving as a reviewable file is the argument.
+
+Switch it back off at the end. Watching a permission be taken away is worth
+fifteen seconds, and it proves the switch was real in both directions.
+
+### 5. The coffee edit, and "save now" (4 min)
+
+Now let *them* do it. Someone orders with the `TESTNET` voucher and it fails:
 *"This voucher has been used the maximum number of times."* The storefront
 showed the discount right up to the submit — that is the bug the demo is about,
 and it is a configuration bug.
 
 Open the menu editor, raise `maximumUsage`, and save. Then press **save now**,
 which creates a `CommitRequest`.
+
+Hand this to the room if the grant is on — it is their permission now, and a
+commit authored by an attendee fixing the bug beats one authored by you. Have
+one ready to do it yourself if nobody volunteers; the beat matters more than
+who performs it.
 
 Two separate facts the UI is careful to distinguish, and you should be too:
 
@@ -340,7 +389,7 @@ Two separate facts the UI is careful to distinguish, and you should be too:
 Then show `demo2/coffee-config.yaml` with the new value, authored by whoever
 made the edit. Re-order the coffee; it succeeds.
 
-### 5. The boundary — what is deliberately *not* in Git (2 min)
+### 6. The boundary — what is deliberately *not* in Git (2 min)
 
 Switch to the **Orders** tab, next to Config. It is a live feed of what the room
 actually ordered, placed and refused.
@@ -452,8 +501,12 @@ them would bury the folder under a document per save.
 | Nothing reaching Git | Reverser down, or deploy key | `kubectl -n voter logs deploy/gitops-reverser`; check the GitProvider's secret |
 | Commit lands with no author | Audit event not matched | Message renders "from an unnamed actor". Mention it and move on — do not debug on stage |
 | Voucher still depleted after raising the limit | Order placed before the patch reconciled | Re-order. The limit is read fresh on every order, never cached |
-| Order feed empty after a restart | Working as designed | This is the point of section 5 — say so |
+| Order feed empty after a restart | Working as designed | This is the point of section 6 — say so |
 | A menu or round edit pushed to Git changed nothing | That object is seeded, not reconciled | Delete it and let Flux recreate it. Not a Flux fault — see "Two repositories" |
+| The grant switch is missing from `/room` | You are signed in as a participant | Reading it needs `rolebindings`, which the audience does not have. Re-enter through the GitHub door |
+| Switch reports the Role does not exist | `voter-audience-coffee-admin` was not reconciled | `kubectl -n voter get role voter-audience-coffee-admin`. The switch refuses rather than create a binding that grants nobody anything |
+| Grant is on but a phone still refuses | That phone has not polled yet | Wait ~5s. The table refreshes itself; there is nothing to press |
+| Permission grid is empty or says "incomplete" | An authorizer could not enumerate | The page says so itself. Mention it and move on — the refusals are still real |
 
 **The one rule, if anything looks odd with authentication:** nothing may reach
 Dex's `room` connector callback except Room Pass. If you find yourself
@@ -477,6 +530,16 @@ Renaming also sidesteps the seeded-object rule: a new round name is a new
 object, so Flux creates it from Git with the `state` you asked for. Reusing a
 name does not reset anything, because Flux no longer applies over an object that
 already exists.
+
+Revoke the coffee grant between runs, or the next room starts with the
+permission demo 1 is supposed to refuse:
+
+```bash
+kubectl -n voter delete rolebinding voter-audience-coffee-admin
+```
+
+The switch on `/room` does the same thing and is the one you will actually
+reach from the stage.
 
 The order feed needs no reset — restarting the pod empties it, which is the
 only guarantee it makes.
