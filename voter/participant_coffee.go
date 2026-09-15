@@ -134,7 +134,7 @@ func registerParticipantCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 					crNS = ns
 				}
 				crName, crErr := createParticipantCommitRequest(ctx, clients, crNS, target,
-					strings.TrimSpace(r.Header.Get("X-Change-Reason")))
+					strings.TrimSpace(r.Header.Get("X-Change-Reason")), cfg.ConfigButlerCloseDelaySeconds)
 				switch {
 				case crErr != nil:
 					log.Printf("commitrequest: create failed sub=%s target=%s: %v", s.Subject, target, crErr)
@@ -155,10 +155,18 @@ func registerParticipantCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 	}))
 }
 
-func createParticipantCommitRequest(ctx context.Context, clients participantClients, ns, target, message string) (string, error) {
+func createParticipantCommitRequest(ctx context.Context, clients participantClients, ns, target, message string, closeDelaySeconds int32) (string, error) {
 	spec := map[string]any{"gitTargetRef": map[string]any{"name": target}}
 	if message != "" {
 		spec["message"] = message
+	}
+	// Without this the request races the write it exists to publish, and loses:
+	// nothing is attached, so the message above is dropped and the edit waits out
+	// the target's own window instead. See ConfigButlerCloseDelaySeconds.
+	// int64, not int32: unstructured values are deep-copied as JSON, and any
+	// narrower integer panics there rather than at compile time.
+	if closeDelaySeconds > 0 {
+		spec["closeDelaySeconds"] = int64(closeDelaySeconds)
 	}
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": commitRequestAPIVersion,

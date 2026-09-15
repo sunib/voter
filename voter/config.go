@@ -49,6 +49,19 @@ type config struct {
 	// are created. Empty means "use the runtime namespace", which must also be
 	// the GitTarget's namespace.
 	ConfigButlerCommitRequestNamespace string `envconfig:"CONFIGBUTLER_COMMITREQUEST_NAMESPACE"`
+	// ConfigButlerCloseDelaySeconds is how long the branch worker may wait for
+	// the CoffeeConfig write to reach it before finalizing the window. It is a
+	// deadline, not a sleep: an attached window still closes on the first normal
+	// flush, so a larger value costs nothing when the write arrives promptly.
+	//
+	// It must not be zero. The patch and the CommitRequest are two independent
+	// trips through the API server, and the patch is the slower one -- it is held
+	// head-of-line in the reverser's watch goroutine until the API server's audit
+	// batch names its author. A zero delay finalizes before that lands, so the
+	// request expires as NoWindowInGrace and the save commits later, under the
+	// target's default message instead of the editor's. Two seconds covers the
+	// audit batch (audit-webhook-batch-max-wait=1s) with margin.
+	ConfigButlerCloseDelaySeconds int32 `envconfig:"CONFIGBUTLER_CLOSE_DELAY_SECONDS" default:"2"`
 
 	// --- OIDC ---------------------------------------------------------------
 	OIDCIssuerURL    string `envconfig:"OIDC_ISSUER_URL"`

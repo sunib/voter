@@ -30,6 +30,9 @@ func testConfig() config {
 		// config has to say it, or every ballot in a test is refused.
 		ParticipantConnectorID: testParticipantConnector,
 		AppOrigin:              "https://demo.koudijs.dev",
+		// Likewise envconfig's default. Zero here would let a test pass while
+		// the deployed save races the write it is meant to publish.
+		ConfigButlerCloseDelaySeconds: 2,
 	}
 }
 

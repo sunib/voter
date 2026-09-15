@@ -346,3 +346,48 @@ func TestCoffeeConditionalPatchBoundary(t *testing.T) {
 		})
 	}
 }
+
+// TestCommitRequestCarriesCloseDelay pins the field that makes "save now"
+// actually save now. The patch and the CommitRequest are two independent trips
+// through the API server, and the reverser holds the patch head-of-line until
+// the audit batch names its author; a request created with no close delay
+// finalizes before that arrives, resolves NoWindowInGrace, and drops the
+// editor's message. The delay is the whole mechanism, so it is asserted on the
+// wire rather than trusted to a struct field.
+func TestCommitRequestCarriesCloseDelay(t *testing.T) {
+	cfg := authorizationFixture(t)
+	calls := 0
+	var commitBody map[string]any
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method == http.MethodPost {
+			if err := json.NewDecoder(r.Body).Decode(&commitBody); err != nil {
+				t.Errorf("commit request body: %v", err)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"apiVersion":"examples.configbutler.ai/v1alpha1","kind":"CoffeeConfig","metadata":{"name":"testnet","uid":"coffee-uid","resourceVersion":"42"},"spec":{}}`))
+	}))
+	defer upstream.Close()
+	cfg.KubernetesAPIServer = upstream.URL
+	cfg.ConfigButlerGitTargetName = "demo-coffeeconfig"
+	mux := http.NewServeMux()
+	registerParticipantCoffeeHandlers(mux, handlerDeps{cfg: cfg, defaultNS: "voter"})
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, authorizedRequest(t, cfg, http.MethodPatch, "participant-token"))
+	if rec.Code != http.StatusOK || calls != 3 {
+		t.Fatalf("status=%d calls=%d body=%s", rec.Code, calls, rec.Body.String())
+	}
+
+	spec, ok := commitBody["spec"].(map[string]any)
+	if !ok {
+		t.Fatalf("commit request carried no spec: %v", commitBody)
+	}
+	// JSON numbers decode as float64; the point is that it is present and not
+	// zero, since zero is the value that reproduces the bug.
+	delay, ok := spec["closeDelaySeconds"].(float64)
+	if !ok || delay <= 0 {
+		t.Fatalf("commit request must carry a non-zero closeDelaySeconds, got %v", spec["closeDelaySeconds"])
+	}
+}
