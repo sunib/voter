@@ -132,9 +132,21 @@ type RoomRef struct {
 type ParticipantSpec struct {
 	RoomRef RoomRef `json:"roomRef"`
 	// DisplayName is an unverified demo label, never an authorization key.
+	//
+	// It is stored in its FOLDED form (see labelName in internal/server): what a
+	// participant types is normalized before it reaches here, so this value is
+	// legal in all three places it travels to -- a Kubernetes label value on
+	// every ballot the voter app writes, one path segment in the mirrored audit
+	// trail, and the tail of a submission's object name. The pattern is exactly
+	// what the fold emits and is deliberately narrower than a label value: no
+	// "_" or ".", because an object name is DNS-1123 and rejects the first.
+	//
+	// MaxLength matches maxParticipantID rather than a label value's 63, so the
+	// display name and the address derived from it share one limit instead of
+	// two that disagree past forty characters.
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=64
-	// +kubebuilder:validation:Pattern="^[^<>\\x00-\\x1f\\x7f]+$"
+	// +kubebuilder:validation:MaxLength=40
+	// +kubebuilder:validation:Pattern="^[A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?$"
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="displayName is immutable"
 	DisplayName string `json:"displayName"`
 	// +kubebuilder:default=false

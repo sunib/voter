@@ -218,14 +218,25 @@ func validName(raw string) (string, error) {
 			return "", errors.New("Choose a name without control characters or angle brackets.")
 		}
 	}
-	// The name has to survive participantID with something left over, because
-	// that result is the Participant's object name and the participant's whole
+	// The name has to survive the fold with something left over, because that
+	// result is the Participant's object name and the participant's whole
 	// address. A name of only emoji or punctuation passes every check above and
 	// still leaves nothing to build an identity from.
-	if participantID(v) == "" {
+	//
+	// What is STORED is the folded form, not what was typed: a display name is
+	// carried into a Kubernetes label value (the voter app labels each ballot
+	// with it) and into an object name, and neither accepts a space. Folding
+	// here rather than repairing it downstream means there is one name, legal
+	// everywhere, and no caller has to know the rules.
+	//
+	// The cost is a name with no ASCII fold at all -- CJK, emoji -- which is
+	// refused below rather than transliterated. Entry 3 of
+	// docs/deliberate-simplifications.md says why we took that trade.
+	name := labelName(v)
+	if name == "" {
 		return "", errors.New("Choose a name with at least one letter or number.")
 	}
-	return v, nil
+	return name, nil
 }
 
 // participantPrefix keeps every Participant object name inside its own
@@ -285,6 +296,42 @@ func participantID(display string) string {
 // trade is that .test carries no promise of an NXDOMAIN the way .invalid does
 // -- RFC 6761 6.2 expects .test names to resolve inside a private network -- so
 // nothing may treat "it does not resolve" as a control.
+// labelName folds a typed name into the form that is STORED as
+// Participant.spec.displayName. It is participantID's rule with the case left
+// alone, and the two are locked together by exactly that: lowercasing this
+// result reproduces participantID, which is what lets the voter app build a
+// submission's object name as "<round>-<lowercased display name>" and have it
+// address the same participant this identity already names.
+//
+// Case survives because this value is read by people: it is a Git commit author
+// line, a label on every ballot, and a filename in the mirrored audit trail,
+// where "Ada-Lovelace" beats "ada-lovelace". Everything else -- NFKD so
+// diacritics fold rather than vanish, the combining-mark skip, the cap, the
+// trimmed separator -- is participantID's behaviour unchanged, because any
+// divergence would break the pairing above.
+func labelName(display string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range norm.NFKD.String(display) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			if dash && b.Len() > 0 {
+				b.WriteByte('-')
+			}
+			dash = false
+			b.WriteRune(r)
+		case r >= 0x0300 && r <= 0x036F:
+		default:
+			dash = true
+		}
+	}
+	name := b.String()
+	if len(name) > maxParticipantID {
+		name = name[:maxParticipantID]
+	}
+	return strings.TrimRight(name, "-")
+}
+
 func demoEmail(id string) string { return id + "@koudijs.dev.test" }
 
 func participantEmail(p *api.Participant) string {
@@ -294,6 +341,16 @@ func participantEmail(p *api.Participant) string {
 // emailPreviewPlaceholder stands in until a name has any usable character. The
 // page's script repeats this literal; changing one means changing both.
 const emailPreviewPlaceholder = "your-name"
+
+// displayPreview is what validName would STORE for this name, shown on the join
+// page so a participant sees the folding before they commit to it rather than
+// afterwards in a Git commit they cannot edit.
+func displayPreview(name string) string {
+	if folded := labelName(name); folded != "" {
+		return folded
+	}
+	return "your name"
+}
 
 func emailPreview(name string) string {
 	id := participantID(name)
@@ -514,13 +571,14 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 
 var page = template.Must(template.New("join").Parse(pageSource))
 
-// previewScript keeps the address on the join page in step with the name box as
+// previewScript keeps the stored NAME and the address on the join page in step
+// with the name box as
 // it is typed. It is the browser half of participantID and must agree with it
 // character for character, including the placeholder and the 40-character cap:
 // the whole point of showing the address is that it is the one the participant
 // will get. No regular expressions and no Unicode tables, so the two halves
 // stay comparable by eye.
-const previewScript = `(function(){var n=document.getElementById("rp-name"),o=document.getElementById("rp-email");if(!n||!o){return}function slug(v){var s=v.normalize("NFKD").toLowerCase(),out="",dash=false,i,c;for(i=0;i<s.length;i++){c=s.charAt(i);if((c>="a"&&c<="z")||(c>="0"&&c<="9")){if(dash&&out.length>0){out+="-"}dash=false;out+=c}else if(c<"\u0300"||c>"\u036f"){dash=true}}if(out.length>40){out=out.slice(0,40)}while(out.length>0&&out.charAt(out.length-1)==="-"){out=out.slice(0,-1)}return out}function show(){var s=slug(n.value);o.textContent=(s||"your-name")+"@koudijs.dev.test"}n.addEventListener("input",show);show()}())`
+const previewScript = `(function(){var n=document.getElementById("rp-name"),o=document.getElementById("rp-email"),d=document.getElementById("rp-display");if(!n||!o){return}function fold(v){var s=v.normalize("NFKD"),out="",dash=false,i,c;for(i=0;i<s.length;i++){c=s.charAt(i);if((c>="a"&&c<="z")||(c>="A"&&c<="Z")||(c>="0"&&c<="9")){if(dash&&out.length>0){out+="-"}dash=false;out+=c}else if(c<"̀"||c>"ͯ"){dash=true}}if(out.length>40){out=out.slice(0,40)}while(out.length>0&&out.charAt(out.length-1)==="-"){out=out.slice(0,-1)}return out}function show(){var f=fold(n.value);if(d){d.textContent=f||"your name"}o.textContent=(f.toLowerCase()||"your-name")+"@koudijs.dev.test"}n.addEventListener("input",show);show()}())`
 
 // previewScriptSource is the CSP source that admits exactly the script above and
 // nothing else. Hashing the same constant the page renders means an edit to the
@@ -531,7 +589,7 @@ var previewScriptSource = func() string {
 	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
 }()
 
-var pageSource = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Join the room</title><style>body{font:18px system-ui;margin:3rem auto;padding:0 1rem;max-width:30rem;background:#f8fafc;color:#172033}input,button{box-sizing:border-box;width:100%;padding:.8rem;margin:.4rem 0 1rem;font:inherit}button{background:#1749a5;color:white;border:0;border-radius:.4rem}label{display:block}small{line-height:1.5}.scanned{background:#e8f0fe;border-radius:.4rem;padding:.6rem .8rem;margin:.4rem 0 1rem}.error{color:#b3261e;font-weight:600}input[aria-invalid=true]{border:2px solid #b3261e;background:#fff5f5}.issued{color:#64748b;font-size:.8em;line-height:1.45;margin:-.7rem 0 1.4rem}.issued .line{display:block;font-size:1.15em;margin-bottom:.35rem}.addr{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#475569;word-break:break-all}</style><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}{{if .Form}}<form method="post" action="/join"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="handoff" value="{{.Handoff}}"><input type="hidden" name="return" value="{{.Return}}">{{if .Enrolled}}<p>You’re already enrolled as <strong>{{.EnrolledName}}</strong>. Continue with the same identity.</p><p class="issued"><span class="line">You are joining as <span class="addr">{{.EnrolledEmail}}</span></span>Room Pass built that address from your name, which is why there was nothing to fill in: it is never a real mailbox.{{with .AttributionNote}} {{.}}{{end}}</p>{{else}}{{if .Code}}<p class="scanned">Room code <strong>{{.Code}}</strong>, from the code you scanned. <input type="hidden" name="code" value="{{.Code}}"></p>{{else}}<label>Room code<input name="code" required maxlength="24" autocomplete="off" autocapitalize="characters" placeholder="BCDFGH"{{if .CodeInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "code"}} autofocus{{end}}></label>{{end}}<label>Display name<input id="rp-name" name="name" required maxlength="64" autocomplete="nickname" value="{{.Name}}"{{if .NameInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "name"}} autofocus{{end}}></label><p class="issued"><span class="line">You will join as <output id="rp-email" for="rp-name" class="addr">{{.Email}}</output></span>Room Pass builds that address from your name, so there is nothing to fill in: it is never a real mailbox.{{with .AttributionNote}} {{.}}{{end}}</p>{{end}}<button>Continue</button></form>{{end}}{{if .Enrolled}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out of this browser</button></form>{{end}}<small>Your name is an unverified label, not a verified identity. It is shown to the application you are joining, together with the address above.</small><script>` + previewScript + `</script></html>`
+var pageSource = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Join the room</title><style>body{font:18px system-ui;margin:3rem auto;padding:0 1rem;max-width:30rem;background:#f8fafc;color:#172033}input,button{box-sizing:border-box;width:100%;padding:.8rem;margin:.4rem 0 1rem;font:inherit}button{background:#1749a5;color:white;border:0;border-radius:.4rem}label{display:block}small{line-height:1.5}.scanned{background:#e8f0fe;border-radius:.4rem;padding:.6rem .8rem;margin:.4rem 0 1rem}.error{color:#b3261e;font-weight:600}input[aria-invalid=true]{border:2px solid #b3261e;background:#fff5f5}.issued{color:#64748b;font-size:.8em;line-height:1.45;margin:-.7rem 0 1.4rem}.issued .line{display:block;font-size:1.15em;margin-bottom:.35rem}.addr{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#475569;word-break:break-all}</style><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}{{if .Form}}<form method="post" action="/join"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="handoff" value="{{.Handoff}}"><input type="hidden" name="return" value="{{.Return}}">{{if .Enrolled}}<p>You’re already enrolled as <strong>{{.EnrolledName}}</strong>. Continue with the same identity.</p><p class="issued"><span class="line">You are joining as <span class="addr">{{.EnrolledEmail}}</span></span>Room Pass built that address from your name, which is why there was nothing to fill in: it is never a real mailbox.{{with .AttributionNote}} {{.}}{{end}}</p>{{else}}{{if .Code}}<p class="scanned">Room code <strong>{{.Code}}</strong>, from the code you scanned. <input type="hidden" name="code" value="{{.Code}}"></p>{{else}}<label>Room code<input name="code" required maxlength="24" autocomplete="off" autocapitalize="characters" placeholder="BCDFGH"{{if .CodeInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "code"}} autofocus{{end}}></label>{{end}}<label>Display name<input id="rp-name" name="name" required maxlength="64" autocomplete="nickname" value="{{.Name}}"{{if .NameInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "name"}} autofocus{{end}}></label><p class="issued"><span class="line">You will appear as <output id="rp-display" for="rp-name"><strong>{{.Display}}</strong></output></span><span class="line">You will join as <output id="rp-email" for="rp-name" class="addr">{{.Email}}</output></span>Room Pass builds both from your name, so there is nothing to fill in: spaces and accents are folded, and the address is never a real mailbox.{{with .AttributionNote}} {{.}}{{end}}</p>{{end}}<button>Continue</button></form>{{end}}{{if .Enrolled}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out of this browser</button></form>{{end}}<small>Your name is an unverified label, not a verified identity. It is shown to the application you are joining, together with the address above.</small><script>` + previewScript + `</script></html>`
 
 func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" && r.Method != "POST" {
@@ -643,7 +701,7 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		// Email is what the script would compute for the name already in the
 		// box, so a browser with script disabled and a form that came back with
 		// a typed name both still show the address that is actually on offer.
-		_ = page.Execute(w, map[string]any{"Title": room.Spec.Title, "AttributionNote": room.Spec.AttributionNote, "Message": message, "Form": form, "CSRF": csrf, "Handoff": handoff, "Return": dest, "Enrolled": enrolled, "EnrolledName": enrolledName, "EnrolledEmail": enrolledEmail, "Code": scanned, "Error": failure, "Name": name, "Email": emailPreview(name), "Focus": focus, "CodeInvalid": field == "code", "NameInvalid": field == "name"})
+		_ = page.Execute(w, map[string]any{"Title": room.Spec.Title, "AttributionNote": room.Spec.AttributionNote, "Message": message, "Form": form, "CSRF": csrf, "Handoff": handoff, "Return": dest, "Enrolled": enrolled, "EnrolledName": enrolledName, "EnrolledEmail": enrolledEmail, "Code": scanned, "Error": failure, "Name": name, "Display": displayPreview(name), "Email": emailPreview(name), "Focus": focus, "CodeInvalid": field == "code", "NameInvalid": field == "name"})
 	}
 	if r.Method == "GET" {
 		render(200, "", "", "")

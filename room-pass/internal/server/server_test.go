@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -680,6 +681,55 @@ func TestParticipantIDFoldsNamesPredictably(t *testing.T) {
 	}
 }
 
+// The pairing the voter app depends on: a submission's object name is built as
+// "<round>-<lowercased display name>", so lowercasing what validName STORES has
+// to reproduce participantID exactly. Anything that makes the two folds diverge
+// -- a different cap, a different combining-mark range, a stray allowed rune --
+// silently points a ballot at a participant who does not exist, so it is
+// asserted over the same corpus the fold itself is tested with.
+func TestLabelNameLowercasesToParticipantID(t *testing.T) {
+	for _, name := range []string{
+		"Ada Demo", "Simon Koudijs", "  Jan-Willem   van der Berg ",
+		"Renée O'Hara", "JOSÉ", "Ångström", "Zoë-Ann  ", "Müller", "ﬁona",
+		"a--b", "--lead--", "N1ck 2", "🎉 Party 🎉", "日本 Taro", "İstanbul",
+		"A very very long display name that goes past the forty character cap",
+	} {
+		if got, want := strings.ToLower(labelName(name)), participantID(name); got != want {
+			t.Errorf("ToLower(labelName(%q)) = %q, want participantID = %q", name, got, want)
+		}
+	}
+}
+
+// What validName returns is what gets stored, so it has to satisfy the CRD
+// pattern on Participant.spec.displayName: a legal Kubernetes label value that
+// is also legal, once lowercased, as the tail of a DNS-1123 object name.
+func TestValidNameStoresAFoldedName(t *testing.T) {
+	legal := regexp.MustCompile(`^[A-Za-z0-9]([-A-Za-z0-9]*[A-Za-z0-9])?$`)
+	for raw, want := range map[string]string{
+		"Ada Lovelace": "Ada-Lovelace",
+		"Renée O'Hara": "Renee-O-Hara",
+		"  --Ada!!  ":  "Ada",
+		"Zoë-Ann":      "Zoe-Ann",
+		"日本 Taro":      "Taro",
+		// 43 raw bytes, inside validName's 64-byte input cap, but folding past
+		// the forty-character identifier cap: the tail is cut, not the name
+		// refused, and no trailing separator survives the cut.
+		"Alexandra Bartholomew Fitzgerald Montgomery": "Alexandra-Bartholomew-Fitzgerald-Montgom",
+	} {
+		got, err := validName(raw)
+		if err != nil {
+			t.Errorf("validName(%q): %v", raw, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("validName(%q) = %q, want %q", raw, got, want)
+		}
+		if !legal.MatchString(got) || len(got) > maxParticipantID {
+			t.Errorf("validName(%q) = %q, which the CRD pattern would refuse", raw, got)
+		}
+	}
+}
+
 // A name that survives every other check but leaves nothing to build an
 // identity from has to be refused at the form, not at the Kubernetes API.
 func TestNamesWithoutUsableCharactersAreRefused(t *testing.T) {
@@ -754,6 +804,29 @@ func TestPreviewScriptIsServedUnderItsOwnCSPHash(t *testing.T) {
 	}
 	if strings.Contains(csp, "script-src 'unsafe-inline'") {
 		t.Error("script-src must name the hash, not fall back to unsafe-inline")
+	}
+}
+
+// The stored name is folded, so the page has to show the fold BEFORE the form is
+// submitted: a participant who types "Ada Lovelace" and is recorded as
+// "Ada-Lovelace" in a Git commit they cannot edit should have seen that coming.
+func TestJoinPagePreviewsTheStoredName(t *testing.T) {
+	s, _ := fixture(t, "http://dex.test")
+	b := newBrowser()
+	body := b.request(s, "GET", "https://demo.test/join", nil).Body.String()
+	if !strings.Contains(body, `id="rp-display"`) {
+		t.Error("the form does not show what name will be stored")
+	}
+	_, rest, _ := strings.Cut(body, `name="csrf" value="`)
+	csrf, _, _ := strings.Cut(rest, `"`)
+	w := b.request(s, "POST", "https://demo.test/join", url.Values{
+		"csrf": {csrf}, "code": {"WRONG"},
+		"name": {"Ada Lovelace"}, "return": {"https://demo.test/app/"},
+	})
+	// Server-rendered, not left to the script: a browser without JavaScript
+	// still has to be told what it is about to be called.
+	if got := w.Body.String(); !strings.Contains(got, "<strong>Ada-Lovelace</strong>") {
+		t.Error("the returned form does not preview the folded name")
 	}
 }
 
