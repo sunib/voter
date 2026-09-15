@@ -1,10 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  currentCsrfToken,
-  currentSession,
-  getSession,
-  logout,
-} from './session'
+import { currentCsrfToken, currentSession, getSession, logout } from './session'
 
 const body = {
   authenticated: true,
@@ -12,6 +7,8 @@ const body = {
   displayName: 'Someone',
   email: 'someone@koudijs.dev.test',
   groups: ['demo:voter-audience'],
+  connector: 'room-pass',
+  canVote: true,
   csrfToken: 'csrf-from-session',
   expiresAt: 0,
   namespace: 'voter',
@@ -89,8 +86,27 @@ describe('logout', () => {
 })
 
 describe('getSession', () => {
+  // canVote is the backend's answer, carried through verbatim. The SPA must not
+  // re-derive it from `connector`: which connector may vote is deployment
+  // configuration, and a browser comparing ids would be a second place to get it
+  // wrong -- which is exactly how a hardcoded "room" once refused every real
+  // participant.
+  it('carries the backend decision about voting', async () => {
+    stubFetch(
+      () =>
+        new Response(
+          JSON.stringify({ ...body, connector: 'github', canVote: false }),
+        ),
+    )
+    const session = await getSession()
+    expect(session?.canVote).toBe(false)
+    expect(session?.connector).toBe('github')
+  })
+
   it('returns null on 401 rather than throwing, and forgets the session', async () => {
-    stubFetch(() => json({ authenticated: false, loginUrl: '/auth/login' }, 401))
+    stubFetch(() =>
+      json({ authenticated: false, loginUrl: '/auth/login' }, 401),
+    )
 
     await expect(getSession()).resolves.toBeNull()
     expect(currentSession()).toBeNull()

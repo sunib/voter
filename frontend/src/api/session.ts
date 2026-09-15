@@ -8,11 +8,16 @@
 export interface Session {
   authenticated: boolean
   username: string
-  /** The Dex connector that authenticated this login: "room" for a participant
-   *  who came through Room Pass, "github" for an operator. Voting is refused
-   *  for anything but "room", so the vote form checks it rather than letting
-   *  someone fill in a ballot and be turned away on submit. */
+  /** The Dex connector that authenticated this login -- "room-pass" for someone
+   *  who came through Room Pass, "github" for an operator. Informational: which
+   *  connector may vote is deployment configuration, so do not compare this
+   *  here. Use canVote. */
   connector: string
+  /** Whether this session may cast a ballot. The BACKEND decides, comparing the
+   *  connector above against its own PARTICIPANT_CONNECTOR_ID, and the vote
+   *  handler applies the same rule -- so a page trusting this can only ever be
+   *  explaining a refusal the server will also make. */
+  canVote: boolean
   displayName: string
   email: string
   groups: string[]

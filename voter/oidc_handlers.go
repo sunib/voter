@@ -52,11 +52,15 @@ func registerOIDCHandlers(mux *http.ServeMux, p *oidcProvider, cfg config, names
 			// claimMappings and became wrong as soon as a second connector
 			// existed. Empty if the review failed.
 			"username": s.KubeUsername,
-			// Which Dex connector authenticated this login. The SPA uses it to
-			// explain up front that voting needs a Room Pass session, rather
-			// than letting an operator fill in a ballot and be refused on
-			// submit.
+			// Which Dex connector authenticated this login, and the decision
+			// that follows from it. The SPA gets the ANSWER, not the inputs:
+			// which connector counts as a participant is deployment
+			// configuration (PARTICIPANT_CONNECTOR_ID), and a browser comparing
+			// ids itself would be a second place to get that wrong. The vote
+			// handler applies the same comparison, so the page can only ever be
+			// explaining a refusal the backend will also make.
 			"connector":   s.Connector,
+			"canVote":     s.Connector == cfg.ParticipantConnectorID,
 			"displayName": s.DisplayName,
 			"email":       s.Email,
 			"groups":      s.Groups,
