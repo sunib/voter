@@ -16,7 +16,14 @@ import { toString as qrToString } from 'qrcode/lib/browser'
 import AppShell from '../components/layout/AppShell.vue'
 import StreamDiagnostics from '../components/layout/StreamDiagnostics.vue'
 import { useLiveResources } from '../api/liveResources'
-import { getAudienceGrant, setAudienceGrant } from '../api/authz'
+import {
+  getAudienceGrant,
+  missingPermissions,
+  setAudienceGrant,
+  ROOM_REQUIREMENTS,
+} from '../api/authz'
+import { useAuthorization } from '../api/useAuthorization'
+import PermissionRequirements from '../components/PermissionRequirements.vue'
 import { setRoundState } from '../api/quiz'
 import { currentSession } from '../api/session'
 import type { KRMObject } from '@configbutler/krm-stream'
@@ -63,6 +70,15 @@ const joinCode = computed(() => theRoom.value?.status?.joinCode?.code ?? '')
 // and the first one in production was exactly that: the shared watch could not
 // read the Room, and calling it a permission problem sent the operator looking
 // for the wrong thing.
+// What this identity is missing for the operator page, from the API server's
+// own answer about its token. The stream's refusal below says THAT you were
+// refused; this says which grant would have made the difference, which is the
+// question anyone actually has.
+const { authz, error: authzError, loading: authzLoading } = useAuthorization()
+const missingForRoom = computed(() =>
+  missingPermissions(authz.value, ROOM_REQUIREMENTS),
+)
+
 const roomDenied = computed(() => room.denied())
 const roomExpired = computed(() => room.expired())
 const roomFaulted = computed(() => room.faulted())
@@ -202,7 +218,36 @@ function signInAsOperator() {
       </p>
     </section>
 
-    <section v-if="roomDenied" class="panel panel--danger">
+    <!-- Self-hiding: renders only when something this page uses is missing.
+         It covers both shapes of problem, which the stream cannot tell apart --
+         a participant who holds none of these, and an operator who can read the
+         room but not hand out the audience grant. In the second case the join
+         code and the rounds below keep working, and only the switch is gone. -->
+    <PermissionRequirements
+      :authz="authz"
+      :loading="authzLoading"
+      :error="authzError"
+      :requirements="ROOM_REQUIREMENTS"
+      title="You are missing permissions for this room"
+      highlight="rooms"
+    >
+      <div class="hero-actions">
+        <button class="button" @click="signInAsOperator">
+          Sign in with GitHub
+        </button>
+        <RouterLink class="text-link" to="/">Back to the quizzes</RouterLink>
+      </div>
+    </PermissionRequirements>
+
+    <!-- Only when the rules review does NOT already explain it. A participant
+         gets the itemised panel above instead of this one; keeping both would
+         tell the same story twice, in red, both times. This still fires in the
+         window before the first review answers, and if the stream and RBAC ever
+         genuinely disagree -- which is worth seeing rather than hiding. -->
+    <section
+      v-if="roomDenied && !missingForRoom.length"
+      class="panel panel--danger"
+    >
       <h2 class="panel-title">You cannot run this room</h2>
       <p class="hero-copy">
         Your identity may read and answer the quizzes, but not read this room.
@@ -252,7 +297,7 @@ function signInAsOperator() {
       <StreamDiagnostics :live="room" :scope="roomScope" :session="session" />
     </section>
 
-    <section v-else class="panel">
+    <section v-else-if="!roomDenied" class="panel">
       <div class="section-heading">
         <h2 class="panel-title">Join code</h2>
         <span

@@ -74,12 +74,23 @@ const wildcardRow = computed(() =>
         >. That is an operator, not a participant.
       </p>
 
+      <!-- Outside the scroll container on purpose: a caption inside it is as
+           wide as the table, so on a phone it scrolls out of view and looks
+           truncated. The <caption> below stays for screen readers, which
+           expect a table to introduce itself. -->
+      <p class="authz__caption">
+        In namespace
+        <code class="inline-code">{{ authz.namespace }}</code
+        >, according to the API server
+      </p>
+
       <div class="authz__scroll">
         <table class="authz__table">
-          <caption class="authz__caption">
-            In namespace
-            <code class="inline-code">{{ authz.namespace }}</code
-            >, according to the API server
+          <caption class="visually-hidden">
+            Permissions in namespace
+            {{
+              authz.namespace
+            }}, as reported by the Kubernetes API server
           </caption>
           <thead>
             <tr>

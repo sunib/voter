@@ -6,36 +6,21 @@ import { formatConflictValue, humanizePath } from '../adminFormatters'
 import { formatMoney, getVoucherUsage } from '../api/coffee'
 import { useLiveCoffeeConfig } from '../api/liveCoffeeConfig'
 import { currentSession } from '../api/session'
-import { allows } from '../api/authz'
+import { ADMIN_REQUIREMENTS } from '../api/authz'
 import { useAuthorization } from '../api/useAuthorization'
 import AdminNav from '../components/admin/AdminNav.vue'
 import AppShell from '../components/layout/AppShell.vue'
-import AuthorizationTable from '../components/AuthorizationTable.vue'
+import PermissionRequirements from '../components/PermissionRequirements.vue'
 import FieldStateMarker from '../components/admin/FieldStateMarker.vue'
 
 type FieldState = 'clean' | 'dirty' | 'conflict'
 type FieldConflict = { previousServer?: unknown; incomingServer: unknown }
 const session = currentSession()!
 
-// Whether this identity may edit the menu, and whether it may still only read
-// it. The answer is the API server's -- a SelfSubjectRulesReview with this
-// browser's token -- and it is POLLED, so the operator granting the room access
-// mid-demo turns this page from read-only to editable without a reload.
-//
-// This drives an EXPLANATION, never a gate. The save button below stays live
-// whatever this says, because the refusal the room should see is a real 403
-// from Kubernetes and not a disabled control. If the two ever disagree, the
-// API server is right and this banner is the thing that is wrong.
+// Polled, so the operator granting the room access mid-demo turns this page
+// from read-only to editable without a reload. What it is compared against is
+// ADMIN_REQUIREMENTS below; PermissionRequirements does the comparing.
 const { authz, error: authzError, loading: authzLoading } = useAuthorization()
-const mayEditMenu = computed(() =>
-  allows(authz.value, 'examples.configbutler.ai', 'coffeeconfigs', 'patch'),
-)
-const mayReadMenu = computed(() =>
-  allows(authz.value, 'examples.configbutler.ai', 'coffeeconfigs', 'get'),
-)
-// Only once the first answer has actually arrived. Announcing a refusal while
-// still asking would put "you cannot do this" in front of someone who can.
-const editingRefused = computed(() => !authzLoading.value && !mayEditMenu.value)
 
 const live = useLiveCoffeeConfig(
   session.namespace,
@@ -372,45 +357,23 @@ onBeforeUnmount(clearAllFlashes)
       </div>
     </section>
 
-    <!-- The refusal, said plainly and BEFORE the form rather than after a
-         failed save. It is not a guess: the table below is the API server's own
-         answer about this token, so the page is explaining a decision that has
-         already been made elsewhere, not making one.
+    <!-- What this page needs, what you hold, and therefore what is missing.
+         The component works it out from the API server's own answer; this
+         screen only declares its requirements, so the page and the Role cannot
+         drift apart in prose.
 
-         The editor still renders and the save button still works. Pressing it
-         produces the real 403, which is the thing worth showing a room -- this
-         panel just means nobody has to discover it by accident. -->
-    <section v-if="editingRefused" class="panel panel--danger" role="alert">
-      <h2 class="panel-title">You may not edit this menu</h2>
-      <p class="hero-copy">
-        Kubernetes grants your identity
-        <code class="inline-code">get</code>,
-        <code class="inline-code">list</code> and
-        <code class="inline-code">watch</code> on
-        <code class="inline-code">coffeeconfigs</code> — but not
-        <code class="inline-code">patch</code>. You can read the menu and watch
-        it change. Saving will be refused by the API server, not by this page.
-      </p>
-      <p v-if="!mayReadMenu" class="hero-copy">
-        You cannot read it either, so the editor below will stay empty.
-      </p>
-      <AuthorizationTable
-        :authz="authz"
-        :loading="authzLoading"
-        :error="authzError"
-        highlight="coffeeconfigs"
-      />
-      <p class="hero-copy">
-        Nothing here needs a new sign-in. If someone grants your group access
-        while you are on this page, the missing column fills in and the save
-        starts working, within a few seconds and without a reload.
-      </p>
-      <div class="hero-actions">
-        <RouterLink class="text-link" to="/me"
-          >See your full identity and permissions</RouterLink
-        >
-      </div>
-    </section>
+         It explains and does not gate: the editor still renders and the save
+         button still works. Pressing it produces the real 403, which is the
+         thing worth showing a room -- this panel just means nobody has to
+         discover it by accident. -->
+    <PermissionRequirements
+      :authz="authz"
+      :loading="authzLoading"
+      :error="authzError"
+      :requirements="ADMIN_REQUIREMENTS"
+      title="You may not edit this menu"
+      highlight="coffeeconfigs"
+    />
 
     <section class="panel" role="status">
       <p>{{ connectionMessage }}</p>

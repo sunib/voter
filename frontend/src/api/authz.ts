@@ -138,3 +138,105 @@ export async function setAudienceGrant(
   }
   return body as AudienceGrant
 }
+
+// --- what a page needs ------------------------------------------------------
+
+/** One thing a page needs to be able to do, and what it is for. */
+export interface Requirement {
+  apiGroup: string
+  resource: string
+  verb: string
+  /** Said in the operator's words, not Kubernetes': "open and close rounds",
+   *  not "patch quizsessions". The verb is already shown beside it. */
+  purpose: string
+}
+
+/** The requirements this identity does NOT hold.
+ *
+ *  Empty while `authz` is null, because "not asked yet" is not "refused" — a
+ *  page that treated the two the same would announce a refusal it had not been
+ *  told about. Callers pair this with the composable's `loading`. */
+export function missingPermissions(
+  authz: Authorization | null,
+  requirements: Requirement[],
+): Requirement[] {
+  if (authz === null) return []
+  return requirements.filter(
+    (r) => !allows(authz, r.apiGroup, r.resource, r.verb),
+  )
+}
+
+const EXAMPLES = 'examples.configbutler.ai'
+const RBAC = 'rbac.authorization.k8s.io'
+const ROOMPASS = 'roompass.configbutler.ai'
+
+/** What the coffee menu editor uses. Declared here rather than described in
+ *  prose on the screen, so the page and the Role cannot drift apart quietly. */
+export const ADMIN_REQUIREMENTS: Requirement[] = [
+  {
+    apiGroup: EXAMPLES,
+    resource: 'coffeeconfigs',
+    verb: 'get',
+    purpose: 'read the menu',
+  },
+  {
+    apiGroup: EXAMPLES,
+    resource: 'coffeeconfigs',
+    verb: 'watch',
+    purpose: "see other people's edits arrive live",
+  },
+  {
+    apiGroup: EXAMPLES,
+    resource: 'coffeeconfigs',
+    verb: 'patch',
+    purpose: 'save a change to the menu',
+  },
+  {
+    apiGroup: 'configbutler.ai',
+    resource: 'commitrequests',
+    verb: 'create',
+    purpose: 'press "save now" to commit without waiting for the window',
+  },
+]
+
+/** What the operator page uses. The join code, the rounds, and the switch that
+ *  widens what the audience may do — three separate grants, and an identity can
+ *  hold some and not others. */
+export const ROOM_REQUIREMENTS: Requirement[] = [
+  {
+    apiGroup: ROOMPASS,
+    resource: 'rooms',
+    verb: 'get',
+    purpose: 'read the room and its rotating join code',
+  },
+  {
+    apiGroup: ROOMPASS,
+    resource: 'rooms',
+    verb: 'watch',
+    purpose: 'follow the code as it rotates, without polling',
+  },
+  {
+    apiGroup: EXAMPLES,
+    resource: 'quizsessions',
+    verb: 'patch',
+    purpose: 'open and close rounds',
+  },
+  {
+    apiGroup: RBAC,
+    resource: 'rolebindings',
+    verb: 'get',
+    purpose: 'see whether the audience may edit the coffee menu',
+  },
+  {
+    apiGroup: RBAC,
+    resource: 'rolebindings',
+    verb: 'create',
+    purpose: 'grant the audience the coffee menu, live',
+  },
+  {
+    apiGroup: RBAC,
+    resource: 'rolebindings',
+    verb: 'delete',
+    purpose: 'take that grant away again',
+  },
+]

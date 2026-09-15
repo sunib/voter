@@ -1530,10 +1530,9 @@ p {
 }
 
 .authz__caption {
-  caption-side: top;
   text-align: left;
   color: rgb(var(--muted));
-  padding-bottom: 0.5rem;
+  margin: 0.8rem 0 0.3rem;
 }
 
 .authz__table th,
@@ -1628,4 +1627,82 @@ p {
 .grant-switch__hint {
   font-size: 0.86rem;
   color: rgb(var(--muted));
+}
+
+/* --- "what you are missing" ----------------------------------------------
+   One row per permission the page uses: a mark, the verb and resource, and
+   what it is for in plain words. Missing rows come first and carry the colour;
+   held rows stay quiet but are still listed, because "3 of 6" only means
+   something if you can see which three. */
+.permission-gap__list {
+  list-style: none;
+  margin: 0.8rem 0;
+  padding: 0;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.permission-gap__row {
+  display: grid;
+  grid-template-columns: 1.2rem minmax(0, 15rem) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.3rem 0.7rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: 10px;
+  background: rgb(var(--line) / 0.05);
+}
+
+.permission-gap__row--missing .permission-gap__mark {
+  color: rgb(var(--danger));
+  font-weight: 700;
+}
+
+.permission-gap__row--held {
+  opacity: 0.72;
+}
+
+.permission-gap__row--held .permission-gap__mark {
+  color: rgb(var(--accent));
+  font-weight: 700;
+}
+
+.permission-gap__what {
+  display: grid;
+  gap: 0.1rem;
+  /* Hug the text. Stretched to the column width the chip reads as an empty
+     input field rather than as a verb. */
+  justify-items: start;
+}
+
+.permission-gap__group {
+  font-size: 0.78rem;
+  color: rgb(var(--muted));
+  overflow-wrap: anywhere;
+}
+
+.permission-gap__purpose {
+  color: rgb(var(--ink));
+  overflow-wrap: anywhere;
+}
+
+.permission-gap__details {
+  margin: 0.6rem 0;
+}
+
+.permission-gap__details summary {
+  cursor: pointer;
+  color: rgb(var(--accent));
+  padding: 0.3rem 0;
+}
+
+@media (max-width: 560px) {
+  .permission-gap__row {
+    grid-template-columns: 1.2rem minmax(0, 1fr);
+  }
+
+  /* The purpose drops under the verb rather than being squeezed into a third
+     column nothing fits in. */
+  .permission-gap__purpose {
+    grid-column: 2;
+  }
 }
