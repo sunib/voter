@@ -79,6 +79,21 @@ const missingForRoom = computed(() =>
   missingPermissions(authz.value, ROOM_REQUIREMENTS),
 )
 
+// Two very different situations wear the same panel, and the headline has to
+// tell them apart. Without `get rooms` there is no operator page at all -- that
+// is the participant, and the demo's own words for it are "You cannot run this
+// room". With the room readable but a grant or two missing, the page mostly
+// works and only some controls are absent; calling that "you cannot run this
+// room" in front of an operator holding a working join code would be wrong.
+const cannotReadRoom = computed(() =>
+  missingForRoom.value.some((r) => r.resource === 'rooms' && r.verb === 'get'),
+)
+const permissionTitle = computed(() =>
+  cannotReadRoom.value
+    ? 'You cannot run this room'
+    : 'Some of this room’s controls are not yours',
+)
+
 const roomDenied = computed(() => room.denied())
 const roomExpired = computed(() => room.expired())
 const roomFaulted = computed(() => room.faulted())
@@ -228,7 +243,7 @@ function signInAsOperator() {
       :loading="authzLoading"
       :error="authzError"
       :requirements="ROOM_REQUIREMENTS"
-      title="You are missing permissions for this room"
+      :title="permissionTitle"
       highlight="rooms"
     >
       <div class="hero-actions">
@@ -245,7 +260,7 @@ function signInAsOperator() {
          window before the first review answers, and if the stream and RBAC ever
          genuinely disagree -- which is worth seeing rather than hiding. -->
     <section
-      v-if="roomDenied && !missingForRoom.length"
+      v-if="roomDenied && !authzLoading && !missingForRoom.length"
       class="panel panel--danger"
     >
       <h2 class="panel-title">You cannot run this room</h2>

@@ -356,12 +356,34 @@ deploy. The application never learned anything — each phone asked Kubernetes
 what it may do and got a different answer than it did ten minutes ago.
 
 The binding is not a Flux resource, deliberately, or Flux would recreate it
-after you switched it off. It is mirrored into `demo1/authorization.yaml`, so
-the grant lands in Git as a commit in your name — show that diff if you have
-time, because "who may do what" arriving as a reviewable file is the argument.
+after you switched it off.
+
+**Show the commit. This is the strongest artifact in the talk**, because it is
+the only place where "who may do what" is a reviewable file with a human's name
+on it. `demo1/authorization.yaml` gains eighteen lines the moment you tick the
+box:
+
+```bash
+git -C <audit-trail> pull
+git -C <audit-trail> log --format=fuller -1 \
+  -- clusters/k8s.koudijs.dev/demo1/authorization.yaml
+git -C <audit-trail> show --format=fuller HEAD
+```
+
+The commit message is
+`chore(demo1): 1 change from github:<you>` with the body
+`- [CREATE] rolebindings/voter-audience-coffee-admin`, **Author** is you and
+**Committer** is the bot — the same split as every vote in demo 1, now applied
+to a permission rather than an answer.
+
+The diff lands directly under the `Role` it references, which is worth pointing
+at: the rules were already in the file and reconciled by Flux, and what you just
+added is the one object that connects them to a group of people.
 
 Switch it back off at the end. Watching a permission be taken away is worth
-fifteen seconds, and it proves the switch was real in both directions.
+fifteen seconds, and it proves the switch was real in both directions — the
+revoke is a clean `+0/-18`, with the document gone from Git rather than
+tombstoned. Verified on 2026-09-15; both directions produce a commit.
 
 ### 5. The coffee edit, and "save now" (4 min)
 
