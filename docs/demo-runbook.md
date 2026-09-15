@@ -181,6 +181,13 @@ check the value survived.
 - [ ] Terminal ready with `kubectl` context on the demo cluster, font size up.
 - [ ] Phone on the lectern, signed in, so you can show a participant's view
       without asking a volunteer to hand you theirs.
+- [ ] **Last look at the audience grant.** `/room` → *Let the room edit the
+      coffee menu* unticked. This is checked twice on purpose: when it is
+      wrongly on, nothing breaks and nothing warns you — demo 1's coffee refusal
+      just quietly does not happen, and demo 2's best beat has nothing to give
+      away. One command settles it:
+      `kubectl -n voter get rolebinding voter-audience-coffee-admin` should say
+      `NotFound`.
 
 ---
 
@@ -233,12 +240,18 @@ refused and then told why.
 Then show it from the other side, in the terminal:
 
 ```bash
-kubectl -n voter auth can-i patch quizsessions \
-  --as=demo:some-subject --as-group=demo:voter-audience     # no
+A="--as=demo:some-subject --as-group=demo:voter-audience --as-group=system:authenticated"
 
-kubectl -n voter auth can-i patch coffeeconfigs \
-  --as=demo:some-subject --as-group=demo:voter-audience     # yes
+kubectl -n voter auth can-i create quizsubmissions $A   # yes  — they may vote
+kubectl -n voter auth can-i patch  quizsessions   $A    # no   — not open a round
+kubectl -n voter auth can-i patch  coffeeconfigs  $A    # no   — not yet
+kubectl -n voter auth can-i delete coffeeconfigs  $A    # no   — not ever
 ```
+
+**The third line says `no` and that is the setup for demo 2.** It used to say
+`yes`; the audience Role lost `patch` on `coffeeconfigs` when the live grant went
+in. Run this block before the talk — if that line answers `yes`, a previous run
+left the grant bound and demo 1's best refusal is silently gone.
 
 The point to land: **the application never decided any of this.** The
 participant's own token went to the API server, RBAC answered, and the app
@@ -249,8 +262,29 @@ setup for demo 2, though you do not say so yet.
 
 Log in with GitHub instead of the room code. You are now `github:<email>` — a
 different namespace of identity, which **cannot** hold demo grants, because the
-API server derives the prefix from the connector. Try to vote: refused. Not
-because you are untrusted, but because you came through a different door.
+API server derives the prefix from the connector. Try to vote: refused.
+
+**Be careful how you say this one, because it is the one refusal in demo 1 that
+is NOT Kubernetes'.** The vote handler checks the Dex connector and returns its
+own 403; your operator identity is bound to `cluster-admin`, so the API server
+has no objection at all to the same write made with `kubectl`. It is entry 4 of
+[deliberate-simplifications.md](deliberate-simplifications.md), and the reason
+is mundane: an operator's GitHub profile name has never been folded by Room
+Pass, usually contains a space, and would be refused as a label value with a 422
+nobody in the room could read.
+
+Say that out loud rather than letting the room assume RBAC did it — in a segment
+whose whole claim is "the application never decided any of this", one refusal
+that *is* the application's needs naming. It is a better beat honestly told:
+
+> The app has a rule here and Kubernetes has a different one. Watch — the app
+> says no in the browser, and then I do exactly the same thing with `kubectl`
+> and it works, because I am cluster-admin. Which is worth knowing about RBAC:
+> it only ever *adds*. There is no rule you can write that takes something away
+> from an administrator. If you want that, you need a different layer.
+
+If you would rather not open that door mid-demo, skip this beat entirely. It is
+optional, and it costs you the two minutes the closing checklist wants back.
 
 ---
 
@@ -590,3 +624,15 @@ spend it in the first thirty-eight:
 - Round two's `confidence` question ("How readable was the mirror on screen?")
   is scored 0–10 by a room that has just watched demo 2. That is a live audience
   metric for the talk itself — consider showing it during the closing checklist.
+- **A third layer: admission.** Demo 1 shows authentication and RBAC, and the
+  interloper beat runs straight into RBAC's one structural limit — it is
+  additive, so nothing can be subtracted from `cluster-admin`. A
+  `ValidatingAdmissionPolicy` is the layer that *can* say no to an
+  administrator, because admission runs after authorization and inspects the
+  object as well as the caller. The cluster has none today
+  (`kubectl get validatingadmissionpolicies` → none), which is why the vote gate
+  lives in the application. Making it real would turn a documented simplification
+  into a third demonstrable mechanism — and "here are three different ways to
+  authorize someone, and here is what each one cannot do" is a better closing
+  than two. Not built; see the trade-offs discussed before building it, because
+  the obvious version breaks "Casting your own answers" above.
