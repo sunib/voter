@@ -2,9 +2,9 @@
 
 Voter is a coffee and voting demo consuming public infrastructure components. Room Pass
 is an independent enrollment service being prepared for extraction. krm-stream owns
-generic live-resource behavior. The **krm-stream 0.4.0 integration with shared streams
-is deployed as `85de0c0`**, verified on **2026-09-11**. Remaining targets are tracked
-in [PLAN.md](PLAN.md).
+generic live-resource behavior. The krm-stream 0.4.0 integration with shared streams
+is deployed; the running revision is **`d9f3d93`**, verified on **2026-09-15**.
+Remaining targets are tracked in [PLAN.md](PLAN.md).
 
 ## Ownership
 
@@ -15,7 +15,7 @@ in [PLAN.md](PLAN.md).
 | krm-stream | Kubernetes watch-to-SSE protocol, shared-watch cache/fan-out, projections, snapshots, reconciliation, draft/conflicts, patch generation, generic recovery and optional framework adapters | No coffee semantics, application credentials, login UI or Git commit workflow |
 | Room Pass | Room lifecycle, rotating codes, browser enrollment, stable participant identity, bound handoff to Dex | No application grants or token signing; no Voter dependency |
 | Dex | OAuth 2.0/OIDC authorization server and OpenID Provider, connectors, codes and signed tokens | Trusts Room Pass assertions only through a protected authproxy integration |
-| Kubernetes | Resource storage, token authentication, RBAC, admission and audit | Identity does not itself grant permission |
+| Kubernetes | Resource storage, token authentication, RBAC and audit | Identity does not itself grant permission. Admission is Kubernetes' too, but **this cluster runs no policy or webhook**, which is why one refusal in the demo is the application's — see [talk-checklist.md](docs/talk-checklist.md) |
 | ConfigButler | Persisting accepted configuration changes to Git, commit status/history | Request acceptance is distinct from an observed commit |
 | Platform GitOps repository | Installed versions, routes, CRDs, RBAC, issuer configuration and deployment | Live application changes arrive through Flux |
 
@@ -68,12 +68,17 @@ sequenceDiagram
 
 ## The operator page
 
-`/room` is the presenter's own screen: the Room's rotating join code as a QR, and
-open/close for each round. It holds no admin check. The page opens the same
+`/room` is the presenter's own screen: the Room's rotating join code as a QR,
+open/close for each round, and a switch that widens what the audience may do.
+It holds no admin check. The page opens the same
 watches any signed-in browser may ask for, carrying that browser's own token, and
 renders what Kubernetes is willing to send — a participant's RBAC grants nothing
-on rooms, so a participant sees a refusal and no code. `/admin` stays public on
-purpose: editing the CoffeeConfig is a thing the audience is meant to do.
+on rooms, so a participant sees a refusal and no code. `/admin` stays reachable by
+everyone on purpose, but what it offers depends on the caller: the audience may
+read the CoffeeConfig and watch it change, and may not save until an operator
+grants it. The page explains the gap from `/auth/rules` and still lets the save
+be attempted, so the refusal the room sees is a real 403 rather than a disabled
+button.
 
 Two locks guard the stream. `scopePolicy` in `participant_stream.go` says which
 KINDS may be streamed at all and `streamAllowlist` says which objects of them, so
@@ -81,6 +86,16 @@ a verb granted to the audience for some other reason cannot by itself become a
 new stream; RBAC then decides per subscriber. Opening a round patches the
 QuizSession with the caller's own token, which is why the refusal a participant
 sees is the API server's own.
+
+The audience switch is the same idea applied to permission itself. It creates or
+deletes one RoleBinding with the operator's own token, binding the static
+`voter-audience-coffee-admin` Role — which lives in Git and is reconciled — to
+the room's group. The **binding is deliberately not in the Flux kustomization**:
+Flux would recreate whatever the switch deletes, and the grant would stop being
+revocable. gitops-reverser mirrors it to the audit trail instead, so widening
+what a room may do arrives in Git as a reviewable diff authored by whoever did
+it. Every phone discovers the change by polling `/auth/rules`; nothing is pushed
+and no session is re-established.
 
 Operators reach `/room` through `/auth/login?connector=github`, allowlisted by
 `OIDC_CONNECTOR_CHOICES`. The default path is unchanged and still sends a room
@@ -105,6 +120,68 @@ Remaining coupling includes the module's Voter repository path, parent CI/tasks,
 new Voter browser fixture, and demo-specific group/email assumptions. Extraction
 preserves the API group, object UIDs, cookie keys, connector ID and subject mapping;
 a new repository must not unexpectedly create new identities.
+
+## HTTP endpoints
+
+Every route the Go binary serves. `Session` means the handler is wrapped in
+`requireParticipant`: a valid application cookie is required, and any method
+other than GET/HEAD/OPTIONS must also carry the CSRF token. `/auth/logout` is
+the one deliberate exception and its row says why. No route accepts a
+browser-asserted identity, and no route falls back to the ServiceAccount for a
+participant's write — a request that cannot be made with the caller's own token
+fails instead.
+
+### Identity
+
+| Endpoint | Methods | Session | Why it exists |
+| --- | --- | --- | --- |
+| `/auth/login` | GET | — | Starts the OIDC transaction with PKCE. `?connector=` picks a Dex connector from `OIDC_CONNECTOR_CHOICES`; `?code=` and `?return=` carry a scanned QR's room code and destination |
+| `/auth/callback` | GET | — | Completes the exchange, validates the token, mints the application session |
+| `/auth/session` | GET | — | The **only** way the SPA learns who it is. Identity metadata and a CSRF token; never the ID token. 401 with a JSON body rather than a redirect, because a redirect inside `fetch()` is how login loops get built |
+| `/auth/whoami` | GET | Session | A fresh `SelfSubjectReview` with the reader's own token, as YAML. There is no stored login object to show instead — a Kubernetes identity is derived per request |
+| `/auth/rules` | GET | Session | A `SelfSubjectRulesReview` in the app's namespace: "what may I do?". `?as=yaml` returns the raw review. Needs no grant of its own — `system:basic-user` gives it to `system:authenticated` |
+| `/auth/logout` | POST | CSRF only | Clears this app's cookie only — not the Dex session, not Room Pass enrolment, not the issued token. Deliberately **not** session-guarded: it verifies CSRF when a valid session exists and otherwise just clears the cookie and returns 204, so someone holding an expired cookie can still get rid of it |
+
+### Coffee
+
+| Endpoint | Methods | Session | Why it exists |
+| --- | --- | --- | --- |
+| `/public/storefront` | GET | Session | The menu as the shop renders it, priced by the server |
+| `/public/vouchers` | GET | Session | Redemption counts. Process-local, and the page says so |
+| `/public/orders` | GET, POST | Session | POST places an order and prices it server-side; GET returns the bounded in-memory feed, placements and refusals both |
+| `/public/orders/stream` | GET | Session | Hand-written SSE for that feed. Not the krm-stream gateway: there is no watch to share and no object to authorize against |
+| `/public/coffeeconfig` | GET, PATCH | Session | The editor's read and its conditional write. PATCH carries UID plus `resourceVersion` as a precondition and only `spec` is editable; a stale base is a real 409 |
+| `/public/stream` | GET | Session | The projected krm-stream SSE for the one configured CoffeeConfig. Two locks: `scopePolicy` says which kinds may stream at all, `streamAllowlist` which objects — then RBAC decides per subscriber |
+
+### Voting
+
+| Endpoint | Methods | Session | Why it exists |
+| --- | --- | --- | --- |
+| `/public/rounds` | GET | Session | Lists the rounds this identity may read |
+| `/public/rounds/{name}` | GET, POST | Session | GET returns a fresh round plus a `voted` flag so a returning voter sees the outcome rather than a form they cannot submit. POST casts the ballot |
+| `/public/rounds/{name}/state` | POST | Session | Opens or closes a round, patched with the caller's own token — which is why a participant's refusal here is the API server's |
+| `/public/rounds/{name}/results` | GET | Session | Counts, numeric averages and text answers, without QuizSubmission metadata |
+
+### Authorization control
+
+| Endpoint | Methods | Session | Why it exists |
+| --- | --- | --- | --- |
+| `/public/audience/coffee-admin` | GET, PUT | Session | Reads and moves the audience's coffee grant by creating or deleting one RoleBinding, with the caller's own token. Reading it needs `get` on `rolebindings`, which the audience does not hold — so a participant never sees the switch, and Kubernetes decided that, not the page |
+
+### Unauthenticated
+
+| Endpoint | Methods | Session | Why it exists |
+| --- | --- | --- | --- |
+| `/healthz` | GET | — | Liveness. No dependencies, so it cannot fail because Kubernetes is unreachable |
+| `/public/build-info` | GET | — | Commit, build date and dirty flag, so a deployment can be verified from outside the cluster |
+| `/metrics` | GET | — | Served on a **separate listener** (`METRICS_ADDRESS`) and explicitly 404'd on the public mux, so the application ingress can never route to it |
+| `/` | GET | — | The built SPA with an SPA fallback. An unknown path returns the app, not a 404 — which is why probing an API path that does not exist appears to "work" |
+
+Two endpoints deliberately have no sibling. There is no update, patch or delete
+for a submitted answer: `QuizSubmission` is create-only through Voter and the
+participant's RBAC matches. And there is no endpoint that returns a CoffeeConfig
+object from a save — saves return a receipt, because a bare 204 cannot carry
+partial success and the watch echo already owns resource updates.
 
 ## Trust boundaries
 
@@ -332,11 +409,9 @@ checkpoint continuation is a separate 0006 follow-up, not a second Voter watch e
 
 ## Coffee and Git responsibilities
 
-Voter serves the SPA and backend in one image. Current coffee endpoints are
-`GET /public/storefront`, `POST /public/orders`, `GET /public/vouchers`,
-`GET,PATCH /public/coffeeconfig`, `GET /public/stream`, and the order feed:
-`GET /public/orders` plus `GET /public/orders/stream`. Pricing and voucher enforcement
-remain server-authoritative. Changing maximumUsage affects subsequent orders.
+Voter serves the SPA and backend in one image. Pricing and voucher enforcement
+remain server-authoritative. Changing `maximumUsage` affects subsequent orders.
+The full endpoint list is below.
 
 Orders are deliberately NOT Kubernetes objects, and the demo says so out loud on
 `/admin/orders`: they are an append-only ring buffer in the process, fanned out
@@ -352,10 +427,17 @@ replica until shared atomic persistence exists. A resource watch is neither orde
 storage nor change history. The config-change history screen remains separate work.
 
 ConfigButler should own durable Git history and commit completion. The UI needs three
-separate facts: Kubernetes saved, CommitRequest accepted, Git commit observed. The deployed receipt uses `commitRequested` for request acceptance and does not
-claim an observed commit. The previous revision called that flag `committed`.
-The previous cluster verification found no CommitRequest CRD; installing it and proving
-the Git payoff remain platform work.
+separate facts: Kubernetes saved, CommitRequest accepted, Git commit observed. The
+deployed receipt uses `commitRequested` for request acceptance and does not claim an
+observed commit; an earlier revision called that flag `committed`, which claimed more
+than it could back.
+
+The CommitRequest CRD was installed on 2026-09-11 and gitops-reverser is running, so
+the Git payoff is no longer hypothetical: one GitProvider and three GitTargets mirror
+the namespace into `ConfigButler/k8s-audit-trail`, and both a participant's vote and an
+operator's RoleBinding commit with the human as Author and the bot as Committer.
+**The third fact is still missing.** Nothing observes commit completion and no commit
+reference is shown back to the user, so the UI distinguishes two of the three states.
 
 ## Release and deployment boundaries
 
@@ -376,49 +458,48 @@ image references in Git, wait for Flux, then verify deployed digests and the bro
 journey. Roll back by reverting the Git change. Do not mutate live application
 workloads with kubectl; disposable fixtures use explicit local kubeconfigs.
 
-On **2026-09-11**, CI for `d7d38ba` passed all jobs, including browser tests and both
-image publications. GitOps commit `5d3d176772587193571d557f93547839478a4b6b` deployed
-The first rollout used Voter and Room Pass `sha-d7d38ba` with explicit digest pins. At
-that verification, Flux `voter-demo` was Ready
-at that revision; both running pod image IDs match the published artifacts.
-The public build-info endpoint reports `d7d38ba` with a clean build, and a Chromium
-smoke check reached the Room Pass enrollment form through the public application.
-The user also confirmed the deployed app works. Authenticated editing was exercised
-in the disposable fixture; the production smoke test stopped at login.
+**Three objects are exceptions, and editing them in Git does nothing.**
+`CoffeeConfig/demo-coffee` and both `QuizSession`s carry
+`kustomize.toolkit.fluxcd.io/ssa: IfNotPresent`, so Flux creates them once and
+never applies them again — otherwise the room's voucher edit would be reverted
+within the reconcile interval, and a round opened on stage would close itself.
+Re-seeding means deleting the object. The runtime RoleBinding behind the audience
+switch is a fourth exception in the other direction: not in the kustomization at
+all, because Flux would recreate it. Both are explained in the runbook's "Two
+repositories".
 
 The library-store migration, conditional saves and shared streaming are all deployed;
 an authenticated production smoke test of the shared stream is still outstanding.
 [PLAN.md](PLAN.md) records release digests, rollback,
 remaining acceptance criteria and platform follow-up. Design history belongs in Git.
 
-## Earlier voting release verification
-
-Voter `14dffd4` was deployed through platform GitOps commit `ef45717`, pinned to
-`sha256:9f82a3157b7c160506f6332aaaae6ae9d538a5fb8f218491d87ea505d8b23e89`.
-Room Pass remains on `d7d38ba`. Full CI run `34584101156` passed. Flux applied the
-GitOps revision, the ready pod uses the matching digest, and public build metadata
-reports the new revision. The sample `demo-round-1` is live; production `/vote`
-reaches the enrollment form. Authenticated voting was tested with two independent
-browser identities in the disposable fixture; no production QuizSubmissions were created.
-
 ## Current release verification
 
-[CI run 34593086461](https://github.com/sunib/voter/actions/runs/34593086461) passed
-all jobs for Voter `55e287d`. Platform GitOps commit `59fc828` deployed image
-`ghcr.io/sunib/voter:sha-55e287d@sha256:ccffb1ca260f78e46af1316e639faabea73b93a160b056a0938d86dd0ce4d186`.
-Flux reports Ready at that revision, the rollout completed, and the ready pod image ID
-matches the published digest. Public build metadata reports `55e287d` and `gitDirty: 0`.
-Room Pass remains on `d7d38ba` because its source was unchanged.
+Verified **2026-09-15**. Older verifications are deleted rather than kept: this
+section records what is running now, and the history is in Git.
 
-The live sample quiz, “How do you change Kubernetes configuration today?”, is available
-at [demo-round-1](https://demo.koudijs.dev/answer/demo-round-1), with
-[results](https://demo.koudijs.dev/answer/demo-round-1/results) and the
-[coffee editor](https://demo.koudijs.dev/admin) using the same room login.
-Room `demo` is open through **2026-09-30 18:00 UTC** at this verification.
-Chromium checked all three routes through the room-code form without page errors.
-Authenticated editing and voting were covered in the fixture and CI; this deployment
-check created no production QuizSubmissions. Revert platform commit `59fc828` to restore
-the previous Voter image while retaining the quiz.
+| | |
+| --- | --- |
+| Voter | `ghcr.io/sunib/voter:sha-d9f3d93@sha256:b978fba4…`, digest-pinned |
+| Room Pass | `sha-359c09b`, unchanged because its source was |
+| CI | run [34966818357](https://github.com/sunib/voter/actions/runs/34966818357), all seven jobs |
+| GitOps | `ConfigButler/k8s` commit `0a10ba8`; Flux `voter-demo` Ready at that revision |
+| Build metadata | `/public/build-info` reports `d9f3d93` with `gitDirty: 0` |
+
+The rounds are `demo1-round-2026-09-15` (live) and `demo2-round-2026-09-15`
+(closed); both are seeded by GitOps and then left alone — see the runbook's
+"Two repositories". Room `demo` is open through **2026-09-30 18:00 UTC**.
+
+The mirror is verified in both directions, which is the claim worth re-testing
+rather than assuming: a participant's vote reaches
+`clusters/k8s.koudijs.dev/demo1/submissions.yaml`, and an operator's audience
+grant reaches `demo1/authorization.yaml` as `+18` lines on create and a clean
+`+0/-18` on revoke, each authored by the human and committed by the bot.
+
+The 16-case browser suite was run against the disposable fixture for this
+revision. Authenticated editing and voting are covered there and in CI; this
+deployment check created no production QuizSubmissions. Roll back by reverting
+the GitOps commit.
 
 ## Voting rounds
 
