@@ -1,0 +1,143 @@
+# demo1-b: three ballots cast with kubectl, landing in ONE commit.
+#
+# The app refuses to let an operator vote -- voting requires a Room Pass
+# session, and the operator arrived through the github connector. This file is
+# the answer to "then it is not fair that I cannot vote": the operator is
+# cluster-admin, so the API server has no objection at all. The refusal is the
+# application's rule, not Kubernetes', and going around it out in the open is
+# the honest way to show where that line sits.
+#
+# What it demonstrates beyond the votes themselves: the CommitRequest at the
+# bottom closes gitops-reverser's open window early, so all three documents
+# land in a SINGLE commit with a message chosen here, instead of trickling out
+# over three separate 5-second windows.
+#
+# ---------------------------------------------------------------------------
+# HOW TO RUN IT
+#
+#   kubectl create -f voter/config/demo1-b.yaml
+#
+# `create`, not `apply`: the CommitRequest uses generateName, and a vote that
+# already exists SHOULD fail rather than be silently overwritten.
+#
+# To run it again (rehearsal), clear the three votes first. With prune: Always
+# on both targets this also writes their removal to Git, which is worth seeing
+# once but not on stage:
+#
+#   kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=demo1-round-2026-09-15
+#
+# Keep the round name below in step with the live round. It appears THREE
+# times per document -- in metadata.name, in spec.sessionRef.name and in the
+# round label -- and a label mismatch is silent: the vote is created, but the
+# results page selects on the label and will not count it.
+# ---------------------------------------------------------------------------
+apiVersion: examples.configbutler.ai/v1alpha1
+kind: QuizSubmission
+metadata:
+  # <round>-<participant-id>, exactly the shape the app now generates: the
+  # round name, then the display name lowercased. Readable in Lens as it
+  # streams in, and still unique per (round, identity) -- Room Pass makes the
+  # participant id the identity, so two ballots cannot share one.
+  name: demo1-round-2026-09-15-ada-lovelace
+  namespace: voter
+  labels:
+    # ONE round label, doing two jobs: the results page selects on it, and
+    # demo1/demo2 use it to decide where the document is filed. It is the round
+    # NAME -- the same ns/name reference spec.sessionRef already makes -- which
+    # is why nothing here has to look up a UID first.
+    voter.configbutler.ai/round: demo1-round-2026-09-15
+    # Placement input for demo2 -- becomes results/Ada-Lovelace.yaml.
+    #
+    # Note the honest asymmetry: this label decides the FILENAME, while the
+    # commit AUTHOR is whoever ran kubectl. The mirror never claims Ada pushed
+    # anything; it files her ballot under her name and records who submitted it.
+    voter.configbutler.ai/submitter: Ada-Lovelace
+spec:
+  sessionRef:
+    group: examples.configbutler.ai
+    kind: QuizSession
+    name: demo1-round-2026-09-15
+  submittedAt: "2026-09-15T09:32:00Z"
+  answers:
+    - questionId: approach
+      singleChoice: GitOps
+    - questionId: feedback
+      freeText: Seeing the diff before it lands, not after.
+---
+apiVersion: examples.configbutler.ai/v1alpha1
+kind: QuizSubmission
+metadata:
+  name: demo1-round-2026-09-15-grace-hopper
+  namespace: voter
+  labels:
+    voter.configbutler.ai/round: demo1-round-2026-09-15
+    voter.configbutler.ai/submitter: Grace-Hopper
+spec:
+  sessionRef:
+    group: examples.configbutler.ai
+    kind: QuizSession
+    name: demo1-round-2026-09-15
+  submittedAt: "2026-09-15T09:32:20Z"
+  answers:
+    - questionId: approach
+      singleChoice: A mix of both
+    - questionId: feedback
+      freeText: A way to tell an emergency kubectl from a deliberate change.
+---
+apiVersion: examples.configbutler.ai/v1alpha1
+kind: QuizSubmission
+metadata:
+  name: demo1-round-2026-09-15-simon-koudijs
+  namespace: voter
+  labels:
+    voter.configbutler.ai/round: demo1-round-2026-09-15
+    voter.configbutler.ai/submitter: Simon-Koudijs
+spec:
+  sessionRef:
+    group: examples.configbutler.ai
+    kind: QuizSession
+    name: demo1-round-2026-09-15
+  submittedAt: "2026-09-15T09:32:40Z"
+  answers:
+    # Answering "kubectl or a cluster UI" by using kubectl is the joke, and it
+    # is also true.
+    - questionId: approach
+      singleChoice: kubectl or a cluster UI
+    - questionId: feedback
+      freeText: I want the cluster to write down what I did, so I do not have to.
+---
+# The window-closer. Without it these three writes still reach Git, but on
+# gitops-reverser's own 5s silence timer and under the target's liveTemplate.
+# With it they are one commit carrying the message below, verbatim.
+apiVersion: configbutler.ai/v1alpha3
+kind: CommitRequest
+metadata:
+  # generateName, so a rehearsal never collides with a finished request. This
+  # is why the file is created rather than applied.
+  generateName: demo1-b-
+  namespace: voter
+spec:
+  # demo1 only. QuizSubmissions are watched by BOTH demo targets, and a
+  # CommitRequest finalizes ONE target's window -- so demo1 commits now and
+  # demo2 follows on its own 5s timer a moment later. That stagger is visible
+  # on screen; add a second CommitRequest naming demo2 if you would rather the
+  # two folders move together.
+  gitTargetRef:
+    name: demo1
+  # The request is created in the same breath as the writes above, so it may
+  # arrive before their window is open. This is the grace it will wait --
+  # without it, an immediate finalize can resolve as NoWindowInGrace and the
+  # message below is quietly lost while the writes commit on the normal timer.
+  closeDelaySeconds: 15
+  # Used verbatim, not as a template: {{.Count}} and friends would appear
+  # literally, so this says what it means in plain words.
+  message: |-
+    vote: three ballots from the back of the room
+
+    Cast with kubectl straight against the API server, because the join page
+    only accepts a Room Pass session and the operator did not come through the
+    door with everyone else.
+
+    One commit rather than three: a CommitRequest closed the window as soon as
+    the three writes were in, instead of letting each one wait out its own
+    five seconds of silence.

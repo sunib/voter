@@ -31,6 +31,14 @@ running gitops-reverser has taught us is kept the same way, from operating it
 rather than consuming it, in
 [docs/gitops-reverser-feedback.md](docs/gitops-reverser-feedback.md).
 
+This is a demo that has to be read from the back of a room, so some robustness
+was traded away for a model an audience can hold. The places where we looked at a
+real failure mode and chose not to defend against it -- what keeps each gap
+closed in practice, and how to recover if it bites -- are written down in
+[docs/deliberate-simplifications.md](docs/deliberate-simplifications.md). A guard
+that is deleted without an entry there is indistinguishable from one nobody
+noticed was missing.
+
 ## Identity flow and Room Pass's product boundary
 
 ```mermaid
