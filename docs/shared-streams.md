@@ -158,9 +158,10 @@ production. Keep the production capacity gate in PLAN open until that evidence e
 Room Pass extraction, k8s-front prototyping, CI artifact promotion and ConfigButler
 commit observation remain separate changes.
 
-The [upstream request](krm-stream-shared-host-request.md) proposes moving generic
-HTTP deadline handling, lifecycle observations and identity-resolution helpers into
-krm-stream. It is a discussion document, not a new release dependency.
+The upstream request that proposed moving generic HTTP deadline handling and
+lifecycle observations into krm-stream was granted: 0.4.0 ships both, and Voter
+deleted its local versions when it adopted them. Identity-resolution helpers
+stayed here.
 
 ## Review follow-up and pending upstream release
 

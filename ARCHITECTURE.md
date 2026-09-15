@@ -2,7 +2,7 @@
 
 Voter is a coffee and voting demo consuming public infrastructure components. Room Pass
 is an independent enrollment service being prepared for extraction. krm-stream owns
-generic live-resource behavior. The **krm-stream 0.3.0 integration with shared streams
+generic live-resource behavior. The **krm-stream 0.4.0 integration with shared streams
 is deployed as `85de0c0`**, verified on **2026-09-11**. Remaining targets are tracked
 in [PLAN.md](PLAN.md).
 
@@ -19,7 +19,9 @@ in [PLAN.md](PLAN.md).
 | ConfigButler | Persisting accepted configuration changes to Git, commit status/history | Request acceptance is distinct from an observed commit |
 | Platform GitOps repository | Installed versions, routes, CRDs, RBAC, issuer configuration and deployment | Live application changes arrive through Flux |
 
-0.3.0 exports managed recovery and save-capture/reconciliation primitives. The Vue
+0.4.0 exports managed recovery and save-capture/reconciliation primitives,
+plus the bounded HTTP delivery and stream lifecycle observations Voter once
+hand-rolled. The Vue
 binding and conditional-save controller are tested, copyable examples, not package
 exports. Voter may own thin binding/request glue while the core owns reconciliation.
 Proposal 0005 is discussion; 0006 sequences follow-ups. Neither makes upstream watch
@@ -168,7 +170,7 @@ Application mutations require CSRF proof. Logout clears the Voter session, not R
 Pass enrollment or an issued Dex token. Stopping a Room blocks new enrollment/assertions;
 it does not revoke existing tokens. Open Kubernetes watches are not immediately
 re-authorized on every event. The deployed implementation bounds each subscription by session/token
-expiry. The new shared-stream integration uses 0.3.0's authorization checks at snapshot cycles plus a 30-second
+expiry. The new shared-stream integration uses 0.4.0's authorization checks at snapshot cycles plus a 30-second
 `ReauthorizationInterval` and five-second `ReauthorizationTimeout`. Timed checks pause
 that subscriber's delivery; denial, timeout or changed projection policy terminates it.
 The target withdrawal-to-termination bound is 60 seconds, including check and sink
@@ -186,7 +188,7 @@ leaves, not when the first attendee's session expires.
 ## Live editing: implementation versus target
 
 Voter pins krm-stream gateway/kube and npm `@configbutler/krm-stream`
-to **0.3.0**, used through `useLiveCoffeeConfig`. Production revision `85de0c0`
+to **0.4.0**, used through `useLiveCoffeeConfig`. Production revision `85de0c0`
 enables the library's documented
 [SharedBackend integration](https://github.com/ConfigButler/krm-stream/blob/main/docs/auth.md#two-things-that-are-easy-to-confuse).
 One process-wide backend instance maintains one upstream watch per scope. The first
@@ -278,7 +280,7 @@ Full projection can suppress bookkeeping-only changes; spec projection also supp
 status changes. An accepted GET refreshes the base, but subsequent churn can reject a
 new save again. Keep conditional merge patch as Voter's baseline. SSA ownership is a
 different host policy, not per-user stale-read protection or a drop-in use of these helpers.
-0.3.0 provides the client primitives; Voter retains mandatory precondition enforcement
+0.4.0 provides the client primitives; Voter retains mandatory precondition enforcement
 and actual Kubernetes mutation. A client helper cannot enforce
 policy against callers that bypass it.
 
@@ -297,7 +299,7 @@ example's `saved` outcome means Kubernetes accepted the write; pending synchroni
 and Git receipt states remain separate. Never automatically retry a stale payload.
 `takeTheirs` resolves a conflict; a reviewed keep-local action can resolve then reapply
 the chosen value as a new store edit, with no intervening await and boundary tests.
-There is no exported keep-local primitive in 0.3.0.
+There is still no exported keep-local primitive in 0.4.0.
 
 Deletion is an exception to draft retention: store pruning removes the old draft.
 Offer recovery of unsaved text from a host-owned in-memory copy captured before pruning,
@@ -307,7 +309,7 @@ Cross-login draft restoration is not implemented: navigating away discards the c
 A reconnect within the mounted editor preserves its draft; reauthentication navigation
 needs a separate identity-bound recovery flow before claiming preservation across login.
 
-0.3.0 reconnects with snapshots, not downstream replay. Routine upstream watch closure
+0.4.0 reconnects with snapshots, not downstream replay. Routine upstream watch closure
 also resnapshots subscribers; a warm shared cache saves watches, not browser bytes.
 Measure resets by cause and snapshot traffic during the 200-attendee rehearsal. Upstream
 checkpoint continuation is a separate 0006 follow-up, not a second Voter watch engine.
@@ -337,7 +339,7 @@ Room Pass will publish its own versioned image/manifests and maintain its own mi
 OIDC fixture. Voter will test against those releases. Voter-specific CoffeeConfig and
 live-editor tests move out of Room Pass before its extraction is complete. Generic
 merge/transport regression suites live in krm-stream; application tests prove the
-integration, authorization and user-visible race handling. Adopt published 0.3.0
+integration, authorization and user-visible race handling. Voter is on published 0.4.0
 npm and Go artifacts; the duplicate editor has been replaced using its existing APIs.
 Both Go modules require Go 1.27.1; validate the consuming module, CI and image builds
 outside upstream's workspace. Main consumes published packages and production consumes

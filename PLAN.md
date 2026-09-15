@@ -2,11 +2,16 @@
 
 This is the implementation plan, not a claim that the target design is deployed.
 [ARCHITECTURE.md](ARCHITECTURE.md) defines the boundaries and target data flow.
-Reviewed against krm-stream **0.3.0** and upstream main `2154f9d` on **2026-09-11**;
-the released primitives are integrated and deployed as described below.
-Updated **2026-09-11** after verifying deployed Voter revision `85de0c0` and GitOps
-revision `2d770a1`; Room Pass remains on `d7d38ba`. Historical investigations remain in Git; this file keeps actionable
-work and operational facts that still matter.
+
+Voter is on krm-stream **0.4.0**; the released primitives are integrated and
+deployed. Cluster facts were last verified **2026-09-15**, when the demo moved to
+three GitTargets and the voter/room-pass images to `sha-359c09b`.
+
+**This file keeps only actionable work.** A section is deleted when its last item
+closes, and completed increments live in Git history rather than here -- which is
+why the numbering starts at 2. What was removed: the shared-streams, first
+implementation and earlier voting increments, the verified-release notes, and
+item 1, adopting the released integration primitives.
 
 ## Outcome
 
@@ -25,224 +30,6 @@ Room Pass becomes an independently released room-enrollment service integrated w
 Dex. Voter keeps coffee and voting behavior, its application session, narrow authorized endpoints
 and presentation. Reducing code means deleting duplicate responsibilities, not moving
 an entire demo into a general-purpose package.
-
-## Deployed increment: shared streams
-
-Deployed on **2026-09-11** as Voter `85de0c0`, promoted through GitOps `2d770a1`.
-
-- One process-wide library `SharedBackend`; participant SelfSubjectReview identity
-  and list/watch SARs before cache disclosure, with 30-second rechecks.
-- Independent session deadlines, five-second authorization/write deadlines and
-  aggregate stream metrics. Direct REST reads/writes retain participant tokens.
-- Narrow grants applied in the disposable fixture and promoted to the platform:
-  named `demo-coffee` list/watch plus SubjectAccessReview creation, nothing else.
-  The vestigial `get` verb and quizsessions/quizsubmissions grants were removed.
-- Local 200-identity rehearsal proved **one actual upstream watch**, update convergence,
-  50-client reconnect reuse, grant withdrawal in 30.00s and last-disconnect cleanup
-  under 1 CPU / 256 MiB limits. Uses real Kubernetes service-account identities in
-  fixture-signed sessions; attendee OIDC/browser load remains unproven.
-
-Validation: Go tests with race detection, vet/lint, all **21 frontend tests**,
-frontend type-check/build/lint, container build and platform Kustomize rendering
-passed. All **13 browser tests passed in 41.9s**, including real RBAC withdrawal
-while another viewer continues. The simultaneous 200-identity rehearsal passed in
-45.0s. [CI run 34605972419](https://github.com/sunib/voter/actions/runs/34605972419)
-passed every job for `85de0c0`.
-
-Production verification: Flux applied `2d770a1`; the ready pod runs
-`ghcr.io/sunib/voter:sha-85de0c0@sha256:cc0f384099ca002a697aeadf5f5617d35658b0b9c33416373cb72af21bf057e3`
-and `/public/build-info` reports `gitCommit: 85de0c0`, `gitDirty: 0`. On Kubernetes
-**1.36.1** the service account is allowed named `coffeeconfigs/demo-coffee` list and
-watch, and denied unnamed list, `get`, `patch`, quiz resources, Secrets and
-impersonation -- the named-authorization promotion gate is closed. Public `/metrics`
-returns 404 while the pod-proxy listener on 9090 serves counters; an unauthenticated
-stream returns 401 and the Dex login redirect is intact.
-
-See [shared-stream verification and release handoff](docs/shared-streams.md) for
-measurements, commands and limitations. **Next: an authenticated production smoke
-test and production-equivalent capacity evidence** -- no attendee has opened a stream
-against the deployed build yet, so all stream counters are still zero. Then
-ConfigButler commit observation and actor attribution. k8s-front remains a separate
-proposal.
-
-### Review fixes and upstream boundary
-
-Metrics now use a separate listener excluded from the application Service/ingress.
-Explicit `STREAM_KUBECONFIG` supports local development while keeping shared credentials
-out of participant clients. Subject initialization is synchronized, wiring failures
-are detected at registration, and flush errors cancel their subscription immediately.
-RBAC rechecks and IdP/token-claim revocation have separate documented bounds.
-
-Keep these host fixes in the shared-stream change. Keep navigation redirects,
-orphaned screen/API removal and stale README cleanup in a separate housekeeping
-commit when preparing the release. No new krm-stream APIs have been adopted; transport/lifecycle wrapper replacement
-is deferred until the upcoming release and its public APIs are verified.
-
-Production gates still include named list/watch authorization on the production API
-version and a complete single-replica Recreate rollout/reconnect rehearsal. Both current
-fixture and platform manifests have 1 CPU / 256 MiB limits.
-
-## First implementation increment
-
-Implemented and deployed as `d7d38ba` on 2026-09-11 while the upstream krm-stream
-improvements are in progress:
-
-- [x] REST editor reads use `gateway.Project(ProjectionFull)` directly, preserving UID,
-      resourceVersion, unknown fields and explicit false/zero/empty/null values. The
-      transitional save response uses the same projection; business DTOs remain for
-      pricing only. Added a handler regression test and frontend metadata fields.
-- [x] Voucher refresh calls its endpoint, reports stale counts on failure and recovers
-      on live updates. Usage failure no longer prevents loading the editor.
-- [x] Save errors keep the form and unsaved input visible. The API client now displays
-      the backend's `error` message instead of only a generic HTTP status.
-- [x] Added browser coverage for rejected-save draft preservation and usage failure/
-      recovery, plus unexpected page-error detection.
-
-Validation: Go tests/vet/lint and frontend unit tests/type-check/build/lint passed.
-All **9 browser tests passed in 6.0s** against the rebuilt image in the disposable
-fixture after clearing local disk pressure and restoring its issuer DNS aliases.
-
-That increment predates the deployed library migration below. Shared streaming
-and the 200-attendee acceptance rehearsal remain outstanding.
-
-## Earlier voting increment
-
-Deployed Voter `14dffd4` through GitOps `ef45717` on 2026-09-11. `/vote` lists rounds,
-`/answer/demo-round-1` is open, and `/answer/demo-round-1/results` shows results on
-explicit refresh. QuizSubmissions persist in Kubernetes; text answers serialize correctly;
-required/type/choice/range validation, closed/stale-round rejection and duplicate
-prevention use the participant-token backend. Removed the obsolete ForwardAuth
-client and cached quiz-session store. See [voting demo](docs/voting-demo.md).
-
-All 10 browser tests pass locally and the fresh-cluster browser CI job passed.
-The full [CI run 34584101156](https://github.com/sunib/voter/actions/runs/34584101156)
-succeeded, including lint, unit/integration/network tests and both image builds.
-Production checks verified Flux revision, ready pod digest, public build metadata,
-a live sample round and the `/vote` login path. The authenticated two-voter journey
-was exercised in the disposable fixture, not by casting votes in the production round.
-
-## Verified release and current gaps
-
-| Area | Evidence and remaining gap |
-| --- | --- |
-| CI | [Run 34593086461](https://github.com/sunib/voter/actions/runs/34593086461) for `55e287d` passed all jobs, including browser tests and both image builds. |
-| Deployment | GitOps commit `59fc82848caf63a40cf2f8e95aebf00d6d0ecc10` is pushed to `ConfigButler/k8s` main. Flux `voter-demo` is Ready at that revision; Voter completed rollout and the sample round is live. |
-| Running versions | Voter runs `sha-55e287d`, pinned to `sha256:ccffb1ca260f78e46af1316e639faabea73b93a160b056a0938d86dd0ce4d186`; the ready pod image ID matches. Room Pass remains on `sha-d7d38ba`. |
-| Production checks | Public `/public/build-info` reports `gitCommit: 55e287d`, `gitDirty: 0`. Chromium reached the room-code form through the quiz, results and editor routes without page errors. The sample QuizSession is live. |
-| Editor | Deployed editor uses the library store, atomic arrays and conditional intent saves; no custom reconciliation remains. |
-| Stream | Deployed stream adds managed recovery, exact namespace/name/version restrictions and per-session deadlines. Shared watches and bounded RBAC rechecks remain open. |
-| Resource contract | Deployed editor initializes from stream snapshots, reconciles guarded projected GETs and returns receipt-only saves. |
-| Git payoff | At the latest CRD check, `commitrequests.configbutler.ai` was absent. Neither an observed Git commit nor end-to-end actor attribution has been verified. |
-
-First-increment artifacts retained as a rollback reference:
-
-- Voter: `sha256:c6dd9cfe0903fb169c599907ac5b385fd53956952bdd55f70de6e3f1af233659`.
-- Room Pass: `sha256:7e1690adb4e304c600afbed2e1f529b98dc727bd5c1bb5f14b2356d5287b8cee`.
-
-Rollback the current library migration by reverting GitOps commit `59fc828` in
-`ConfigButler/k8s`, pushing and letting Flux reconcile. That restores Voter `14dffd4`
-while retaining the sample round. All workload changes came from Git;
-Flux reconciliation was triggered to apply the committed revision.
-
-## 1. Adopt the released integration primitives
-
-The external checkout was fast-forwarded from `4a12571` to main `2154f9d`.
-The npm and both Go 0.3.0 tags point to `209537c`; main only adds release tooling/docs.
-Voter now pins npm and both Go modules to **0.3.0**. The Go module and image builder
-use **1.27.1**. Upstream runtime behavior was reviewed at the release tag; no local
-upstream override or core library copy is used.
-
-### Implemented and deployed as `55e287d`
-
-- AdminScreen now renders the store's draft and derived changes/conflicts. Removed
-  custom reconciliation, mutation helpers and dirty registries. Arrays remain atomic;
-  existing SKU/code inputs are read-only and row changes use store APIs.
-- Managed fetch streams retain same-origin cookie authentication, expose connection
-  state, recover sequence gaps, and close on disposal. Storefront uses a read-only policy.
-- Saves send captured UID/RV/patch; backend accepts only spec edits, validates projection,
-  and adds the captured preconditions to Kubernetes PATCH. No unconditional save is
-  accepted. Responses contain receipts with `saved` and optional `commitRequested`,
-  `commitRequest` / `commitError`; they never return the object.
-- A 409 triggers a guarded uncached GET. Actual conflicts require Take Theirs or Keep
-  Mine; a refreshed version without conflicts asks for a new deliberate save. Later
-  typing survives the response. A bounded delayed read recovers missing watch echoes.
-- Editor UID stays fixed. Deletion offers an in-memory copy of unsaved input; disposal
-  clears it. Reopening a replacement starts a new editor. Cross-login draft restoration
-  remains separate work; a page navigation currently discards the in-memory draft.
-- The per-participant stream now enforces configured namespace/name/version and closes
-  at session/token expiry. It does not yet share watches or periodically query RBAC.
-
-Validation: **21 frontend tests**, frontend build/lint, Go tests with race detection,
-vet/lint and the Go 1.27.1 container build passed. **All 12 browser tests passed in
-10.7s** against the final rebuilt disposable fixture, including a real Kubernetes 409 followed
-by a fresh reviewed save, receipt-only response and explicit conflict choice. Backend
-tests also prove exact scope refusal and expiry isolation; a client integration test
-proves transport reconnection preserves edits through a fresh snapshot. Shared-watch capacity and the full race/reconnect matrix remain open.
-The final fixture run required extending the expired local Room deadline. The subsequent
-production rollout was verified through Flux, the ready pod digest, public build metadata
-and anonymous browser smoke checks; authenticated tests ran in the fixture, and no
-production QuizSubmissions were created.
-
-The existing live quiz is [demo-round-1](https://demo.koudijs.dev/answer/demo-round-1),
-“How do you change Kubernetes configuration today?” Its
-[results](https://demo.koudijs.dev/answer/demo-round-1/results) are available after room
-login. Room `demo` is open through **2026-09-30 18:00 UTC** at this verification.
-
-| Earlier upstream request | 0.3.0 finding | Voter decision |
-| --- | --- | --- |
-| Managed recovery | `connectManagedResourceStream` is exported: fetch transport, bounded jittered retries, health reset, cancellation, terminal 401/403 | Adopt it with the existing same-origin session cookie; delete native EventSource gap assumptions |
-| Periodic subscriber authorization | `ReauthorizationInterval` and `ReauthorizationTimeout` check authorization and projection independently per subscriber | Configure the existing gateway; no upstream extension or Voter watch loop |
-| Conditional-save integration | Exported `captureSave` and `captureReconciliation`, tested host/client examples and a real-cluster 409 test source | Use the primitives; adapt the small host controller for CoffeeConfig and receipts |
-| Vue binding | Tested copyable composable, not an npm export or separate adapter package | Keep a thin Voter binding following the example; no adapter release dependency |
-| Authorization naming | `SubjectAccessReviewAuthorizer` exported; `SSARAuthorizer` retained as deprecated alias | Use the clearer name |
-
-[Proposal 0005](https://github.com/ConfigButler/krm-stream/blob/2154f9d/docs/proposals/0005-kubernetes-stream-and-save-semantics.md)
-is design discussion, not an approved runtime contract.
-[Plan 0006](https://github.com/ConfigButler/krm-stream/blob/2154f9d/docs/proposals/0006-stream-and-save-implementation-plan.md)
-supersedes its phase order. Corrected save outcomes and focused regressions shipped;
-formal convergence clarification, real-API status/save and UID-race hardening, and upstream
-watch continuation remain follow-ups. Do not wait for replay, SSA, version-only events
-or a general save framework to remove Voter's duplicate editor state.
-
-- [x] Pin npm and both Go modules to published **0.3.0**, update lockfiles and run
-      consumer checks outside upstream `go.work`. Both Go modules now require Go
-      **1.27.1**; verify Voter module/toolchain, CI and image build compatibility.
-      Verified Go tests/vet/lint and the image build against registry modules.
-      No lasting `replace`, local overrides or vendored core source. The external
-      checkout is review/development evidence, not a production dependency.
-- [x] Make stream, initial read and conflict reread use the same projected KRM shape:
-      GVK, namespace/name, **UID**, resourceVersion and preserved JSON value types.
-      Keep redaction information with the resource where relevant. Use
-      `gateway.Project`; avoid round-tripping editable objects through lossy coffee
-      DTOs. Defaults for display must not silently become user edits.
-- [x] Render withheld-field indicators from `store.redactions()`, never from mask
-      strings inserted into draft values. Preserve disclosure metadata during recovery
-      and reject patches to protected paths. CoffeeConfig's `apiKeySecretRef` fields
-      contain references (name/key), not Secret values; do not resolve or mask them
-      merely because their names mention secrets. Current built-in Secret redaction
-      does not automatically redact arbitrary fields in a CoffeeConfig.
-- [x] Reuse `LiveResourceStore`, segment-array `Path`, `regionPolicy`,
-      `readOnlyPolicy`, stream URL/transport helpers and
-      `gateway.ValidateMergePatch`. Voter's editable region is `spec`.
-      Schema-driven `withOpenAPIKeyedLists` adoption remains a separate enhancement below.
-- [x] Replace `connectWithEventSource` with `connectManagedResourceStream`. Use its
-      connecting/syncing/live/retrying/closed/terminal/exhausted states and `onError`
-      classification. Keep login navigation in Voter; same-origin fetch carries the
-      HttpOnly cookie without exposing the token. Close the owned connection on teardown.
-- [x] Follow the upstream Vue example for reactive draft/changes/conflicts/redactions
-      and subscription cleanup. It binds one fixed UID; mount the editor only after
-      snapshot discovery and remount for a replacement UID. A parent owns any shared
-      browser connection. Thin host glue is allowed; copied reconciliation is not.
-- [x] Use `captureSave(uid)` and `captureReconciliation(uid)` directly. Adapt the
-      conditional-editor example for Voter's HTTP errors, CSRF and receipt body;
-      serialize saves and gate them on live/same-UID readiness and no unresolved conflicts.
-      Do not propose another generic conditional-edit module upstream.
-- [x] Preserve the existing upstream save/watch ordering tests and add focused Voter
-      integration coverage for the actual component and host endpoints. Track upstream
-      0006 follow-ups separately rather than treating every planned test as shipped.
-
-Acceptance: Voter consumes released store/connection primitives with thin host glue,
-without implementing reconciliation, retry scheduling or shared-watch machinery.
 
 ## 2. Replace the editor and make writes conditional
 
@@ -392,9 +179,9 @@ Extend the existing disposable browser fixture rather than introducing another s
       disconnect cleanup. Record latency, CPU/memory, access-review load and errors
       under deployment resource limits. Count upstream recycling and browser reconnect
       resets separately, bytes per snapshot, and save 409s with/without field conflicts.
-      0.3.0 still resnapshots after upstream watch closure and every browser reconnect;
+      0.4.0 still resnapshots after upstream watch closure and every browser reconnect;
       sharing does not eliminate per-browser transfer or rendering. Upstream continuation
-      is a measured follow-up, not a claimed 0.3.0 feature. Use real-browser smoke tests
+      is a measured follow-up, not a claimed 0.4.0 feature. Use real-browser smoke tests
       alongside the load harness; 200 HTTP clients alone do not prove browser rendering.
 - [ ] Verify multiple tabs keep independent drafts while sharing the upstream watch.
       Test denied users, altered identity headers, denied list/watch separately, scope

@@ -202,8 +202,9 @@ kubectl -n voter get secret gitops-reverser-age -o jsonpath='{.data}' \
 **Recovery.** There is none if the key is lost and the cluster is gone. That is
 the whole reason the annotation exists, and why this entry does.
 
-See [reverse-gitops-plan.md](./reverse-gitops-plan.md) for the target
-configuration itself.
+The targets themselves are `git-sink-demo1.yaml`, `git-sink-demo2.yaml` and
+`git-sink-config.yaml` in `external/k8s/k8s.koudijs.dev/2-gitops/voter-demo/`,
+each carrying its own reasoning in comments.
 
 ---
 
