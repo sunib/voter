@@ -190,7 +190,7 @@ func run(ctx context.Context, tr http.RoundTripper, i int, code *atomic.Value) (
 		return o
 	}
 	joinBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != 200 {
 		o.phase, o.status = "post-join", resp.StatusCode
 		o.err = fmt.Sprintf("landed on %s: %s", resp.Request.URL, firstLine(string(joinBody)))
@@ -261,7 +261,7 @@ func run(ctx context.Context, tr http.RoundTripper, i int, code *atomic.Value) (
 		return o
 	}
 	vbody, _ := io.ReadAll(io.LimitReader(vresp.Body, 16<<10))
-	vresp.Body.Close()
+	_ = vresp.Body.Close()
 	o.ballot = time.Since(ballotStart)
 	o.status = vresp.StatusCode
 	if vresp.StatusCode != 201 {
@@ -282,7 +282,7 @@ func get(ctx context.Context, c *http.Client, u string) (string, *url.URL, int, 
 	if err != nil {
 		return "", nil, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
 	return string(b), resp.Request.URL, resp.StatusCode, nil
 }
@@ -293,7 +293,7 @@ func getJSON(ctx context.Context, c *http.Client, u string, into any) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("%d %s", resp.StatusCode, firstLine(string(b)))
