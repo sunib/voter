@@ -15,6 +15,9 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .status.joinCode.code
+      name: Code
+      type: string
     - jsonPath: .spec.enrollment
       name: Enrollment
       type: string

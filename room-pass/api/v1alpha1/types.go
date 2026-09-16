@@ -100,8 +100,23 @@ type RoomStatus struct {
 	ParticipantCount int    `json:"participantCount"`
 }
 
+// Code leads the printer columns below, because on stage it is the one thing
+// worth reading off a terminal: `kubectl get room` answers "what do I type"
+// without a jsonpath. It rotates on spec.joinCode.rotateEvery, so the column is
+// expected to differ between two gets -- that is the credential working.
+//
+// It exposes nothing new. A printer column is a projection of status, not a
+// grant: anyone who can already `get rooms` could read .status.joinCode.code,
+// and participants have no rooms grant at all. The operator-only material is
+// status.validJoinCodes, which stays off the list.
+//
+// Kept clear of the marker block on purpose -- a comment contiguous with it is
+// the type's doc comment, and controller-gen would compile these paragraphs
+// into the Room schema's description for every client to download.
+
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Code",type=string,JSONPath=`.status.joinCode.code`
 // +kubebuilder:printcolumn:name="Enrollment",type=string,JSONPath=`.spec.enrollment`
 // +kubebuilder:printcolumn:name="Participants",type=integer,JSONPath=`.status.participantCount`
 // +kubebuilder:printcolumn:name="Ends",type=date,JSONPath=`.spec.endsAt`
