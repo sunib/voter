@@ -17,8 +17,6 @@ spec:
     - name: v1alpha1
       served: true
       storage: true
-      subresources:
-        status: {}
       additionalPrinterColumns:
         - name: Session
           type: string
@@ -95,38 +93,3 @@ spec:
                     x-kubernetes-validations:
                       - rule: "(has(self.singleChoice) ? 1 : 0) + (has(self.multiChoice) ? 1 : 0) + (has(self.number) ? 1 : 0) + (has(self.freeText) ? 1 : 0) == 1"
                         message: "exactly one answer field must be set"
-            status:
-              type: object
-              properties:
-                observedGeneration:
-                  type: integer
-                  format: int64
-                conditions:
-                  type: array
-                  x-kubernetes-list-type: map
-                  x-kubernetes-list-map-keys:
-                    - type
-                  items:
-                    type: object
-                    required:
-                      - type
-                      - status
-                      - lastTransitionTime
-                      - reason
-                      - message
-                    properties:
-                      type:
-                        type: string
-                      status:
-                        type: string
-                        enum:
-                          - "True"
-                          - "False"
-                          - "Unknown"
-                      lastTransitionTime:
-                        type: string
-                        format: date-time
-                      reason:
-                        type: string
-                      message:
-                        type: string

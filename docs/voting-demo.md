@@ -112,6 +112,8 @@ additional submissions.
   not a measured 200-person capacity guarantee. The shared CoffeeConfig streaming
   and load rehearsal in PLAN.md remain outstanding.
 
-Quiz CRD definitions are under `voter/config/crd/` for reproducible local fixtures;
-keep platform CRD copies aligned when changing their schema. The browser voting test
+Every `examples.configbutler.ai` CRD -- both quiz kinds and CoffeeConfig -- is
+defined under `voter/config/crd/`, and the room-pass e2e fixture applies that
+directory rather than keeping a copy. The platform repository holds its own copy
+for Flux to apply; keep it aligned when changing a schema. The browser voting test
 creates and deletes its own round using only the disposable fixture kubeconfig.

@@ -17,15 +17,10 @@ spec:
     - name: v1alpha1
       served: true
       storage: true
-      subresources:
-        status: {}
       additionalPrinterColumns:
         - name: State
           type: string
           jsonPath: .spec.state
-        - name: Join Code
-          type: string
-          jsonPath: .status.joinCode
         - name: Title
           type: string
           jsonPath: .spec.title
@@ -102,41 +97,3 @@ spec:
                         message: "min must be <= max"
                       - rule: "self.type == 'scale0to10' ? (has(self.min) && has(self.max) && self.min == 0.0 && self.max == 10.0) : true"
                         message: "scale0to10 requires min=0 and max=10"
-            status:
-              type: object
-              properties:
-                joinCode:
-                  type: string
-                  description: Current active join code for this session
-                observedGeneration:
-                  type: integer
-                  format: int64
-                conditions:
-                  type: array
-                  x-kubernetes-list-type: map
-                  x-kubernetes-list-map-keys:
-                    - type
-                  items:
-                    type: object
-                    required:
-                      - type
-                      - status
-                      - lastTransitionTime
-                      - reason
-                      - message
-                    properties:
-                      type:
-                        type: string
-                      status:
-                        type: string
-                        enum:
-                          - "True"
-                          - "False"
-                          - "Unknown"
-                      lastTransitionTime:
-                        type: string
-                        format: date-time
-                      reason:
-                        type: string
-                      message:
-                        type: string

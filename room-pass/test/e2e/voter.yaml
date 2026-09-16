@@ -78,7 +78,7 @@ roleRef:
 # history routing from /, and its session cookie is a __Host- cookie, so a
 # stripped prefix would break both in ways that look like application bugs.
 #
-# The CoffeeConfig CRD is in coffeeconfig-crd.yaml and must be established first.
+# The CoffeeConfig CRD lives in ../voter/config/crd/ and must be established first.
 apiVersion: examples.configbutler.ai/v1alpha1
 kind: CoffeeConfig
 metadata:

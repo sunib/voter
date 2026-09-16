@@ -97,12 +97,18 @@ kubectl -n room-pass create configmap issuer-ca --from-file=ca.crt=.local/tls.cr
 # root because the image contains both the Go backend and the Vue bundle.
 docker build -t voter:dev -f ../voter/Dockerfile ..
 k3d image import voter:dev -c room-pass-e2e
-# The CRD first, and awaited: applying it together with a CoffeeConfig loses the
-# race against the API server starting to serve the new kind.
-kubectl apply -f test/e2e/coffeeconfig-crd.yaml
-kubectl wait --for=condition=Established crd/coffeeconfigs.examples.configbutler.ai --timeout=60s
+# Every examples.configbutler.ai CRD from the voter repository, which is where
+# all three are defined -- this fixture keeps no copy of its own, so an e2e run
+# cannot pass against a schema the application no longer ships.
+#
+# Applied and AWAITED before voter.yaml: a CRD and a custom resource of that
+# kind in one apply is a race the resource usually loses, rejected with "no
+# matches for kind" because the API server is not serving the type yet.
 kubectl apply -f ../voter/config/crd/
-kubectl wait --for=condition=Established crd/quizsessions.examples.configbutler.ai crd/quizsubmissions.examples.configbutler.ai --timeout=60s
+kubectl wait --for=condition=Established \
+  crd/coffeeconfigs.examples.configbutler.ai \
+  crd/quizsessions.examples.configbutler.ai \
+  crd/quizsubmissions.examples.configbutler.ai --timeout=60s
 kubectl apply -f test/e2e/voter.yaml
 kubectl -n room-pass rollout restart deployment/voter
 kubectl -n room-pass rollout status deployment/voter --timeout=180s
