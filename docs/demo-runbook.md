@@ -17,20 +17,26 @@ choreography.
 | Minutes | Beat | Room's phones |
 |---|---|---|
 | 0–8 | The problem: business intent ends up in Git, stakeholders do not do pull requests | idle |
-| 8–18 | **Demo 1** — identity and authorization | **in use** |
-| 18–26 | The pattern: a typed API in front of the repo | idle |
-| 26–40 | **Demo 2** — the mirror, the live grant, and the commit in their name | **in use** |
+| 8–17 | **Demo 1** — identity, authorization, and a Kubernetes object you did not expect | **in use** |
+| 17–25 | The pattern: a typed API in front of the repo | idle |
+| 25–40 | **Demo 2** — Git, conflict, and the one place the room works together | **in use** |
 | 40–45 | The honest checklist: where this fits, where it does not | idle |
 
-Two phone segments, ten minutes apart, is about right. A room will pick a phone
+Two phone segments, eight minutes apart, is about right. A room will pick a phone
 up twice; it will not pick it up four times.
 
-Demo 2 grew to fourteen minutes when the live grant went in, which leaves the
-closing five rather than seven. **Buy the two minutes back by dropping the
-interloper** (demo 1 step 4, already marked optional) — the closing checklist is
-where this talk's credibility lives and it should not be the thing that gets
-compressed. If you are still over, demo 2 step 2 survives being told in two
-minutes instead of three.
+**The first eight minutes talk about Git, and that is fine.** What is being held
+back is not the word. It is the evidence that *this cluster has been writing to a
+repository since they scanned the code*. Naming the problem — intent ends up in
+a repo that the people who own the intent cannot reach — is the setup for both
+demos and gives nothing away. "The secret" below draws the line.
+
+The arithmetic, honestly: demo 1's steps sum to nine minutes with the interloper
+dropped, demo 2's to fifteen. That is the allocation above, and it leaves the
+closing its full five. **The interloper (demo 1 step 4) is the slack** — it is
+marked optional and this is the second time this runbook has spent it. Put it
+back only if you walk on early. If you are still over on stage, demo 2 step 2
+survives being told in ninety seconds.
 
 ---
 
@@ -39,12 +45,25 @@ minutes instead of three.
 They need a phone with a camera and a browser. No app, no account, no typing a
 URL. They scan a projected QR code and type a display name.
 
-Say the display-name line out loud, early:
+**Do not say what the name becomes.** This runbook used to open with the best
+sentence in the talk — *"the name you type becomes a filename in a Git
+repository, choose accordingly"* — three sections above a rule saying not to
+mention Git in demo 1. It is now the last sentence rather than the first. Say
+this instead:
 
-> The name you type becomes a filename in a Git repository. Choose accordingly.
+> Type a name you are happy for a room full of strangers to read.
 
-That sentence does more work than any slide. It is also literally true —
-`results/Ada-Lovelace.yaml` — and it is the hook you cash in during demo 2.
+Be honest with yourself about the trade. The old line bought careful names; this
+one buys fewer, and you will get more `asdf`. That is the price of the reveal
+landing on a room that did not see it coming, and it is worth paying — the
+invented voters in "Casting your own answers" are partly there to keep the file
+readable when the room's own contributions are not.
+
+The deployment no longer helps you spoil it either. `Room.spec.attributionNote`
+read "It labels your changes in Git." and now says the name and address are used
+for demo purposes: true, enough for an informed choice, silent on the part you
+are saving. The join page is titled "Room Pass" rather than after this demo, for
+the same reason — it says what the page is, not what the talk is about.
 
 Expect 30–60% of the room to join. Design every beat so a non-participant still
 sees the point on the projector: the room screen and the results screen are the
@@ -143,6 +162,9 @@ check the value survived.
       all three; do not skip it.
 - [ ] Round one `state: live`, round two `state: closed` (not `draft` — a draft
       is filtered out of the room page entirely and there is no button to press).
+      **Check this, do not assume it.** A rehearsal leaves round two `live`, and
+      then demo 2 step 3 has nothing to open and the room has already voted in
+      it: `kubectl -n voter get quizsessions` prints the state of both.
 - [ ] Push and let Flux reconcile. Confirm both rounds exist:
       `kubectl -n voter get quizsessions`
 - [ ] **If you changed the coffee menu**, pushing is not enough — the
@@ -172,6 +194,18 @@ check the value survived.
       `kubectl -n voter delete rolebinding voter-audience-coffee-admin`
 - [ ] Open `/me` on your own phone and confirm the permission grid renders. It
       is the first thing you point the room at in demo 1 step 3.
+- [ ] **Nothing the audience can read may mention Git.** Two values, one
+      command — the CoffeeConfig is seeded and not reconciled, so a fix in the
+      platform repo does not reach the live object on its own:
+
+      ```bash
+      kubectl -n voter get coffeeconfig demo-coffee -o jsonpath='{.spec.bannerText}{"\n"}'
+      kubectl -n voter get room demo -o jsonpath='{.spec.title}: {.spec.attributionNote}{"\n"}'
+      ```
+
+      The banner must not say "Git"; if it does, patch it back:
+      `kubectl -n voter patch coffeeconfig demo-coffee --type=merge -p '{"spec":{"bannerText":"Edit this menu. Every phone in the room sees your change."}}'`.
+      The Room is reconciled by Flux, so its two values look after themselves.
 - [ ] Have the audit-trail repo open in a browser tab, on the `demo1` folder,
       **not yet shown**.
 
@@ -191,9 +225,16 @@ check the value survived.
 
 ---
 
-## Demo 1 — who are you, and who decides what you may do
+## Demo 1 — who you are, who decides what you may do, and what a vote actually is
 
-**Ten minutes. Git is not mentioned.** See "The secret" below.
+**Nine minutes. Git is not mentioned once.** See "The secret" below.
+
+Demo 1 has two jobs and only two. The first is identity and authorization: who
+the room is, and who decided what they may do. The second is quieter and lands
+better for being unannounced — **the things this application keeps in Kubernetes
+are not the things anyone expects to find there.** A vote is an object. A coffee
+menu is an object. You show that and then let it sit, because the surprise here
+is the API, not the repository, and the repository is demo 2's to reveal.
 
 ### 1. Get them in (2 min)
 
@@ -210,13 +251,31 @@ While they join, say what just happened, because it is the substance:
 - Everyone in the room is now `demo:<opaque-subject>` in group
   `demo:voter-audience`.
 
-### 2. Let them vote (2 min)
+### 2. Let them vote, then show them what they just wrote (3 min)
 
 Round one is live. They answer "How do you change Kubernetes configuration
-today?" Project the results screen and let the bars fill. This is the warm-up
-and it earns the room's attention for the refusals.
+today?" Project the results screen and let the bars fill. That is the warm-up,
+and it earns the room's attention for what follows.
 
-### 3. Show what they *cannot* do (4 min) — the core of demo 1
+Then go to the terminal while the bars are still fresh:
+
+```bash
+kubectl -n voter get quizsubmissions
+kubectl -n voter get quizsubmission <round>-<somebody> -o yaml
+kubectl -n voter get coffeeconfig demo-coffee
+```
+
+**This is demo 1's second job.** Every answer the room just gave is a Kubernetes
+object, named after the person who gave it, validated by a CRD whose CEL rules
+refuse two answers to one question. The coffee menu next to it is another one.
+Nobody reached for a ConfigMap and nobody put a REST API in front of a database.
+
+Let the oddness sit there unresolved. Do not justify it — the middle segment is
+where the pattern gets a name — and do not mention Git. "Your vote is a
+Kubernetes object" is a big enough thing to have said, and it is the sentence
+demo 2 collects on.
+
+### 3. Show what they *cannot* do (4 min) — the core of the authorization half
 
 This is the part worth rehearsing, because every refusal below is a **real API
 server 403**, rendered verbatim. There is no client-side permission model to
@@ -288,28 +347,53 @@ optional, and it costs you the two minutes the closing checklist wants back.
 
 ---
 
-## The secret: do not mention Git in demo 1
+## The secret: do not SHOW Git in demo 1
 
-Your instinct is right, and the deployment is already built for it.
+Your instinct is right, and the deployment is now built for it.
 
 `demo1` has been mirroring the whole time. Every vote the room cast in the last
-ten minutes is already in
-`clusters/k8s.koudijs.dev/demo1/submissions.yaml`, each commit authored by the
-person who cast it. You have said nothing about it.
+nine minutes is already in `clusters/k8s.koudijs.dev/demo1/submissions.yaml`,
+each commit authored by the person who cast it. You have said nothing about it.
 
 So demo 2 opens on a file that is *already full of the room's answers*. The
 reveal is "this has been happening since you scanned the code", which is a much
 better beat than "watch, I will now demonstrate a commit". Keep it.
 
-The one thing that can spoil it: the audit-trail repo visible in a browser tab,
-or a `git log` left on screen. Check your tabs.
+**The line is between talking and showing.** The problem statement in the first
+eight minutes is allowed to say that business intent ends up in Git and that
+stakeholders do not open pull requests; a room that has not heard that does not
+know why any of this matters. What may not appear before minute 25 is evidence
+that this cluster is doing it right now.
+
+Four things can spoil it. Three are now fixed in the deployment; the fourth is
+you.
+
+- **The audit-trail repo in a browser tab, or a `git log` left on screen.**
+  Still entirely on you. Check your tabs before you walk on.
+- The join page's attribution note, which read "It labels your changes in Git."
+  Now says demo purposes only.
+- The display-name line this runbook told you to say out loud. Gone — see "What
+  you are asking of the room".
+- The storefront banner, which read "Edit this menu -- your change becomes a Git
+  commit in your name". The audience may read `coffeeconfigs` from the moment
+  they join, so that was legible on a phone during demo 1, on the very page
+  demo 1 invites them to open and be refused by. **The seed in Git is fixed;
+  the live object is seeded, not reconciled, so confirm it at T-30m.**
 
 ---
 
-## Demo 2 — the same actions, now visible in Git
+## Demo 2 — the same actions in Git, and the one place the room works together
 
-**Fourteen minutes.** The room is still signed in from demo 1; do not make them
+**Fifteen minutes.** The room is still signed in from demo 1; do not make them
 join again.
+
+Two arguments, in this order. The first is the reveal: everything they have
+already done is in a repository, attributed to them by name, and not one of them
+has a GitHub account. The second answers the question the first one provokes in
+any engineer in the room — *if Git is the record, what happens when two people
+change the same thing?* — and its answer is the thesis of the talk. **Git is the
+record. The Kubernetes API is where you work together.** Step 5 is where that
+stops being a slogan and becomes a red dot on a screen.
 
 ### 1. The reveal (2 min)
 
@@ -338,7 +422,7 @@ reconciles from it. A commit written by an attendee can never travel back into
 the cluster. The picture is in "Two repositories" above if you want it fresh
 before you walk on.
 
-### 2. The same objects, filed two ways (3 min)
+### 2. The same objects, filed two ways (2 min)
 
 Now open `clusters/k8s.koudijs.dev/demo2/results/`. One file per person, named
 after them, and every round they vote in appends a document to their file.
@@ -387,7 +471,7 @@ What happens, in this order:
 
 Say what did *not* happen: no feature flag, no application permission, no
 deploy. The application never learned anything — each phone asked Kubernetes
-what it may do and got a different answer than it did ten minutes ago.
+what it may do and got a different answer than it did in demo 1.
 
 The binding is not a Flux resource, deliberately, or Flux would recreate it
 after you switched it off.
@@ -419,20 +503,71 @@ fifteen seconds, and it proves the switch was real in both directions — the
 revoke is a clean `+0/-18`, with the document gone from Git rather than
 tombstoned. Verified on 2026-09-15; both directions produce a commit.
 
-### 5. The coffee edit, and "save now" (4 min)
+### 5. Two people, one menu (5 min)
 
-Now let *them* do it. Someone orders with the `TESTNET` voucher and it fails:
-*"This voucher has been used the maximum number of times."* The storefront
-showed the discount right up to the submit — that is the bug the demo is about,
-and it is a configuration bug.
+Now let *them* do it — and then collide with them on purpose. This is the beat
+the talk is named for.
 
-Open the menu editor, raise `maximumUsage`, and save. Then press **save now**,
-which creates a `CommitRequest`.
+**The bug.** Someone orders with the `TESTNET` voucher and it fails: *"This
+voucher has been used the maximum number of times."* The storefront showed the
+discount right up to the submit. That is the bug the demo is about, and it is a
+configuration bug.
 
-Hand this to the room if the grant is on — it is their permission now, and a
-commit authored by an attendee fixing the bug beats one authored by you. Have
-one ready to do it yourself if nobody volunteers; the beat matters more than
-who performs it.
+**The edit.** Open the menu editor and raise `maximumUsage`. **Do not save.**
+Yellow dots mark the fields you changed and the summary offers to save one
+change.
+
+**The collision.** With that draft still open and unsaved, have a second person
+change the same field — a volunteer, now that step 4 gave them the permission,
+or you from the terminal if nobody bites:
+
+```bash
+kubectl -n voter patch coffeeconfig demo-coffee --type=json \
+  -p '[{"op":"replace","path":"/spec/vouchers/0/maximumUsage","value":99}]'
+```
+
+**Use `--type=json`, not a merge patch.** `spec.vouchers` is a list, and a JSON
+merge patch replaces a list wholesale — `-p '{"spec":{"vouchers":[...]}}'` would
+delete every voucher you did not retype, live, in front of the room. Check the
+index first with `kubectl -n voter get coffeeconfig demo-coffee -o jsonpath='{range .spec.vouchers[*]}{.code}{"\n"}{end}'`;
+`TESTNET` is at `0` today and that is not guaranteed after an edit.
+
+Your screen changes with no reload. The field turns **red**, the notice reads
+*"Another editor changed the same fields. Review the highlighted conflicts."*,
+and the summary lists both values with **Take Theirs** and **Keep Mine** beside
+them. **Save is disabled** until every conflict is resolved — not discouraged,
+disabled; the footer counts "N edit(s) and M missed incoming change(s) in this
+save" so nobody resolves one by accident.
+
+Three things to say while that is on screen, in this order:
+
+1. **Be precise about who refuses, because a sharp room will ask.** The red dot
+   and the disabled button are the browser: the editor saw the watch event and
+   will not let you write over it. Underneath, the save carries the
+   `resourceVersion` the draft was built on, so if you *did* get past the
+   browser the **API server** would refuse it with a 409, exactly as it refuses
+   a stale `kubectl apply`. The UI is a courtesy; the guarantee is Kubernetes'.
+   Say it that way round — this is the same shape as the interloper beat in
+   demo 1, and it costs nothing to be accurate.
+2. **Only the collision is a conflict.** Change a *different* field from the
+   terminal and watch it arrive as an ordinary update while your draft survives
+   untouched. That is what an API can do and a three-way text merge cannot: it
+   knows what a field is.
+3. **So this is why the API is the source of truth and the repository is the
+   record.** Two people cannot both be right about `maximumUsage`, and the place
+   that settles it has to be the one they are both already talking to. Git finds
+   out afterwards. If the room takes one sentence home, take that one.
+
+**The save.** Resolve it — Take Theirs or Keep Mine, and say out loud which you
+chose and why. Then fill in the reason box. It is not decoration: it becomes
+`CommitRequest.spec.message`, which becomes the commit message on a commit
+authored by whoever pressed the button. Press Save, then **save now**, which
+creates the `CommitRequest`.
+
+Hand the whole thing to the room if the grant from step 4 is on — it is their
+permission now, and a commit authored by an attendee fixing the bug beats one
+authored by you. The conflict half works either way, because the second editor
+can always be your terminal.
 
 Two separate facts the UI is careful to distinguish, and you should be too:
 
@@ -442,8 +577,15 @@ Two separate facts the UI is careful to distinguish, and you should be too:
    release gate — see [PLAN.md](../PLAN.md). Do not claim more on stage than the
    UI claims.
 
-Then show `demo2/coffee-config.yaml` with the new value, authored by whoever
-made the edit. Re-order the coffee; it succeeds.
+Then show `demo2/coffee-config.yaml` with the new value, the reason you typed as
+the commit message, and whoever made the edit as the author. Re-order the
+coffee; it succeeds.
+
+If you want one more, this is the place for it: set the banner to *"Edit this
+menu — your change becomes a Git commit in your name"* from the editor. It used
+to be the seeded value and it gave demo 2 away during demo 1. Set live, at this
+moment, it is a banner announcing the commit that is itself a commit, and every
+phone in the room reads it at once.
 
 ### 6. The boundary — what is deliberately *not* in Git (2 min)
 
@@ -563,6 +705,10 @@ them would bury the folder under a document per save.
 | Switch reports the Role does not exist | `voter-audience-coffee-admin` was not reconciled | `kubectl -n voter get role voter-audience-coffee-admin`. The switch refuses rather than create a binding that grants nobody anything |
 | Grant is on but a phone still refuses | That phone has not polled yet | Wait ~5s. The table refreshes itself; there is nothing to press |
 | Permission grid is empty or says "incomplete" | An authorizer could not enumerate | The page says so itself. Mention it and move on — the refusals are still real |
+| Save is greyed out in the menu editor | An unresolved conflict — this is the design | Take Theirs or Keep Mine on every red field. `canSave` is false while any conflict is open |
+| The conflict never appears in demo 2 step 5 | The second editor changed a different field, or the stream dropped | Different field is not a conflict; that is the point of beat 2. If the banner says reconnecting, press Refresh from cluster and redo the collision |
+| "Live updates overtook the read. Refresh again" | A watch arrived mid-refresh | Press Refresh from cluster again. Your draft is retained throughout |
+| A voucher vanished after a terminal patch | A merge patch replaced the whole list | `--type=json` with an index, never `--type=merge`, on `spec.vouchers` or `spec.products`. Re-seed if you have lost them: see "Two repositories" |
 
 **The one rule, if anything looks odd with authentication:** nothing may reach
 Dex's `room` connector callback except Room Pass. If you find yourself
