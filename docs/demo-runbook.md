@@ -159,7 +159,10 @@ check the value survived.
       cannot vote again, this talk's votes land in the previous talk's file, and
       — because ballots are selected by round *name*, not UID — a recreated
       round **inherits the old round's votes**. The file's own header explains
-      all three; do not skip it.
+      all three; do not skip it. To write new questions rather than rename old
+      ones, [quizsession-authoring.md](quizsession-authoring.md) is the field
+      reference — every constraint, the five question types, and what each one
+      looks like on the projector.
 - [ ] Round one `state: live`, round two `state: closed` (not `draft` — a draft
       is filtered out of the room page entirely and there is no button to press).
       **Check this, do not assume it.** A rehearsal leaves round two `live`, and
@@ -610,7 +613,9 @@ you can point at both halves on one screen.
 
 ### Casting your own answers
 
-You wanted to add a few obviously invented voters. The object is plain:
+You wanted to add a few obviously invented voters. The object is plain — and it
+has to agree with the round exactly, which
+[quizsession-authoring.md](quizsession-authoring.md) spells out:
 
 ```yaml
 apiVersion: examples.configbutler.ai/v1alpha1
