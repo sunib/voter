@@ -3,7 +3,7 @@
 Use the same room code and login as the coffee demo. Open the Voter host's home
 page, choose **Answer questions** on the round, answer, and submit. The
 confirmation opens results. The presenter can open
-`/answer/demo1-round-2026-09-15/results` and select **Refresh results** as votes
+`/answer/demo1/results` and select **Refresh results** as votes
 arrive. The home page lists every open
 round and links to the coffee bar; the **Quizzes** and **Coffee** tabs in the top
 bar move between the two halves from any screen. Results do not refresh

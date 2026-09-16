@@ -1,5 +1,13 @@
-# Choose a NEW metadata.name for each demo round; do not edit questions once
-# voting starts. Open/close by changing state through the GitOps repository.
+# A SAMPLE, not what the conference runs. The deployed rounds are `demo1` and
+# `evaluation`, defined in the platform repository at
+# k8s.koudijs.dev/2-gitops/voter-demo/demo-questions.yaml, and their names are
+# stable rather than dated -- so the old advice here ("choose a NEW name for each
+# round") no longer describes the demo. Resetting between runs is now the
+# explicit delete in docs/demo-runbook.md, "Reset between runs".
+#
+# For the schema, every constraint and the traps, see
+# docs/quizsession-authoring.md. Do not edit questions once voting has started:
+# a ballot references its round by name, and answers reference question ids.
 apiVersion: examples.configbutler.ai/v1alpha1
 kind: QuizSession
 metadata:

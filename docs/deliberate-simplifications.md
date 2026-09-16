@@ -57,7 +57,7 @@ one does, so that check catches both; the UID comparison beside it was redundant
 ## 2. A submission is named after the voter, not a hash
 
 **What we do.** `submissionName` returns `<round>-<lowercased display name>` —
-`demo1-round-2026-09-15-ada-lovelace`. It was a SHA-256 of the round UID and the
+`demo1-ada-lovelace`. It was a SHA-256 of the round UID and the
 opaque Kubernetes subject.
 
 **What we gave up.** Nothing, *as long as one display name is one person*. That
@@ -76,7 +76,7 @@ or an admin creating `Participant` objects that share a `displayName`. If you
 change enrolment, re-read this entry.
 
 **Why we took the trade.** The submission list is the demo. With Lens open on
-`quizsubmissions`, the room watches `demo1-round-2026-09-15-ada-lovelace` arrive
+`quizsubmissions`, the room watches `demo1-ada-lovelace` arrive
 as Ada votes, and everyone can pick out their own ballot. `vote-9f2a…` is a wall
 of hex.
 

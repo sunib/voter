@@ -1,6 +1,7 @@
 # Demo runbook — "GitOps Needs an API"
 
-Swiss Cloud Native Day 2026. 45 minutes, two live demos, a room full of phones.
+Swiss Cloud Native Day 2026, 17 September. A 45-minute slot: **40 minutes of
+talk, 5 of questions.** Two live demos and a closing round, a room full of phones.
 
 This is the operator's copy: what to press, what the room sees, what breaks and
 what to do about it. It is also the answer to "what are we building for" — if a
@@ -12,18 +13,40 @@ choreography.
 
 ---
 
-## The shape of the 45 minutes
+## The shape of the 40 minutes
 
-| Minutes | Beat | Room's phones |
+The slot is 45. **The talk is 40 and the last five are questions** — so every
+number below is five minutes tighter than the version of this runbook you read
+last week. [`presentation.md`](presentation.md) carries the same clock in its
+presenter notes, slide by slide. If the two ever disagree, the deck is right,
+because the deck is what is in front of you on stage.
+
+| Clock | Beat | Room's phones |
 |---|---|---|
-| 0–8 | The problem: business intent ends up in Git, stakeholders do not do pull requests | idle |
-| 8–17 | **Demo 1** — identity, authorization, and a Kubernetes object you did not expect | **in use** |
-| 17–25 | The pattern: a typed API in front of the repo | idle |
-| 25–40 | **Demo 2** — Git, conflict, and the one place the room works together | **in use** |
-| 40–45 | The honest checklist: where this fits, where it does not | idle |
+| 0:00–3:15 | Why we like GitOps: the four W's, and the fact that Git is not easy | idle |
+| 3:15–8:30 | The problem arc, eleven diagram builds | idle |
+| 8:30–10:30 | The big picture, today's setup, and what is out of scope | idle |
+| 10:30–18:00 | **Demo 1** — identity, authorization, and a Kubernetes object you did not expect | **in use** |
+| 18:00–24:00 | The mechanism: how you observe a cluster, and what a commit can carry | idle |
+| 24:00–36:00 | **Demo 2** — Git, conflict, and the one place the room works together | **in use** |
+| 36:00–38:45 | The honest checklist: where this fits, where it does not | idle |
+| 38:45–40:00 | **The evaluation round, opened live** | **in use** |
+| 40:00–45:00 | Questions, with the results still on screen | in use |
 
-Two phone segments, eight minutes apart, is about right. A room will pick a phone
-up twice; it will not pick it up four times.
+**Three phone segments now, not two.** The third one is cheap because it is the
+close: you need their attention anyway, and the button press that opens it is
+itself the last artifact of the talk. See "The closing round" below.
+
+Five minutes came out of the 45-minute version, and here is exactly where from,
+so you can put any of it back if a rehearsal runs short:
+
+| Cut | Saves | Was |
+|---|---|---|
+| Demo 1 step 4, the interloper | 2:00 | optional already; this is the third time it has been spent |
+| Demo 1 step 3 tightened | 0:30 | four minutes of refusals; three is enough |
+| Demo 2 step 2 told, not walked | 0:30 | this runbook already conceded it survives 90 seconds |
+| Demo 2 step 3 moved to the close | 2:00 | it costs nothing there, and it makes the close live |
+| The bio merged into one slide | 1:00 | two slides; nobody is here for it |
 
 **The first eight minutes talk about Git, and that is fine.** What is being held
 back is not the word. It is the evidence that *this cluster has been writing to a
@@ -31,12 +54,12 @@ repository since they scanned the code*. Naming the problem — intent ends up i
 a repo that the people who own the intent cannot reach — is the setup for both
 demos and gives nothing away. "The secret" below draws the line.
 
-The arithmetic, honestly: demo 1's steps sum to nine minutes with the interloper
-dropped, demo 2's to fifteen. That is the allocation above, and it leaves the
-closing its full five. **The interloper (demo 1 step 4) is the slack** — it is
-marked optional and this is the second time this runbook has spent it. Put it
-back only if you walk on early. If you are still over on stage, demo 2 step 2
-survives being told in ninety seconds.
+**What to sacrifice if you are over on stage**, in the order you should reach for
+it: the krm-stream slide after demo 1 (30s, pure bonus), demo 2 step 2 told
+rather than walked (30s), the coffee menu dropped from demo 1 step 2 (30s — it
+comes back in demo 2 anyway). Do not cut demo 2 step 4; it is the beat the talk
+is named for. Do not cut the closing round; it is where the last commit comes
+from.
 
 ---
 
@@ -125,9 +148,9 @@ and never applies them again.
 They have to. Flux applies server-side and owns every field it declares,
 including `maximumUsage` and `state`. Without the annotation the demo is quietly
 bi-directional and loses both ways: the room raises the voucher limit and the
-next reconcile reverts it, or you press Open on round two and Flux closes it
-again while the room is still voting. The reconcile interval is 10 minutes —
-comfortably inside a 45-minute talk.
+next reconcile reverts it, or you press Open on `evaluation` at the close and
+Flux closes it again while the room is still voting. The reconcile interval is
+10 minutes — comfortably inside a 45-minute slot.
 
 Two consequences, both of which bite at pre-flight rather than on stage:
 
@@ -135,10 +158,19 @@ Two consequences, both of which bite at pre-flight rather than on stage:
   exists.** Changing a price in `app.yaml` and pushing does nothing. To re-seed,
   delete the object and let Flux recreate it:
   `kubectl -n voter delete coffeeconfig demo-coffee`
-- **Renaming a round is unaffected.** A new name is a new object, so it is
-  created from Git as normal and `prune` removes the old one. This is a second
-  reason to rename rather than reuse — a re-run under the *same* name will not
-  have its `state` reset, because Flux no longer touches it.
+- **The rounds are now called `demo1` and `evaluation`, and those names are
+  stable.** That reads better everywhere — the demo2 commit template
+  interpolates the round name into the subject line, so a commit says
+  `chore(demo2): 1 change in evaluation` instead of carrying a date nobody
+  needs. (No author on that line any more — see "What the commits say".) But it removes the escape hatch this runbook used to lean on.
+
+> ⚠️ **The rename trick is gone, and it was doing three jobs.** A dated round
+> name used to reset `state`, drop the previous room's ballots, and let a
+> returning audience vote again, all for free. With fixed names, **every one of
+> those is now a manual step**, and the one that bites is the rehearsal: open
+> `evaluation` this afternoon to check it works and it is still `live` tomorrow
+> morning, because Flux will not apply over an object that already exists. See
+> T-24h and "Reset between runs" — both now carry the commands.
 
 **Do not verify this by looking for the annotation on the live object.** Flux
 reads it from the manifest it is about to apply, sees the object already exists,
@@ -147,35 +179,90 @@ shows no annotation, and that absence is the proof it is working. Verify by
 behaviour instead: patch a field, `flux reconcile kustomization voter-demo`, and
 check the value survived.
 
+### What the commits say
+
+Every commit message lost its author line. They used to end `from
+demo:CgZzaW1vbjcSCXJvb20tcGFzcw` — the raw Kubernetes username, which is the
+identity RBAC authorized and reads on a projector like a base64 accident — and
+demo2's body line repeated the display name in brackets on top of that. The same
+fact, three times, one of them unreadable.
+
+It now appears exactly once, where Git already keeps it:
+
+```
+commit 4aaa861…
+Author:     Ada-Lovelace <ada-lovelace@koudijs.dev.test>
+Commit:     ConfigButler Bot <bot@configbutler.ai>
+
+    chore(demo2): 1 change in demo1
+
+    - [CREATE] QuizSubmission/demo1-ada-lovelace
+```
+
+That is a better demo, not just a tidier one. The subject says **what changed**
+and the header says **who** — so `git show --format=fuller` in demo 2 step 1 is
+the moment the name appears, rather than a repetition of something already on
+screen. Say it that way: *"the message never mentions her. Git's own author
+field does, and the cluster filled it in."*
+
+**What is not in there is a resourceVersion**, and it cannot be. A live commit
+template's per-resource context exposes Operation, Group, Version, Resource,
+Kind, Namespace, Name and Labels — and no resourceVersion — while the mirrored
+YAML has it stripped by the reverser's sanitizer, deliberately, or every write
+would churn the file. A reconcile commit is the one place a version is
+available, and those now say `at rv 184213` when the reverser pins one. See
+[gitops-reverser-feedback.md](gitops-reverser-feedback.md).
+
 ---
 
 ## Pre-flight
 
 ### T-24h
 
-- [ ] **Rename both rounds.** `demo-round.yaml` ships
-      `demo1-round-<date>` / `demo2-round-<date>`. Choose a new name for *this
-      talk*, not this topic. A reused name means the room that voted last time
-      cannot vote again, this talk's votes land in the previous talk's file, and
-      — because ballots are selected by round *name*, not UID — a recreated
-      round **inherits the old round's votes**. The file's own header explains
-      all three; do not skip it. To write new questions rather than rename old
-      ones, [quizsession-authoring.md](quizsession-authoring.md) is the field
-      reference — every constraint, the five question types, and what each one
-      looks like on the projector.
-- [ ] Round one `state: live`, round two `state: closed` (not `draft` — a draft
-      is filtered out of the room page entirely and there is no button to press).
-      **Check this, do not assume it.** A rehearsal leaves round two `live`, and
-      then demo 2 step 3 has nothing to open and the room has already voted in
-      it: `kubectl -n voter get quizsessions` prints the state of both.
-- [ ] Push and let Flux reconcile. Confirm both rounds exist:
-      `kubectl -n voter get quizsessions`
-- [ ] **If you changed the coffee menu**, pushing is not enough — the
-      CoffeeConfig is seeded, not reconciled. Delete it and let Flux recreate
-      it: `kubectl -n voter delete coffeeconfig demo-coffee`. Same for a round
-      whose `state` you edited without renaming it. See "Two repositories".
+- [ ] **Deploy the questions** from
+      [`demo-questions.yaml`](demo-questions.yaml) — two sessions, `demo1` with
+      four questions and `evaluation` with four. The ids are referenced further
+      down this file; if you change one, change it here too.
+- [ ] **Delete the sessions and let Flux re-seed them.** Pushing is not enough:
+      they are `ssa: IfNotPresent`, so Flux will not apply over an object that
+      exists. This is the *only* way to change the questions now that the names
+      are stable:
+
+      ```bash
+      kubectl -n voter delete quizsession demo1 evaluation
+      flux reconcile kustomization voter-demo
+      kubectl -n voter get quizsessions
+      ```
+
+      The old dated sessions (`demo1-round-2026-09-15` and friends) are not
+      removed by that delete — they go when Flux prunes them, because they left
+      the kustomization when `demo-round.yaml` became `demo-questions.yaml`.
+      Confirm nothing dated is left in the same `get`.
+- [ ] **`demo1` is `live`, `evaluation` is `closed`.** Not `draft` — a draft is
+      filtered out of the room page entirely and there is no button to press.
+      **Check it, do not assume it**, and check it again after any rehearsal:
+      `kubectl -n voter get quizsessions` prints the state of both. If a
+      rehearsal opened it, a push will not close it again:
+
+      ```bash
+      kubectl -n voter patch quizsession evaluation --type=merge -p '{"spec":{"state":"closed"}}'
+      ```
+
+- [ ] **Delete every ballot from both rounds.** Submissions are not owned by
+      their round and the names no longer carry a date, so nothing expires on
+      its own. Skip this and tomorrow's room sees today's answers and cannot
+      vote:
+
+      ```bash
+      kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=demo1
+      kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=evaluation
+      ```
+
+- [ ] **If you changed the coffee menu**, pushing is not enough either — same
+      reason. `kubectl -n voter delete coffeeconfig demo-coffee`, then reconcile.
 - [ ] Confirm the audit-trail repo is reachable and the previous talk's folders
-      are either cleaned or clearly dated.
+      are either cleaned or clearly dated. `prune: Always` means the deletions
+      above reach Git, so expect commits from this step.
 
 ### T-30m
 
@@ -185,12 +272,15 @@ check the value survived.
 - [ ] Open `https://demo.koudijs.dev/auth/login?connector=github&return=%2Froom`
       on the presenter machine. That is the operator door; it puts you at
       `/room` with the rotating QR.
-- [ ] Join from your own phone as a participant. Vote in round one. This proves
+- [ ] Join from your own phone as a participant. Vote in `demo1`. This proves
       the whole chain and gives the room's first file a neighbour.
-- [ ] `git -C <audit-trail> pull` and confirm your test vote arrived in
-      `clusters/k8s.koudijs.dev/demo1/submissions.yaml`.
+- [ ] `git -C <audit-trail> pull` and confirm your test vote arrived in **both**
+      places — every submission is mirrored twice, because both WatchRules claim
+      `quizsubmissions`:
+      `clusters/k8s.koudijs.dev/demo1/submissions.yaml` and
+      `clusters/k8s.koudijs.dev/demo2/results/<your-name>.yaml`.
 - [ ] Delete the test vote so the room starts clean:
-      `kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=<round-1-name>`
+      `kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=demo1`
 - [ ] **Confirm the audience grant is off.** On `/room`, *Let the room edit the
       coffee menu* must be unticked — demo 1's refusal depends on it. If a
       previous run left it on:
@@ -225,12 +315,22 @@ check the value survived.
       away. One command settles it:
       `kubectl -n voter get rolebinding voter-audience-coffee-admin` should say
       `NotFound`.
+- [ ] **Last look at the two round states**, for the same reason — a wrongly
+      `live` `evaluation` breaks the close silently and the room will have voted
+      in it during demo 1. One command settles it:
+
+      ```bash
+      kubectl -n voter get quizsessions
+      # demo1       live
+      # evaluation  closed
+      ```
 
 ---
 
 ## Demo 1 — who you are, who decides what you may do, and what a vote actually is
 
-**Nine minutes. Git is not mentioned once.** See "The secret" below.
+**Clock 10:30 → 18:00, seven and a half minutes. Git is not mentioned once.**
+See "The secret" below.
 
 Demo 1 has two jobs and only two. The first is identity and authorization: who
 the room is, and who decided what they may do. The second is quieter and lands
@@ -256,15 +356,36 @@ While they join, say what just happened, because it is the substance:
 
 ### 2. Let them vote, then show them what they just wrote (3 min)
 
-Round one is live. They answer "How do you change Kubernetes configuration
-today?" Project the results screen and let the bars fill. That is the warm-up,
-and it earns the room's attention for what follows.
+`demo1` is live. Four questions — Argo/Flux, Helm/Kustomize, how they change
+configuration today (multi-select), and one free-text line. Project the results
+screen and let the bars fill. **Press "Refresh results" to make them fill** —
+the results screen loads once and has a button, not a stream. The room page
+updates itself; this one does not. Give it a press every few answers so the
+bars visibly grow rather than sitting still while you talk over them.
+
+That is the warm-up, and it earns the room's attention for what follows.
+
+**Take the two free callbacks off those bars.** They cost nothing now and they
+buy you two moments later:
+
+- **Argo vs Flux** — "whichever you picked, nothing in this talk changes it.
+  They both live downstream of everything I am about to show you." Use it at the
+  big-picture slide.
+- **Helm's share** — *remember the number*. At the honest-limits slide you get to
+  say "sixty-odd percent of this room said Helm, and a chart is the one thing I
+  cannot reverse into readable intent." Your own audience proving your own
+  limitation is worth more than the question cost.
+
+And say what the multi-select bars are showing, because they are the argument
+from the "But Git is not easy" slide made out of their data: GitOps and
+`kubectl apply` are both lit up. *"You are all doing both, and only one of them
+leaves a story."*
 
 Then go to the terminal while the bars are still fresh:
 
 ```bash
 kubectl -n voter get quizsubmissions
-kubectl -n voter get quizsubmission <round>-<somebody> -o yaml
+kubectl -n voter get quizsubmission demo1-<somebody> -o yaml
 kubectl -n voter get coffeeconfig demo-coffee
 ```
 
@@ -278,7 +399,7 @@ where the pattern gets a name — and do not mention Git. "Your vote is a
 Kubernetes object" is a big enough thing to have said, and it is the sentence
 demo 2 collects on.
 
-### 3. Show what they *cannot* do (4 min) — the core of the authorization half
+### 3. Show what they *cannot* do (2.5 min) — the core of the authorization half
 
 This is the part worth rehearsing, because every refusal below is a **real API
 server 403**, rendered verbatim. There is no client-side permission model to
@@ -286,7 +407,7 @@ give the game away.
 
 | Try this | What happens | Why |
 |---|---|---|
-| Vote twice in round one | "You have already voted in this round." | One `QuizSubmission` per identity per round, named `<round>-<name>`. The create is atomic, so two tabs still make one vote. |
+| Vote twice in `demo1` | "You have already voted in this round." | One `QuizSubmission` per identity per round, named `demo1-<name>`. The create is atomic, so two tabs still make one vote. |
 | A participant opens or closes a round | **403 from Kubernetes**, shown on the page | The audience Role has `get, list, watch` on `quizsessions` and no `patch`. |
 | A participant edits the coffee menu | **403 on save**, with the page saying so before they try | `coffeeconfigs: get, list, watch` — no `patch`. They may read the menu and watch it change. Editing lives in a second Role that is not bound yet; you hand it out in demo 2. |
 | A participant edits their own vote | no path to it, and **403** if attempted directly | `quizsubmissions: get, list, watch, create`. Create-only, on purpose. |
@@ -320,7 +441,7 @@ participant's own token went to the API server, RBAC answered, and the app
 rendered the answer. That is what makes the audit trail honest — and it is the
 setup for demo 2, though you do not say so yet.
 
-### 4. The interloper (2 min, optional but strong)
+### 4. The interloper — CUT, and this is where it went
 
 Log in with GitHub instead of the room code. You are now `github:<email>` — a
 different namespace of identity, which **cannot** hold demo grants, because the
@@ -345,8 +466,12 @@ that *is* the application's needs naming. It is a better beat honestly told:
 > it only ever *adds*. There is no rule you can write that takes something away
 > from an administrator. If you want that, you need a different layer.
 
-If you would rather not open that door mid-demo, skip this beat entirely. It is
-optional, and it costs you the two minutes the closing checklist wants back.
+**This beat is cut from the 40-minute version.** It is the two minutes that pay
+for the questions at the end, and it is the third time this runbook has spent
+them. It stays written down because it is genuinely strong and because you may
+walk on early — but the deck has no slide for it, so putting it back means
+talking over the demo-1 slide for two extra minutes. Decide before you go on, not
+on stage.
 
 ---
 
@@ -387,15 +512,19 @@ you.
 
 ## Demo 2 — the same actions in Git, and the one place the room works together
 
-**Fifteen minutes.** The room is still signed in from demo 1; do not make them
-join again.
+**Clock 24:00 → 36:00, twelve minutes.** The room is still signed in from demo 1;
+do not make them join again.
+
+Step 3 used to be "open round two, live". It now happens at 38:45, during the
+close — see "The closing round" below. Everything else keeps its shape, and the
+steps are renumbered.
 
 Two arguments, in this order. The first is the reveal: everything they have
 already done is in a repository, attributed to them by name, and not one of them
 has a GitHub account. The second answers the question the first one provokes in
 any engineer in the room — *if Git is the record, what happens when two people
 change the same thing?* — and its answer is the thesis of the talk. **Git is the
-record. The Kubernetes API is where you work together.** Step 5 is where that
+record. The Kubernetes API is where you work together.** Step 4 is where that
 stops being a slogan and becomes a red dot on a screen.
 
 ### 1. The reveal (2 min)
@@ -425,10 +554,13 @@ reconciles from it. A commit written by an attendee can never travel back into
 the cluster. The picture is in "Two repositories" above if you want it fresh
 before you walk on.
 
-### 2. The same objects, filed two ways (2 min)
+### 2. The same objects, filed two ways (90 seconds — tell it, do not walk it)
 
 Now open `clusters/k8s.koudijs.dev/demo2/results/`. One file per person, named
-after them, and every round they vote in appends a document to their file.
+after them, and every round they vote in appends a document to their file. That
+is not a second copy made for the demo: **both WatchRules claim
+`quizsubmissions`**, so every vote was mirrored into both folders at the moment
+it was cast.
 
 These are **the same `QuizSubmission` objects**. The only difference between the
 two folders is one template string:
@@ -445,21 +577,7 @@ This is the moment the pattern stops being a diagram. The API is typed, the
 objects are the intent, and *how they are laid out in Git is configuration* —
 not something the caller knows or cares about.
 
-### 3. Open round two, live (2 min)
-
-From `/room`, press Open on round two. Two things happen at once:
-
-- Every phone in the room updates without a refresh, and the round appears.
-- `demo1/quiz-configs.yaml` flips `state: closed` → `state: live` **in place**,
-  authored by you.
-
-Show that diff. A one-line change in a file the room has already seen, made by
-pressing a button, attributed to the person who pressed it.
-
-Let them vote. Round two is the "would you actually run this" round, which gives
-you your closing material for free.
-
-### 4. Grant the room the admin page (2 min)
+### 3. Grant the room the admin page (2 min)
 
 The room's admin page has been refusing them since demo 1. On `/room`, under
 **What the audience may do**, tick *Let the room edit the coffee menu*.
@@ -506,7 +624,7 @@ fifteen seconds, and it proves the switch was real in both directions — the
 revoke is a clean `+0/-18`, with the document gone from Git rather than
 tombstoned. Verified on 2026-09-15; both directions produce a commit.
 
-### 5. Two people, one menu (5 min)
+### 4. Two people, one menu (5 min)
 
 Now let *them* do it — and then collide with them on purpose. This is the beat
 the talk is named for.
@@ -521,7 +639,7 @@ Yellow dots mark the fields you changed and the summary offers to save one
 change.
 
 **The collision.** With that draft still open and unsaved, have a second person
-change the same field — a volunteer, now that step 4 gave them the permission,
+change the same field — a volunteer, now that step 3 gave them the permission,
 or you from the terminal if nobody bites:
 
 ```bash
@@ -567,7 +685,7 @@ chose and why. Then fill in the reason box. It is not decoration: it becomes
 authored by whoever pressed the button. Press Save, then **save now**, which
 creates the `CommitRequest`.
 
-Hand the whole thing to the room if the grant from step 4 is on — it is their
+Hand the whole thing to the room if the grant from step 3 is on — it is their
 permission now, and a commit authored by an attendee fixing the bug beats one
 authored by you. The conflict half works either way, because the second editor
 can always be your terminal.
@@ -590,7 +708,7 @@ to be the seeded value and it gave demo 2 away during demo 1. Set live, at this
 moment, it is a banner announcing the commit that is itself a commit, and every
 phone in the room reads it at once.
 
-### 6. The boundary — what is deliberately *not* in Git (2 min)
+### 5. The boundary — what is deliberately *not* in Git (2 min)
 
 Switch to the **Orders** tab, next to Config. It is a live feed of what the room
 actually ordered, placed and refused.
@@ -609,38 +727,112 @@ you can point at both halves on one screen.
 
 ---
 
+## The closing round — the last commit of the talk
+
+**Clock 38:45.** This is the old demo 2 step 3, moved. It costs nothing here,
+because you need the room's attention for the close anyway, and it turns a
+bullet list into a live demo.
+
+On the "One last round" slide, go to `/room` and press **Open** on `evaluation`.
+Two things happen at once:
+
+- Every phone in the room updates without a refresh, and the round appears.
+- `demo1/quiz-configs.yaml` flips `state: closed` → `state: live` **in place**,
+  authored by you.
+
+**Show that diff.** A one-line change in a file the room has already seen, made
+by pressing a button, attributed to the person who pressed it. It is the last
+artifact of the talk and it is the four W's slide proved one more time, in five
+seconds, without a slide.
+
+Note which folder it lands in: **`demo1/quiz-configs.yaml`, not `demo2/`.** The
+demo2 GitTarget does not claim `quizsessions` — only `coffeeconfigs` and
+`quizsubmissions`. If you go looking in the wrong folder on stage you will find
+nothing and lose thirty seconds.
+
+Then leave the results screen projected and take questions. Four questions:
+`trust`, `first`, `adopt` (0–10, renders as an average to one decimal) and
+`missing` (free text).
+
+**It does not move on its own.** `/answer/evaluation/results` fetches once and
+offers a "Refresh results" button; there is no stream behind it. Across a
+five-minute Q&A that matters more than anywhere else in the talk, because the
+screen behind you is the last thing the room looks at. Press Refresh between
+questions — it is one click and it is worth the beat. If you would rather not
+touch the laptop, say so out loud ("this is a snapshot, let me pull it again")
+rather than letting a frozen count look like nobody voted.
+
+**Read two or three of the `missing` answers out loud.** It is a question
+channel for everyone in the room who would never raise a hand, and the answers
+are your roadmap written by the people who would use it.
+
+**There is no contact question, on purpose.** Real e-mail addresses would be the
+only genuine personal data in that repository, they are awkward to remove from a
+history, and right now you get to say on stage that every identity in there is
+synthetic (`@koudijs.dev.test` — RFC 2606 reserves `.test`, so nobody can ever
+register it; Room Pass chose it over `.invalid` because a participant reads the
+address on the join page and "invalid" looks like a bug). Keep that property.
+Point people at
+reversegitops.dev, or just ask them to come and find you.
+
+If a rehearsal left `evaluation` already `live`, there is no button to press:
+skip the diff, let them vote, and say the sentence instead. See T-2m — this is
+exactly what that check is for.
+
+**Before you leave the stage**, revoke the coffee grant, and let the room watch
+you do it. The revoke is a clean `+0/-18` commit, so it proves the switch was
+real in both directions:
+
+```bash
+kubectl -n voter delete rolebinding voter-audience-coffee-admin
+```
+
+---
+
 ## The kubectl interludes
 
 ### Casting your own answers
 
-You wanted to add a few obviously invented voters. The object is plain — and it
-has to agree with the round exactly, which
-[quizsession-authoring.md](quizsession-authoring.md) spells out:
+You wanted to add a few obviously invented voters. The object is plain:
 
 ```yaml
 apiVersion: examples.configbutler.ai/v1alpha1
 kind: QuizSubmission
 metadata:
-  # <round>-<display name, lowercased>
-  name: demo1-round-2026-09-15-ada-lovelace
+  # demo1-<display name, lowercased>
+  name: demo1-ada-lovelace
   namespace: voter
   labels:
-    voter.configbutler.ai/round: demo1-round-2026-09-15
+    voter.configbutler.ai/round: demo1
     # Original casing. This becomes results/Ada-Lovelace.yaml in demo2.
     voter.configbutler.ai/submitter: Ada-Lovelace
 spec:
   sessionRef:
     group: examples.configbutler.ai
     kind: QuizSession
-    name: demo1-round-2026-09-15
-  submittedAt: "2026-09-15T10:00:00Z"
+    name: demo1
+  submittedAt: "2026-09-17T10:00:00Z"
   answers:
     # Exactly one answer field per question — the CRD enforces it with CEL.
+    - questionId: stack
+      singleChoice: Flux
+    - questionId: packaging
+      singleChoice: Plain YAML
+    # approach is multiChoice now — a LIST, not a string. A bare
+    # `singleChoice: GitOps` here is rejected by the CRD, live, in front of
+    # the room.
     - questionId: approach
-      singleChoice: GitOps
-    - questionId: feedback
+      multiChoice:
+        - A pull request to a GitOps repo
+        - kubectl apply
+    - questionId: wish
       freeText: I would like the cluster to write this down for me.
 ```
+
+**The ids and types must match [`demo-questions.yaml`](demo-questions.yaml).**
+Three of them moved when the questions were finalised: the round is `demo1` and
+not a dated name, `feedback` became `wish`, and `approach` became `multiChoice`.
+Paste the old version and the CEL validation refuses it on stage.
 
 Keep the made-up names visibly made up — Ada Lovelace, Grace Hopper, Alan
 Turing. The room enjoys being in on it, and it makes the "one file per person"
@@ -655,7 +847,7 @@ including when that is you cheating.
 
 ```bash
 kubectl -n voter get quizsubmissions \
-  -l voter.configbutler.ai/round=<round-name> \
+  -l voter.configbutler.ai/round=demo1 \
   --sort-by=.metadata.creationTimestamp
 ```
 
@@ -700,18 +892,21 @@ them would bury the folder under a document per save.
 | Nobody can join | Room ended, or enrolment closed | `kubectl -n voter get room demo -o yaml` — check `endsAt` and `enrollment` |
 | Join works, voting 403s | RoleBinding missing | `kubectl -n voter get rolebinding voter-audience` |
 | Phones show stale prices | Stream dropped | The page says so and offers Retry. Prices are server-authoritative; orders are still priced correctly |
-| Round two will not open | You are signed in as a participant, not an operator | Re-enter through the GitHub door |
+| `evaluation` will not open | You are signed in as a participant, not an operator | Re-enter through the GitHub door |
+| `evaluation` is already open when the close arrives | A rehearsal opened it and a push did not close it — seeded, not reconciled | Nothing to fix on stage: skip the diff, let them vote. Prevent it at T-2m |
 | Nothing reaching Git | Reverser down, or deploy key | `kubectl -n voter logs deploy/gitops-reverser`; check the GitProvider's secret |
 | Commit lands with no author | Audit event not matched | Message renders "from an unnamed actor". Mention it and move on — do not debug on stage |
 | Voucher still depleted after raising the limit | Order placed before the patch reconciled | Re-order. The limit is read fresh on every order, never cached |
-| Order feed empty after a restart | Working as designed | This is the point of section 6 — say so |
+| Order feed empty after a restart | Working as designed | This is the point of step 5 — say so |
 | A menu or round edit pushed to Git changed nothing | That object is seeded, not reconciled | Delete it and let Flux recreate it. Not a Flux fault — see "Two repositories" |
 | The grant switch is missing from `/room` | You are signed in as a participant | Reading it needs `rolebindings`, which the audience does not have. Re-enter through the GitHub door |
 | Switch reports the Role does not exist | `voter-audience-coffee-admin` was not reconciled | `kubectl -n voter get role voter-audience-coffee-admin`. The switch refuses rather than create a binding that grants nobody anything |
 | Grant is on but a phone still refuses | That phone has not polled yet | Wait ~5s. The table refreshes itself; there is nothing to press |
 | Permission grid is empty or says "incomplete" | An authorizer could not enumerate | The page says so itself. Mention it and move on — the refusals are still real |
+| The results bars do not move | Working as designed — the results screen fetches once | Press **Refresh results**. There is no stream behind that page; only the room page updates itself |
+| A commit message names nobody | Working as designed since the templates changed | The name is in the commit's Author header. `git show --format=fuller` — see "What the commits say" |
 | Save is greyed out in the menu editor | An unresolved conflict — this is the design | Take Theirs or Keep Mine on every red field. `canSave` is false while any conflict is open |
-| The conflict never appears in demo 2 step 5 | The second editor changed a different field, or the stream dropped | Different field is not a conflict; that is the point of beat 2. If the banner says reconnecting, press Refresh from cluster and redo the collision |
+| The conflict never appears in demo 2 step 4 | The second editor changed a different field, or the stream dropped | Different field is not a conflict; that is the point of beat 2. If the banner says reconnecting, press Refresh from cluster and redo the collision |
 | "Live updates overtook the read. Refresh again" | A watch arrived mid-refresh | Press Refresh from cluster again. Your draft is retained throughout |
 | A voucher vanished after a terminal patch | A merge patch replaced the whole list | `--type=json` with an index, never `--type=merge`, on `spec.vouchers` or `spec.products`. Re-seed if you have lost them: see "Two repositories" |
 
@@ -723,23 +918,41 @@ port-forwarding to Dex on a shared conference network, stop.
 
 ## Reset between runs
 
-If you give this talk twice in a day, use a new round name per run (`-afternoon`
-suffix) rather than deleting. If you must clean:
+**The rounds are called `demo1` and `evaluation` and they keep those names.** The
+old advice — give each run a dated name and let the rename do the cleanup — no
+longer applies, and neither does anything downstream of it. Run all four
+commands below between every run, **including between a rehearsal and the real
+talk**, because nothing resets itself any more:
 
 ```bash
-kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=<old-round>
+# 1. Drop every ballot from both rounds. Submissions are not owned by their
+#    round, so nothing goes away on its own. prune: Always means this reaches
+#    Git — expect delete commits.
+kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=demo1
+kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=evaluation
+
+# 2. Re-seed both sessions. A push does NOT do this: they are ssa: IfNotPresent,
+#    so Flux will not apply over an object that exists. This is also how you
+#    reset `evaluation` to closed after a rehearsal opened it.
+kubectl -n voter delete quizsession demo1 evaluation
+flux reconcile kustomization voter-demo
+
+# 3. Confirm what you actually got.
+kubectl -n voter get quizsessions   # demo1 live, evaluation closed
+
+# 4. Revoke the coffee grant.
+kubectl -n voter delete rolebinding voter-audience-coffee-admin
 ```
 
-Submissions are not owned by their round, so renaming the round alone leaves
-them behind. `prune: Always` means the delete reaches Git too.
+If you would rather not delete the sessions, step 2 has a smaller version that
+resets the one field that matters — but it leaves any question edits unapplied:
 
-Renaming also sidesteps the seeded-object rule: a new round name is a new
-object, so Flux creates it from Git with the `state` you asked for. Reusing a
-name does not reset anything, because Flux no longer applies over an object that
-already exists.
+```bash
+kubectl -n voter patch quizsession evaluation --type=merge -p '{"spec":{"state":"closed"}}'
+```
 
-Revoke the coffee grant between runs, or the next room starts with the
-permission demo 1 is supposed to refuse:
+On the coffee grant specifically — the next room starts with the permission
+demo 1 is supposed to refuse if you skip it:
 
 ```bash
 kubectl -n voter delete rolebinding voter-audience-coffee-admin
@@ -755,8 +968,8 @@ only guarantee it makes.
 
 ## What not to promise
 
-The talk's credibility rests on the last seven minutes being honest, so do not
-spend it in the first thirty-eight:
+The talk's credibility rests on the last four minutes being honest, so do not
+spend it in the first thirty-six:
 
 - **Not** "the commit is observed end to end." The receipt says accepted. Observed
   commit completion is still open work.
@@ -771,10 +984,16 @@ spend it in the first thirty-eight:
 
 - The Git side is only visible on your screen, never on the room's phones.
   Worth a read-only "your commit" link on the thanks screen? It would make the
-  attribution personal for 300 people instead of for one projector.
-- Round two's `confidence` question ("How readable was the mirror on screen?")
-  is scored 0–10 by a room that has just watched demo 2. That is a live audience
-  metric for the talk itself — consider showing it during the closing checklist.
+  attribution personal for 300 people instead of for one projector. **This one
+  got sharper, not weaker**: `k8s-audit-trail` is private, so "go and look at
+  your own commit afterwards" is not something you can offer today even if
+  somebody asks for it.
+- The old `confidence` question ("How readable was the mirror on screen?") was
+  replaced by `adopt` ("How likely are you to try this in the next six months?"),
+  on the reasoning that at the close you want the number that matters and
+  readability is something you can ask three people at the coffee break. Both are
+  `scale0to10`; swapping back is a one-line change in
+  [`demo-questions.yaml`](demo-questions.yaml).
 - **A third layer: admission.** Demo 1 shows authentication and RBAC, and the
   interloper beat runs straight into RBAC's one structural limit — it is
   additive, so nothing can be subtracted from `cluster-admin`. A

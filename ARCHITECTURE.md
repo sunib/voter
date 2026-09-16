@@ -486,7 +486,7 @@ section records what is running now, and the history is in Git.
 | GitOps | `ConfigButler/k8s` commit `0a10ba8`; Flux `voter-demo` Ready at that revision |
 | Build metadata | `/public/build-info` reports `d9f3d93` with `gitDirty: 0` |
 
-The rounds are `demo1-round-2026-09-15` (live) and `demo2-round-2026-09-15`
+The rounds are `demo1` (live) and `evaluation`
 (closed); both are seeded by GitOps and then left alone — see the runbook's
 "Two repositories". Room `demo` is open through **2026-09-30 18:00 UTC**.
 

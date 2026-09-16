@@ -24,7 +24,7 @@
 # on both targets this also writes their removal to Git, which is worth seeing
 # once but not on stage:
 #
-#   kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=demo1-round-2026-09-15
+#   kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=demo1
 #
 # Keep the round name below in step with the live round. It appears THREE
 # times per document -- in metadata.name, in spec.sessionRef.name and in the
@@ -38,14 +38,14 @@ metadata:
   # round name, then the display name lowercased. Readable in Lens as it
   # streams in, and still unique per (round, identity) -- Room Pass makes the
   # participant id the identity, so two ballots cannot share one.
-  name: demo1-round-2026-09-15-ada-lovelace
+  name: demo1-ada-lovelace
   namespace: voter
   labels:
     # ONE round label, doing two jobs: the results page selects on it, and
     # demo1/demo2 use it to decide where the document is filed. It is the round
     # NAME -- the same ns/name reference spec.sessionRef already makes -- which
     # is why nothing here has to look up a UID first.
-    voter.configbutler.ai/round: demo1-round-2026-09-15
+    voter.configbutler.ai/round: demo1
     # Placement input for demo2 -- becomes results/Ada-Lovelace.yaml.
     #
     # Note the honest asymmetry: this label decides the FILENAME, while the
@@ -56,54 +56,74 @@ spec:
   sessionRef:
     group: examples.configbutler.ai
     kind: QuizSession
-    name: demo1-round-2026-09-15
+    name: demo1
   submittedAt: "2026-09-15T09:32:00Z"
   answers:
+    # Four questions, and `approach` is multiChoice -- a LIST. A bare
+    # `singleChoice:` here is refused by the CRD, which is exactly the mistake
+    # this file exists to stop you making in front of a room.
+    - questionId: stack
+      singleChoice: Flux
+    - questionId: packaging
+      singleChoice: Plain YAML
     - questionId: approach
-      singleChoice: GitOps
-    - questionId: feedback
+      multiChoice:
+        - A pull request to a GitOps repo
+    - questionId: wish
       freeText: Seeing the diff before it lands, not after.
 ---
 apiVersion: examples.configbutler.ai/v1alpha1
 kind: QuizSubmission
 metadata:
-  name: demo1-round-2026-09-15-grace-hopper
+  name: demo1-grace-hopper
   namespace: voter
   labels:
-    voter.configbutler.ai/round: demo1-round-2026-09-15
+    voter.configbutler.ai/round: demo1
     voter.configbutler.ai/submitter: Grace-Hopper
 spec:
   sessionRef:
     group: examples.configbutler.ai
     kind: QuizSession
-    name: demo1-round-2026-09-15
+    name: demo1
   submittedAt: "2026-09-15T09:32:20Z"
   answers:
+    - questionId: stack
+      singleChoice: Argo CD
+    - questionId: packaging
+      singleChoice: Helm
     - questionId: approach
-      singleChoice: A mix of both
-    - questionId: feedback
+      multiChoice:
+        - A pull request to a GitOps repo
+        - kubectl apply
+    - questionId: wish
       freeText: A way to tell an emergency kubectl from a deliberate change.
 ---
 apiVersion: examples.configbutler.ai/v1alpha1
 kind: QuizSubmission
 metadata:
-  name: demo1-round-2026-09-15-simon-koudijs
+  name: demo1-simon-koudijs
   namespace: voter
   labels:
-    voter.configbutler.ai/round: demo1-round-2026-09-15
+    voter.configbutler.ai/round: demo1
     voter.configbutler.ai/submitter: Simon-Koudijs
 spec:
   sessionRef:
     group: examples.configbutler.ai
     kind: QuizSession
-    name: demo1-round-2026-09-15
+    name: demo1
   submittedAt: "2026-09-15T09:32:40Z"
   answers:
     # Answering "kubectl or a cluster UI" by using kubectl is the joke, and it
     # is also true.
+    - questionId: stack
+      singleChoice: Both
+    - questionId: packaging
+      singleChoice: Kustomize
     - questionId: approach
-      singleChoice: kubectl or a cluster UI
-    - questionId: feedback
+      multiChoice:
+        - kubectl apply
+        - I ask someone in Slack or a ticket
+    - questionId: wish
       freeText: I want the cluster to write down what I did, so I do not have to.
 ---
 # The window-closer. Without it these three writes still reach Git, but on

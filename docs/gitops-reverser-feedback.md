@@ -16,7 +16,7 @@ demo cluster now runs. Three earlier entries — a routine watch reconnect grade
 as a Warning, `closeDelaySeconds` defaulting to `0`, and a compile-time branch
 worker queue — were resolved in that release, by `d0601a59`, `46bbf3c5` and
 `c6127229` respectively, and have been dropped from this page rather than kept
-as history. What remains is two items, neither of them urgent, and the second
+as history. What remains is three items, none of them urgent, and the second
 is a suggestion we expect may be declined.
 
 ---
@@ -123,6 +123,50 @@ kept narrow.
 unreachable Git remote must not stall the watch path, and dropping-then-healing
 is the right trade. Not removal of the drop path. Not the `GitTarget` surfacing
 we originally proposed — that one we withdraw.
+
+---
+
+## 3. A live commit message cannot name the resourceVersion it wrote
+
+**2026-09-16 · feature request · `spec.commit.message.liveTemplate`**
+
+We wanted a commit subject that carries the resourceVersion of the object the
+commit mirrors — for a conference talk, where the argument is that the
+Kubernetes API is the place concurrent editors meet and the repository is the
+record. A message reading `1 change in demo1 at rv 184213` makes the optimistic
+-concurrency story visible in the artifact it produces, rather than only in the
+browser that produced it.
+
+It cannot be written today. `ResourceRef` (`internal/git/types.go:629`) exposes
+`Operation`, `APIVersion`, `Group`, `Version`, `Resource`, `Kind`, `Namespace`,
+`Name` and `Labels`, and `LiveCommitMessageData` adds `Author`, `GitTarget`,
+`Count`, `Operations`, `Resources` and `RequestMessage`. No version field on
+either. `ReconcileCommitMessageData` does carry `Revision`, which is what we now
+render on reconcile commits — so the concept exists in the template vocabulary,
+just not on the live path.
+
+The mirrored document cannot supply it either, and should not:
+`internal/sanitize/sanitize.go:84` deletes `metadata.resourceVersion`, which is
+correct — a mirror that kept it would rewrite the file on every no-op write.
+
+Two things made this more expensive to discover than it needed to be, and both
+are cheaper to fix than the feature:
+
+1. **The CRD's field list is already out of date.** `liveTemplate`'s description
+   says "Resources exposes Operation, Group, Version, Resource, Namespace, Name,
+   and APIVersion" and omits `Kind` and `Labels`, both of which we use and both
+   of which work. A reader checking whether a field exists cannot trust the list,
+   so they end up in `internal/`.
+2. **Nothing validates a template's field names.** `kubectl apply
+   --dry-run=server` accepts `{{.NoSuchField}}` without complaint; the failure
+   arrives at commit time, and per the CRD a failed render fails the commit. For
+   a config whose whole job is to run unattended during a live demo, admission is
+   where we would want to find that out. A dry render against a zero-valued
+   sample at admission would catch every typo we could make.
+
+We worked around (2) by rendering each template locally against copies of the
+0.47.0 structs before deploying it. That is a reasonable thing for us to do once;
+it is not a reasonable thing to expect of every operator writing a template.
 
 ---
 
