@@ -24,12 +24,17 @@
 # on both targets this also writes their removal to Git, which is worth seeing
 # once but not on stage:
 #
-#   kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=demo1
+#   kubectl -n voter delete quizsubmissions --all
 #
-# Keep the round name below in step with the live round. It appears THREE
-# times per document -- in metadata.name, in spec.sessionRef.name and in the
-# round label -- and a label mismatch is silent: the vote is created, but the
-# results page selects on the label and will not count it.
+# --all, not a label selector: a ballot is selected by spec.sessionRef now, so
+# one carrying no label still counts and a label-scoped delete would leave it
+# for the next room.
+#
+# Keep spec.sessionRef.name below in step with the live round. THAT is what
+# decides which round these ballots count in -- the label beside it only decides
+# where gitops-reverser files the document. A label mismatch is now cosmetic:
+# the vote counts, it is just filed under the wrong folder on the projector.
+# It used to be silent and fatal, which is why this warning was here.
 # ---------------------------------------------------------------------------
 apiVersion: examples.configbutler.ai/v1alpha1
 kind: QuizSubmission
@@ -41,10 +46,10 @@ metadata:
   name: demo1-ada-lovelace
   namespace: voter
   labels:
-    # ONE round label, doing two jobs: the results page selects on it, and
-    # demo1/demo2 use it to decide where the document is filed. It is the round
-    # NAME -- the same ns/name reference spec.sessionRef already makes -- which
-    # is why nothing here has to look up a UID first.
+    # Placement input for demo1 -- it decides which folder the mirrored document
+    # lands in, and NOTHING else. Counting is spec.sessionRef's job. It is the
+    # round NAME, the same reference spec.sessionRef makes, which is why nothing
+    # here has to look up a UID first.
     voter.configbutler.ai/round: demo1
     # Placement input for demo2 -- becomes results/Ada-Lovelace.yaml.
     #

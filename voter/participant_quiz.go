@@ -334,41 +334,32 @@ func registerParticipantQuizHandlers(mux *http.ServeMux, deps handlerDeps) {
 			writeParticipantKubeError(w, err)
 			return
 		}
-		results := make([]quizResult, len(spec.Questions))
-		for i, q := range spec.Questions {
-			results[i] = quizResult{Question: q, Choices: map[string]int{}, Text: []string{}}
-		}
-		total := 0
-		options := metav1.ListOptions{LabelSelector: roundLabel + "=" + round.GetName(), Limit: 500}
+		// The NAMESPACE, with no label selector, because spec.sessionRef is what
+		// selects a ballot now and a label a pasted ballot may not carry cannot
+		// decide what counts. At two rounds and 300 participants that is ~600
+		// objects through the pagination this loop already did.
+		var ballots []*unstructured.Unstructured
+		options := metav1.ListOptions{Limit: 500}
 		for {
 			list, err := clients.dynamic.Resource(quizSubmissions).Namespace(deps.defaultNS).List(ctx, options)
 			if err != nil {
 				writeParticipantKubeError(w, err)
 				return
 			}
-			for _, vote := range list.Items {
-				var data struct {
-					Answers []quizAnswer `json:"answers"`
-				}
-				raw, _ := json.Marshal(vote.Object["spec"])
-				if json.Unmarshal(raw, &data) != nil || validateQuizAnswers(spec.Questions, data.Answers) != nil {
-					continue
-				}
-				total++
-				for _, a := range data.Answers {
-					for i := range results {
-						if results[i].Question.ID == a.QuestionID {
-							results[i].add(a)
-						}
-					}
-				}
+			for i := range list.Items {
+				ballots = append(ballots, &list.Items[i])
 			}
 			if list.GetContinue() == "" {
 				break
 			}
 			options.Continue = list.GetContinue()
 		}
-		writeJSON(w, 200, map[string]any{"round": round, "total": total, "questions": results})
+		// The same counter the reconciler writes into status, so the Refresh
+		// button and the projector cannot disagree.
+		tally := tallyRound(round.GetName(), spec.Questions, ballots)
+		// total stays counted, not filed: it is what this endpoint has always
+		// meant, and the two numbers are told apart on the round's status.
+		writeJSON(w, 200, map[string]any{"round": round, "total": tally.Counted, "filed": tally.Filed, "questions": tally.Questions})
 	}))
 }
 

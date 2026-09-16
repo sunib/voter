@@ -248,29 +248,24 @@ available, and those now say `at rv 184213` when the reverser pins one. See
       kubectl -n voter patch quizsession evaluation --type=merge -p '{"spec":{"state":"closed"}}'
       ```
 
-- [ ] **Delete every ballot from both rounds.** Submissions are not owned by
-      their round and the names no longer carry a date, so nothing expires on
-      its own. Skip this and tomorrow's room sees today's answers and cannot
-      vote:
+- [ ] **Delete every ballot.** Submissions are not owned by their round and the
+      names no longer carry a date, so nothing expires on its own. Skip this and
+      tomorrow's room sees today's answers and cannot vote:
 
       ```bash
-      kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=demo1
-      kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=evaluation
+      kubectl -n voter delete quizsubmissions --all
       ```
 
-      **Those two selectors do not catch the ballots from before the rename.**
-      A submission carries the round name it was cast against, so the four
-      rehearsal votes still in the namespace are labelled
-      `demo1-round-2026-09-15` and neither command above sees them. They are
-      harmless — the results page selects on the label, so they cannot show up
-      in `demo1` — but they are sitting in `demo1/submissions.yaml` on the
-      projector. Clear them once:
+      `--all`, not two label selectors. A ballot is selected by
+      `spec.sessionRef` now, so one that carries no round label at all still
+      counts — and a label-scoped delete would leave it behind for the next
+      room, where it *would* show up. There are two rounds and they reset
+      together, so this is also simply shorter. It catches the stale
+      `demo1-round-2026-09-15` rehearsal ballots for free.
 
-      ```bash
-      kubectl -n voter get quizsubmissions \
-        -L voter.configbutler.ai/round    # anything not demo1/evaluation is stale
-      kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=demo1-round-2026-09-15
-      ```
+      The tally follows: the controller watches the deletions and writes both
+      rounds back to zero within a second or two. Confirm with
+      `kubectl -n voter get quizsessions` — the VOTES column should read 0.
 
 - [ ] **If you changed the coffee menu**, pushing is not enough either — same
       reason. `kubectl -n voter delete coffeeconfig demo-coffee`, then reconcile.
@@ -294,7 +289,8 @@ available, and those now say `at rv 184213` when the reverser pins one. See
       `clusters/k8s.koudijs.dev/demo1/submissions.yaml` and
       `clusters/k8s.koudijs.dev/demo2/results/<your-name>.yaml`.
 - [ ] Delete the test vote so the room starts clean:
-      `kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=demo1`
+      `kubectl -n voter delete quizsubmissions --all`, then check
+      `kubectl -n voter get quizsessions` shows VOTES 0 on both rounds.
 - [ ] **Confirm the audience grant is off.** On `/room`, *Let the room edit the
       coffee menu* must be unticked — demo 1's refusal depends on it. If a
       previous run left it on:
@@ -372,10 +368,15 @@ While they join, say what just happened, because it is the substance:
 
 `demo1` is live. Four questions — Argo/Flux, Helm/Kustomize, how they change
 configuration today (multi-select), and one free-text line. Project the results
-screen and let the bars fill. **Press "Refresh results" to make them fill** —
-the results screen loads once and has a button, not a stream. The room page
-updates itself; this one does not. Give it a press every few answers so the
-bars visibly grow rather than sitting still while you talk over them.
+screen and let the bars fill. **There is nothing to press.** The tally is a
+field on the round, written by a controller that watches the API, and it reaches
+the projector on the stream that page already has — so the bars grow while you
+talk over them, which is the whole point of projecting them.
+
+The screen says "as of 13:22:41" next to the count. If that timestamp stops
+moving while the room is still voting, the controller is down, not the room: the
+count is frozen, not zero. Reload the page — it falls back to reading the
+result on demand, which is exactly what this screen did before.
 
 That is the warm-up, and it earns the room's attention for what follows.
 
@@ -768,13 +769,12 @@ Then leave the results screen projected and take questions. Four questions:
 `trust`, `first`, `adopt` (0–10, renders as an average to one decimal) and
 `missing` (free text).
 
-**It does not move on its own.** `/answer/evaluation/results` fetches once and
-offers a "Refresh results" button; there is no stream behind it. Across a
-five-minute Q&A that matters more than anywhere else in the talk, because the
-screen behind you is the last thing the room looks at. Press Refresh between
-questions — it is one click and it is worth the beat. If you would rather not
-touch the laptop, say so out loud ("this is a snapshot, let me pull it again")
-rather than letting a frozen count look like nobody voted.
+**It moves on its own**, which across a five-minute Q&A matters more than
+anywhere else in the talk: the screen behind you is the last thing the room
+looks at, and the `adopt` average visibly shifts while people are still
+answering. Do not touch the laptop. If the "as of" timestamp behind you stops
+while people are plainly still voting, say so out loud and reload — a frozen
+count that looks live is the one failure this screen can have.
 
 **Read two or three of the `missing` answers out loud.** It is a question
 channel for everyone in the room who would never raise a hand, and the answers
@@ -807,7 +807,13 @@ kubectl -n voter delete rolebinding voter-audience-coffee-admin
 
 ### Casting your own answers
 
-You wanted to add a few obviously invented voters. The object is plain:
+You wanted to add a few obviously invented voters. **Point at the projector, not
+at the terminal.** The tally controller watches the API, so a ballot pasted here
+moves the bars behind you exactly as one typed on a phone does — and nothing in
+the application knew it happened. That is the talk's own argument, performed
+rather than asserted, and it costs one extra sentence.
+
+The object is plain:
 
 ```yaml
 apiVersion: examples.configbutler.ai/v1alpha1
@@ -817,6 +823,10 @@ metadata:
   name: demo1-ada-lovelace
   namespace: voter
   labels:
+    # Neither label decides whether this is counted -- spec.sessionRef below
+    # does. They decide where gitops-reverser FILES it: one folder per round in
+    # demo1, one file per person in demo2. Omit them and the vote still counts;
+    # it just lands somewhere less legible on the projector.
     voter.configbutler.ai/round: demo1
     # Original casing. This becomes results/Ada-Lovelace.yaml in demo2.
     voter.configbutler.ai/submitter: Ada-Lovelace
@@ -863,6 +873,9 @@ including when that is you cheating.
 kubectl -n voter get quizsubmissions \
   -l voter.configbutler.ai/round=demo1 \
   --sort-by=.metadata.creationTimestamp
+
+# ...and the same number the projector is showing, from the terminal:
+kubectl -n voter get quizsessions
 ```
 
 ---
@@ -917,7 +930,7 @@ them would bury the folder under a document per save.
 | Switch reports the Role does not exist | `voter-audience-coffee-admin` was not reconciled | `kubectl -n voter get role voter-audience-coffee-admin`. The switch refuses rather than create a binding that grants nobody anything |
 | Grant is on but a phone still refuses | That phone has not polled yet | Wait ~5s. The table refreshes itself; there is nothing to press |
 | Permission grid is empty or says "incomplete" | An authorizer could not enumerate | The page says so itself. Mention it and move on — the refusals are still real |
-| The results bars do not move | Working as designed — the results screen fetches once | Press **Refresh results**. There is no stream behind that page; only the room page updates itself |
+| The results bars do not move | The tally controller is not running, or the stream dropped | Check the "as of" timestamp: if it is stuck, reload the page. It falls back to reading the result on demand and a **Refresh results** button appears |
 | A commit message names nobody | Working as designed since the templates changed | The name is in the commit's Author header. `git show --format=fuller` — see "What the commits say" |
 | Save is greyed out in the menu editor | An unresolved conflict — this is the design | Take Theirs or Keep Mine on every red field. `canSave` is false while any conflict is open |
 | The conflict never appears in demo 2 step 4 | The second editor changed a different field, or the stream dropped | Different field is not a conflict; that is the point of beat 2. If the banner says reconnecting, press Refresh from cluster and redo the collision |
@@ -942,8 +955,7 @@ talk**, because nothing resets itself any more:
 # 1. Drop every ballot from both rounds. Submissions are not owned by their
 #    round, so nothing goes away on its own. prune: Always means this reaches
 #    Git — expect delete commits.
-kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=demo1
-kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=evaluation
+kubectl -n voter delete quizsubmissions --all
 
 # 2. Re-seed both sessions. A push does NOT do this: they are ssa: IfNotPresent,
 #    so Flux will not apply over an object that exists. This is also how you

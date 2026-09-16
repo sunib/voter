@@ -18,8 +18,18 @@ and a reader would otherwise assume it exists, it belongs here.**
 
 ## 1. A round is identified by its name, not its UID
 
-**What we do.** A `QuizSubmission` carries `voter.configbutler.ai/round` holding
-the round's `metadata.name`, and the results page selects on it.
+**What we do.** A `QuizSubmission` names its round by `metadata.name`, in
+`spec.sessionRef`, and everything that counts a ballot selects on that. It also
+carries `voter.configbutler.ai/round` holding the same name — but only so
+gitops-reverser can file the mirrored document one folder per round. **The label
+decides nothing.**
+
+It used to. Until the tally moved into `QuizSession.status`, the results page
+selected on the label, which the CRD does not require — so a ballot pasted with
+`kubectl` without it was accepted by the API server, committed to Git, and
+counted by nobody. That was a silent dropped vote, and it is gone:
+`spec.sessionRef` is required and typed, so there is no mismatch to report
+because there is only one thing being read.
 
 **What we gave up.** A `QuizSession` deleted and recreated under the *same name*
 inherits the old round's ballots. They are counted into the new round, and the
@@ -41,11 +51,16 @@ a mirror meant to be projected. Keying on the name is also the shape every other
 Kubernetes reference has — `spec.sessionRef` was already a name — so there is one
 notion of "which round" instead of two.
 
-**Recovery.** Delete the stale ballots. The selector is now typeable:
+**Recovery.** Delete the stale ballots. Every one of them, not a label-scoped
+selection — a ballot with no label counts now, so leaving it behind leaves a vote
+behind:
 
 ```console
-kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=<round-name>
+kubectl -n voter delete quizsubmissions --all
 ```
+
+The tally follows the deletions down to zero on its own; `kubectl -n voter get
+quizsessions` shows it in the VOTES column.
 
 **Staleness is not part of this trade.** A browser voting into a round that
 changed under it is still refused, by the `resourceVersion` comparison in the

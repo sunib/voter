@@ -160,7 +160,7 @@ fails instead.
 | `/public/rounds` | GET | Session | Lists the rounds this identity may read |
 | `/public/rounds/{name}` | GET, POST | Session | GET returns a fresh round plus a `voted` flag so a returning voter sees the outcome rather than a form they cannot submit. POST casts the ballot |
 | `/public/rounds/{name}/state` | POST | Session | Opens or closes a round, patched with the caller's own token — which is why a participant's refusal here is the API server's |
-| `/public/rounds/{name}/results` | GET | Session | Counts, numeric averages and text answers, without QuizSubmission metadata |
+| `/public/rounds/{name}/results` | GET | Session | Counts, numeric averages and the full text answers, without QuizSubmission metadata. The first paint and the fallback; the live tally is `QuizSession.status` |
 
 ### Authorization control
 
@@ -530,9 +530,29 @@ vote per enrollment in that round. The round GET looks that name up and returns 
 form they cannot submit; the create stays authoritative, so a failed lookup costs only
 the early warning. Reopening a round preserves votes; create a
 new named round for another vote. Drafts are scoped to participant and round UID.
-`/public/rounds/:name/results` reads QuizSubmissions selected by round UID and returns
-counts, numeric averages and text answers without QuizSubmission metadata. The browser
-refreshes results on demand; this flow opens no extra watches or polling loops.
+A round's result is a field on the round. `voter/quiz_reconciler.go` runs in the
+Voter process as the ServiceAccount, watches QuizSubmissions, and patches
+`QuizSession.status` with the tally -- filed, counted, per-question counts, sums
+and a bounded free-text sample, plus `lastTallyTime` so a stale tally cannot look
+live. It writes the `status` subresource only, so it can publish the result
+without being able to edit the questions. Because it watches the API rather than
+the vote handler, a ballot written with `kubectl` moves the tally exactly as one
+typed on a phone does.
+
+The results and home screens read that status off the `quizsessions` stream they
+already open, so live results cost no new subscription, no new stream scope and
+no new participant grant -- participants could already read rounds.
+`/public/rounds/:name/results` remains, as the first paint, as the fallback when
+the stream or the controller is unavailable, and as the authority for the FULL
+free-text list that status bounds. It and the controller share one counter
+(`voter/quiz_tally.go`), so they cannot disagree.
+
+A ballot is selected by `spec.sessionRef`, which the CRD requires -- not by the
+`voter.configbutler.ai/round` label, which it does not. The label survives as
+gitops-reverser's filing key and decides nothing about counting, so a ballot
+pasted without it is still counted rather than silently dropped. Status never
+reaches Git: gitops-reverser rebuilds each mirrored document from an allowlist
+that has no `status` on it. See `docs/live-results-design.md`.
 
 Round definitions come from GitOps; see `voter/config/demo-round.yaml`. Keep the
 question set unchanged after voting starts: changing it can invalidate existing

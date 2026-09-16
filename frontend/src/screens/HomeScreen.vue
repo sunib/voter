@@ -50,6 +50,19 @@ const closedRounds = computed(() =>
   allRounds.value.filter((round) => round.spec.state === 'closed'),
 )
 
+// How many answers have been filed, off the round's own status.
+//
+// Undefined rather than 0 when there is no tally yet: "0 answers" on a round
+// nobody has counted is a claim, and a wrong one as soon as somebody votes
+// against a deployment whose controller is not running.
+function answersFiled(round: QuizSession): string | undefined {
+  const counted = round.status?.counted
+  if (round.status?.lastTallyTime === undefined || counted === undefined) {
+    return undefined
+  }
+  return counted === 1 ? '1 answer' : `${counted} answers`
+}
+
 async function refresh() {
   busy.value = true
   error.value = ''
@@ -90,6 +103,12 @@ onMounted(refresh)
           <div class="round-card__body">
             <h3>{{ round.spec.title }}</h3>
             <span class="pill pill--good">Voting is open</span>
+            <!-- A field on an object this page ALREADY streams: no second
+                 subscription per idle phone, no new request, no new endpoint.
+                 See docs/live-results-design.md. -->
+            <span v-if="answersFiled(round) !== undefined" class="pill">{{
+              answersFiled(round)
+            }}</span>
           </div>
           <div class="round-card__actions">
             <RouterLink
@@ -126,6 +145,9 @@ onMounted(refresh)
             <div class="round-card__body">
               <h3>{{ round.spec.title }}</h3>
               <span class="pill">Voting is closed</span>
+              <span v-if="answersFiled(round) !== undefined" class="pill">{{
+                answersFiled(round)
+              }}</span>
             </div>
             <div class="round-card__actions">
               <RouterLink

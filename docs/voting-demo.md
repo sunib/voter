@@ -2,12 +2,17 @@
 
 Use the same room code and login as the coffee demo. Open the Voter host's home
 page, choose **Answer questions** on the round, answer, and submit. The
-confirmation opens results. The presenter can open
-`/answer/demo1/results` and select **Refresh results** as votes
-arrive. The home page lists every open
-round and links to the coffee bar; the **Quizzes** and **Coffee** tabs in the top
-bar move between the two halves from any screen. Results do not refresh
-automatically.
+confirmation opens results. The presenter projects
+`/answer/demo1/results` and leaves it alone: the tally is a field on the round,
+written by a controller that watches the API, and it arrives on the stream that
+page already has. There is nothing to press. The home page lists every open
+round, with the answer count on each card, and links to the coffee bar; the
+**Quizzes** and **Coffee** tabs in the top bar move between the two halves from
+any screen.
+
+The count is stamped "as of <time>". If that stops moving while the room is
+still voting, the tally controller is down, not the room — reload, and the page
+falls back to reading the result on demand with a **Refresh results** button.
 
 **Only a Room Pass session may vote.** An operator signed in through GitHub can
 open and close rounds and read results, but the ballot form refuses them: the
@@ -72,7 +77,8 @@ them. The Voter repository sample is a template, not a second reconciler.
    Set `spec.state: live` to accept votes. `draft` blocks voting and is hidden from
    the home page; `closed` stays listed there for results.
 2. Let Flux reconcile and verify the questions on the home page.
-3. Share the round link, collect votes, and refresh the presenter results page.
+3. Share the round link and project the presenter results page. It follows the
+   votes on its own.
 4. To close, change `spec.state` to `closed` in Git and push. A request that read
    the live state just before closure can still finish; this is not an atomic cutoff.
 5. For another round, add a resource with a new name. Reopening a closed round

@@ -25,7 +25,19 @@ rules:
     verbs: [list, watch]
   - apiGroups: [examples.configbutler.ai]
     resources: [quizsessions]
+    verbs: [get, list, watch]
+  # The tally controller. It watches the API, so a ballot pasted with kubectl
+  # moves the projected number exactly as one typed on a phone does -- the
+  # application is not on that path at all.
+  - apiGroups: [examples.configbutler.ai]
+    resources: [quizsubmissions]
     verbs: [list, watch]
+  # ...and writes the result back, to the STATUS only. The subresource split is
+  # worth having for its own sake: the controller publishes the numbers without
+  # being able to edit the questions that produced them.
+  - apiGroups: [examples.configbutler.ai]
+    resources: [quizsessions/status]
+    verbs: [get, patch]
   - apiGroups: [roompass.configbutler.ai]
     resources: [rooms]
     resourceNames: [demo]

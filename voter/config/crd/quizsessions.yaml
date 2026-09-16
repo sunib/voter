@@ -17,16 +17,31 @@ spec:
     - name: v1alpha1
       served: true
       storage: true
+      # The result of the vote, next to the questions that produced it: the same
+      # move as `kubectl get room` printing the join code. VOTES is the tally
+      # the controller wrote, so the terminal answers the question the projector
+      # is answering, from the same number.
       additionalPrinterColumns:
         - name: State
           type: string
           jsonPath: .spec.state
+        - name: Votes
+          type: integer
+          jsonPath: .status.counted
         - name: Title
           type: string
           jsonPath: .spec.title
         - name: Created
           type: date
           jsonPath: .metadata.creationTimestamp
+      # Restored, together with the controller that was missing when 03e2bbb
+      # removed it: the contract existed "for a controller that does not exist",
+      # and voter/quiz_reconciler.go is that controller. It earns its keep twice
+      # over -- the tally is written without the writer being able to edit the
+      # round, and metadata.generation now moves only when the QUESTIONS change,
+      # which is what makes observedGeneration below mean anything.
+      subresources:
+        status: {}
       schema:
         openAPIV3Schema:
           type: object
@@ -97,3 +112,71 @@ spec:
                         message: "min must be <= max"
                       - rule: "self.type == 'scale0to10' ? (has(self.min) && has(self.max) && self.min == 0.0 && self.max == 10.0) : true"
                         message: "scale0to10 requires min=0 and max=10"
+            status:
+              type: object
+              description: >-
+                The round's result, recomputed by Voter from every QuizSubmission
+                whose spec.sessionRef names this round -- whoever wrote it. It
+                never reaches Git: gitops-reverser rebuilds each mirrored
+                document from an allowlist that does not include status.
+              properties:
+                observedGeneration:
+                  type: integer
+                  format: int64
+                  description: >-
+                    The metadata.generation this tally was computed against. A
+                    value that lags means the questions were edited after it.
+                lastTallyTime:
+                  type: string
+                  format: date-time
+                  description: >-
+                    When Voter last recomputed. Rendered on screen: a controller
+                    that has stopped looks exactly like a room that has stopped
+                    voting, and this is the only thing that tells them apart.
+                filed:
+                  type: integer
+                  description: Ballots carrying this round's name.
+                counted:
+                  type: integer
+                  description: >-
+                    Of those, how many passed validation. Lower than filed when a
+                    hand-written ballot names a question that does not exist.
+                questions:
+                  type: array
+                  # Atomic, not a map: one writer replaces the whole tally, and a
+                  # choice that drops back to zero has to disappear with it.
+                  x-kubernetes-list-type: atomic
+                  items:
+                    type: object
+                    required:
+                      - id
+                    properties:
+                      id:
+                        type: string
+                      count:
+                        type: integer
+                      choices:
+                        type: object
+                        description: Votes per choice, for singleChoice and multiChoice.
+                        additionalProperties:
+                          type: integer
+                      sum:
+                        type: number
+                        description: >-
+                          The total of every number answered, for number and
+                          scale0to10. The average is sum/count, computed where it
+                          is shown.
+                      textTotal:
+                        type: integer
+                        description: How many free-text answers were written.
+                      text:
+                        type: array
+                        description: >-
+                          The most recent few, NOT all of them. Counts stay exact
+                          however many people vote; 300 answers of up to 2000
+                          characters would not fit an object with a 1.5 MB
+                          ceiling that is rewritten on every tally. The results
+                          endpoint still returns the full list.
+                        maxItems: 25
+                        items:
+                          type: string

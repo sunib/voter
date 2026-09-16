@@ -25,6 +25,16 @@ type streamRuntime struct {
 	// writeTimeout bounds each downstream write plus flush. A field rather than a
 	// literal so tests can shorten it, exactly as reauthorizationInterval is.
 	writeTimeout time.Duration
+	// serviceAccount is this process's OWN dynamic client, built from the same
+	// rest.Config as the shared backend. The tally reconciler is the only user:
+	// it is the one thing here that acts as the deployment rather than on behalf
+	// of a participant, because it writes a round's status and no participant
+	// may. Participant REST clients still never touch it.
+	//
+	// nil only in tests that build a runtime from a fake backend and never reach
+	// the reconciler. newStreamRuntime always sets it, and main.go is the only
+	// caller of that.
+	serviceAccount dynamic.Interface
 }
 
 // Configure a single cluster for both shared and participant clients. Only TLS
@@ -71,7 +81,9 @@ func newStreamRuntime(appConfig *config) (*streamRuntime, error) {
 	if err != nil {
 		return nil, err
 	}
-	return makeStreamRuntime(kube.NewBackend(dyn), typed), nil
+	runtime := makeStreamRuntime(kube.NewBackend(dyn), typed)
+	runtime.serviceAccount = dyn
+	return runtime, nil
 }
 
 func makeStreamRuntime(backend gateway.Backend, typed kubernetes.Interface) *streamRuntime {

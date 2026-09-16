@@ -2,7 +2,12 @@ import { test, expect } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 const kubeconfig = resolve('../../.local/kubeconfig');
-const kube = (...args) => execFileSync('kubectl', ['--kubeconfig', kubeconfig, '-n', 'room-pass', ...args], { encoding: 'utf8' });
+const kube = (...args) => {
+  // A trailing object is execFileSync options, so `kube('create', '-f', '-', { input })`
+  // works without a second helper.
+  const options = typeof args.at(-1) === 'object' ? args.pop() : {};
+  return execFileSync('kubectl', ['--kubeconfig', kubeconfig, '-n', 'room-pass', ...args], { encoding: 'utf8', ...options });
+};
 const APP = 'https://app.roompass.test:18443';
 
 test('two participants vote, see durable results, and cannot vote twice or after closure', async ({ browser }) => {
@@ -16,8 +21,9 @@ test('two participants vote, see durable results, and cannot vote twice or after
     ],
   }};
   execFileSync('kubectl', ['--kubeconfig', kubeconfig, 'create', '-f', '-'], { input: JSON.stringify(round) });
-  // Ballots are selected by the round's NAME, not its UID: the label the app
-  // writes is what the results page and the Git mirror both read.
+  // The label is still WRITTEN by the app -- the Git mirror files by it -- but it
+  // no longer selects anything: spec.sessionRef does. The reset below deletes on
+  // it anyway, because everything this test created carries it.
   const roundSelector = `voter.configbutler.ai/round=${name}`;
   async function signIn(label) {
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -52,12 +58,35 @@ test('two participants vote, see durable results, and cannot vote twice or after
     await bob.getByRole('button', { name: 'Manual changes', exact: true }).click();
     await bob.getByRole('button', { name: 'Submit', exact: true }).click();
     await expect(bob.getByTestId('vote-total')).toHaveText('2 votes recorded');
-    await alice.getByRole('button', { name: 'Refresh results', exact: true }).click();
+    // THE FEATURE. Alice's page has been open since before Bob voted and nobody
+    // touched it: no reload, and no "Refresh results" button to press, because
+    // the tally arrives on the quizsessions stream the page already had.
     await expect(alice.getByTestId('vote-total')).toHaveText('2 votes recorded');
+    await expect(alice.getByRole('button', { name: 'Refresh results', exact: true })).toBeHidden();
+    // A tally that has stopped must not look live, so it says when it was taken.
+    await expect(alice.getByTestId('vote-as-of')).toContainText('as of');
     await expect(alice.getByRole('progressbar', { name: 'GitOps', exact: true })).toHaveAttribute('value', '1');
     await expect(alice.getByRole('progressbar', { name: 'Manual changes', exact: true })).toHaveAttribute('value', '1');
     await alice.reload();
     await expect(alice.getByTestId('vote-total')).toHaveText('2 votes recorded');
+
+    // The quizzes page counts too, off a field on objects it ALREADY streams.
+    await alice.goto(`${APP}/`);
+    const listed = alice.getByRole('article').filter({ has: alice.getByRole('heading', { name, exact: true }) });
+    await expect(listed.getByText('2 answers')).toBeVisible();
+
+    // And the controller watches the API, not the vote handler: a ballot written
+    // straight with kubectl -- no session, no round LABEL, nothing the app ever
+    // saw -- moves the same number on a page nobody touched.
+    kube('create', '-f', '-', { input: JSON.stringify({
+      apiVersion: 'examples.configbutler.ai/v1alpha1', kind: 'QuizSubmission',
+      metadata: { name: `${name}-kubectl`, namespace: 'room-pass', labels: { [`voter.configbutler.ai/round`]: name } },
+      spec: { sessionRef: { group: 'examples.configbutler.ai', kind: 'QuizSession', name },
+        submittedAt: new Date().toISOString(), answers: [{ questionId: 'choice', singleChoice: 'GitOps' }] },
+    }) });
+    await expect(listed.getByText('3 answers')).toBeVisible();
+    await bob.goto(`${APP}/answer/${name}/results`);
+    await expect(bob.getByTestId('vote-total')).toHaveText('3 votes recorded');
 
     // A returning voter is told before the form is drawn, so there is nothing to fill in.
     await alice.goto(`${APP}/answer/${name}`);
@@ -65,7 +94,7 @@ test('two participants vote, see durable results, and cannot vote twice or after
     await expect(alice.getByRole('heading', { name: 'Which approach?' })).toBeHidden();
     await expect(alice.getByRole('button', { name: 'Submit', exact: true })).toBeHidden();
     await alice.getByRole('link', { name: 'View results' }).click();
-    await expect(alice.getByTestId('vote-total')).toHaveText('2 votes recorded');
+    await expect(alice.getByTestId('vote-total')).toHaveText('3 votes recorded');
 
     // Carol has not voted, so she still gets the form and meets the closure instead.
     const carol = await signIn('carol');
@@ -106,7 +135,7 @@ test('two participants vote, see durable results, and cannot vote twice or after
     await carol.reload();
     await expect(carol.getByRole('button', { name: 'Submit', exact: true })).toBeDisabled();
     const quizSubmissions = JSON.parse(kube('get', 'quizsubmissions', '-l', roundSelector, '-o', 'json')).items;
-    expect(quizSubmissions).toHaveLength(2);
+    expect(quizSubmissions).toHaveLength(3);
   } finally {
     for (const context of contexts) await context.close();
     kube('delete', 'quizsubmissions', '-l', roundSelector);

@@ -107,6 +107,20 @@ func main() {
 	// Last: it owns "/" and therefore everything unclaimed above.
 	registerHandlers(mux, deps)
 
+	// The round's result is a field on the round, kept there by a controller
+	// that watches the API rather than this application's vote handler -- so a
+	// ballot written with kubectl moves the projected number exactly as one
+	// typed on a phone does. docs/live-results-design.md.
+	//
+	// Started here rather than lazily: the screens fall back to the REST results
+	// endpoint, so a process that never starts this degrades to a Refresh button
+	// instead of to a blank page, and a process that starts it must start it
+	// before the first phone connects.
+	// It runs for the life of the process, like the metrics server above: this
+	// binary has no graceful shutdown to hang a cancel off, and a half-stopped
+	// tally would be worse than a stopped one.
+	go newQuizReconciler(streams.serviceAccount, deps.defaultNS).Run(context.Background())
+
 	addr := net.JoinHostPort(cfg.Host, cfg.Port)
 	srv := &http.Server{
 		Addr:              addr,

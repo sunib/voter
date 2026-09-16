@@ -33,13 +33,38 @@ export type QuizSessionSpec = {
   }>
 }
 
-export type QuizSession = KubeObject<QuizSessionSpec>
+/** The round's result, written by Voter's tally controller and read by anyone
+ *  who may read the round -- which is every participant, with no extra grant.
+ *  Every field is optional: a round that has never been tallied has no status
+ *  at all, and a screen that assumes one renders NaN. */
+export type QuizSessionStatus = {
+  /** The metadata.generation this tally was computed against. */
+  observedGeneration?: number
+  lastTallyTime?: string
+  /** Ballots carrying this round's name, against how many passed validation. */
+  filed?: number
+  counted?: number
+  questions?: Array<{
+    id: string
+    count?: number
+    choices?: Record<string, number>
+    sum?: number
+    /** How many free-text answers were written, against the bounded sample in
+     *  `text`. The results endpoint still returns all of them. */
+    textTotal?: number
+    text?: string[]
+  }>
+}
+
+export type QuizSession = KubeObject<QuizSessionSpec> & {
+  status?: QuizSessionStatus
+}
 
 export type SessionInfo = {
-	name: string
-	namespace: string
-	state?: 'draft' | 'live' | 'closed'
-	title?: string
+  name: string
+  namespace: string
+  state?: 'draft' | 'live' | 'closed'
+  title?: string
 }
 
 export type QuizSubmissionSpec = {
