@@ -11,13 +11,13 @@ a library, so they are pinned by what the cluster reported — events, condition
 and controller logs — and by the source lines that produce them, rather than by
 a test in this repository.
 
-Against **`main` at `c6127229`** (four commits past `v0.46.0`, unreleased at the
-time of writing). Three earlier entries — a routine watch reconnect graded as a
-Warning, `closeDelaySeconds` defaulting to `0`, and a compile-time branch worker
-queue — were resolved there, by `d0601a59`, `46bbf3c5` and `c6127229`
-respectively, and have been dropped from this page rather than kept as history.
-What remains is two items, neither of them urgent, and the second is a
-suggestion we expect may be declined.
+Against **0.47.0** (`ghcr.io/configbutler/gitops-reverser:0.47.0`), which the
+demo cluster now runs. Three earlier entries — a routine watch reconnect graded
+as a Warning, `closeDelaySeconds` defaulting to `0`, and a compile-time branch
+worker queue — were resolved in that release, by `d0601a59`, `46bbf3c5` and
+`c6127229` respectively, and have been dropped from this page rather than kept
+as history. What remains is two items, neither of them urgent, and the second
+is a suggestion we expect may be declined.
 
 ---
 
