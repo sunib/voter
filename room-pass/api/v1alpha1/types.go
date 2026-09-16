@@ -113,13 +113,21 @@ type RoomStatus struct {
 // Kept clear of the marker block on purpose -- a comment contiguous with it is
 // the type's doc comment, and controller-gen would compile these paragraphs
 // into the Room schema's description for every client to download.
+//
+// Ends is typed string rather than date for a reason that looks like a mistake.
+// kubectl renders a date column as an AGE -- time SINCE the value -- and the age
+// of a future timestamp is negative, which it formats as the literal
+// "<invalid>". A room that has not ended yet is the only case anyone looks at,
+// so the date form showed "<invalid>" exactly when it was asked. As a string the
+// column prints the timestamp. The date form is right for Created and
+// SubmittedAt, which are always in the past; it is wrong for a deadline.
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Code",type=string,JSONPath=`.status.joinCode.code`
 // +kubebuilder:printcolumn:name="Enrollment",type=string,JSONPath=`.spec.enrollment`
 // +kubebuilder:printcolumn:name="Participants",type=integer,JSONPath=`.status.participantCount`
-// +kubebuilder:printcolumn:name="Ends",type=date,JSONPath=`.spec.endsAt`
+// +kubebuilder:printcolumn:name="Ends",type=string,JSONPath=`.spec.endsAt`
 type Room struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
