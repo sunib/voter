@@ -258,6 +258,20 @@ available, and those now say `at rv 184213` when the reverser pins one. See
       kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=evaluation
       ```
 
+      **Those two selectors do not catch the ballots from before the rename.**
+      A submission carries the round name it was cast against, so the four
+      rehearsal votes still in the namespace are labelled
+      `demo1-round-2026-09-15` and neither command above sees them. They are
+      harmless — the results page selects on the label, so they cannot show up
+      in `demo1` — but they are sitting in `demo1/submissions.yaml` on the
+      projector. Clear them once:
+
+      ```bash
+      kubectl -n voter get quizsubmissions \
+        -L voter.configbutler.ai/round    # anything not demo1/evaluation is stale
+      kubectl -n voter delete quizsubmissions -l voter.configbutler.ai/round=demo1-round-2026-09-15
+      ```
+
 - [ ] **If you changed the coffee menu**, pushing is not enough either — same
       reason. `kubectl -n voter delete coffeeconfig demo-coffee`, then reconcile.
 - [ ] Confirm the audit-trail repo is reachable and the previous talk's folders
