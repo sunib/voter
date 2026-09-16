@@ -286,21 +286,10 @@ The room is still signed in. Do not make them join again.
 - [ ] Leave the results projected for questions. The `adopt` average moves on
       its own. Do not touch the laptop.
 - [ ] Read two or three `missing` answers out loud.
-- [ ] `contact` is the last question and it asks for an email address. Say out
-      loud that it is optional and that the answers are on the screen behind
-      you, because they are, and somebody will notice before you do.
-
-      **This is the one place in the talk that collects real personal data.**
-      Two things follow, neither of which RBAC can change. The answers are
-      mirrored into `k8s-audit-trail` twice like every ballot and stay in that
-      history, which is fine only because the repo is private. And they render
-      on the projected results screen, because the tally is copied onto the
-      round's status and the audience must be able to read `quizsessions` in
-      order to vote at all. If you would rather they were not on the wall, do
-      not project the results while that question is open.
-
-      You also can no longer say on stage that every identity in the repo is
-      synthetic. Drop that line from the close.
+- [ ] `contact` is the last question and asks for an email address. Say it is
+      optional. Keep the results screen off the projector while it is open, and
+      drop the line about every identity in the repo being synthetic, because
+      after this question it is not.
 - [ ] Before you leave the stage, revoke the grant and let them watch. It is a
       clean `+0/-18` commit.
 
