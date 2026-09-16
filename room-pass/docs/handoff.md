@@ -7,7 +7,7 @@ which is `room-pass` in this deployment. The connector ID is also its callback p
 so the two below follow it.
 
 1. Dex redirects a real authorization request to `/callback/room-pass?state=...`. Room Pass
-   bounds the state and creates a random, three-minute transaction. It saves Dex state
+   bounds the state and creates a random, ten-minute transaction. It saves Dex state
    separately from application OAuth state, sets `__Host-rp-browser` on the issuer
    host, and redirects to the join host's `/bind?handoff=...`.
 2. `/bind` sets/reuses `__Host-rp-join-browser`, binds that cookie to the transaction,
@@ -30,8 +30,17 @@ so the two below follow it.
 6. Dex validates its own transaction, completes the application's OAuth flow, and
    issues tokens. Room Pass never exchanges an application authorization code.
 
-Unknown, expired, reused, unconfirmed and mismatched handoffs fail closed. The handles
-are cryptographically random (256 bits), bounded in memory, and absent from logs.
+Unknown, expired, reused, unconfirmed and mismatched handoffs fail closed: no such
+transaction is ever completed. At step 4 that is not the same as turning the participant
+away. The join page drops the dead handle, says so, and lets them enrol anyway, so they
+arrive back at the application holding a session cookie and finish the next login in one
+press. Nothing the dropped transaction carried is reused; the application starts a fresh
+one. Steps 2, 3 and 5 have no form to fall back to and refuse outright.
+
+The ten minutes exist to cover a person filling in a form, not a redirect: it has to
+outlast reading the page, typing a code and a name, and being told the name is taken.
+The handles are cryptographically random (256 bits), bounded in memory, and absent from
+logs.
 A `same-origin` referrer policy and no-store headers bound referrer and cache
 propagation. It is deliberately not `no-referrer`: under that policy a browser
 serialises the Origin of a form POST as `null`, which the CSRF check rejected.

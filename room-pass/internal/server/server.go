@@ -589,7 +589,7 @@ var previewScriptSource = func() string {
 	return "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
 }()
 
-var pageSource = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Join the room</title><style>body{font:18px system-ui;margin:3rem auto;padding:0 1rem;max-width:30rem;background:#f8fafc;color:#172033}input,button{box-sizing:border-box;width:100%;padding:.8rem;margin:.4rem 0 1rem;font:inherit}button{background:#1749a5;color:white;border:0;border-radius:.4rem}label{display:block}small{line-height:1.5}.scanned{background:#e8f0fe;border-radius:.4rem;padding:.6rem .8rem;margin:.4rem 0 1rem}.error{color:#b3261e;font-weight:600}input[aria-invalid=true]{border:2px solid #b3261e;background:#fff5f5}.issued{color:#64748b;font-size:.8em;line-height:1.45;margin:-.7rem 0 1.4rem}.issued .line{display:block;font-size:1.15em;margin-bottom:.35rem}.addr{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#475569;word-break:break-all}</style><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}{{if .Form}}<form method="post" action="/join"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="handoff" value="{{.Handoff}}"><input type="hidden" name="return" value="{{.Return}}">{{if .Enrolled}}<p>You’re already enrolled as <strong>{{.EnrolledName}}</strong>. Continue with the same identity.</p><p class="issued"><span class="line">You are joining as <span class="addr">{{.EnrolledEmail}}</span></span>Room Pass built that address from your name, which is why there was nothing to fill in: it is never a real mailbox.{{with .AttributionNote}} {{.}}{{end}}</p>{{else}}{{if .Code}}<p class="scanned">Room code <strong>{{.Code}}</strong>, from the code you scanned. <input type="hidden" name="code" value="{{.Code}}"></p>{{else}}<label>Room code<input name="code" required maxlength="24" autocomplete="off" autocapitalize="characters" placeholder="BCDFGH"{{if .CodeInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "code"}} autofocus{{end}}></label>{{end}}<label>Display name<input id="rp-name" name="name" required maxlength="64" autocomplete="nickname" value="{{.Name}}"{{if .NameInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "name"}} autofocus{{end}}></label><p class="issued"><span class="line">You will appear as <output id="rp-display" for="rp-name"><strong>{{.Display}}</strong></output></span><span class="line">You will join as <output id="rp-email" for="rp-name" class="addr">{{.Email}}</output></span>Room Pass builds both from your name, so there is nothing to fill in: spaces and accents are folded, and the address is never a real mailbox.{{with .AttributionNote}} {{.}}{{end}}</p>{{end}}<button>Continue</button></form>{{end}}{{if .Enrolled}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out of this browser</button></form>{{end}}<small>Your name is an unverified label, not a verified identity. It is shown to the application you are joining, together with the address above.</small><script>` + previewScript + `</script></html>`
+var pageSource = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Join the room</title><style>body{font:18px system-ui;margin:3rem auto;padding:0 1rem;max-width:30rem;background:#f8fafc;color:#172033}input,button{box-sizing:border-box;width:100%;padding:.8rem;margin:.4rem 0 1rem;font:inherit}button{background:#1749a5;color:white;border:0;border-radius:.4rem}label{display:block}small{line-height:1.5}.scanned{background:#e8f0fe;border-radius:.4rem;padding:.6rem .8rem;margin:.4rem 0 1rem}.error{color:#b3261e;font-weight:600}input[aria-invalid=true]{border:2px solid #b3261e;background:#fff5f5}.issued{color:#64748b;font-size:.8em;line-height:1.45;margin:-.7rem 0 1.4rem}.issued .line{display:block;font-size:1.15em;margin-bottom:.35rem}.addr{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#475569;word-break:break-all}</style><h1>{{.Title}}</h1><p>{{.Message}}</p>{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}{{if .Form}}<form method="post" action="/join"><input type="hidden" name="csrf" value="{{.CSRF}}"><input type="hidden" name="handoff" value="{{.Handoff}}"><input type="hidden" name="return" value="{{.Return}}">{{if .Enrolled}}<p>You’re already enrolled as <strong>{{.EnrolledName}}</strong>. Continue with the same identity.</p><p class="issued"><span class="line">You are joining as <span class="addr">{{.EnrolledEmail}}</span></span>Room Pass built that address from your name, which is why there was nothing to fill in: it is never a real mailbox.{{with .AttributionNote}} {{.}}{{end}}</p>{{else}}{{if .Scanned}}<p class="scanned">Room code <strong>{{.Scanned}}</strong>, from the code you scanned. <input type="hidden" name="code" value="{{.Scanned}}"><input type="hidden" name="scanned" value="1"></p>{{else}}<label>Room code<input name="code" required maxlength="24" autocomplete="off" autocapitalize="characters" placeholder="BCDFGH" value="{{.Code}}"{{if .CodeInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "code"}} autofocus{{end}}></label>{{end}}<label>Display name<input id="rp-name" name="name" required maxlength="64" autocomplete="nickname" value="{{.Name}}"{{if .NameInvalid}} aria-invalid="true"{{end}}{{if eq .Focus "name"}} autofocus{{end}}></label><p class="issued"><span class="line">You will appear as <output id="rp-display" for="rp-name"><strong>{{.Display}}</strong></output></span><span class="line">You will join as <output id="rp-email" for="rp-name" class="addr">{{.Email}}</output></span>Room Pass builds both from your name, so there is nothing to fill in: spaces and accents are folded, and the address is never a real mailbox.{{with .AttributionNote}} {{.}}{{end}}</p>{{end}}<button>Continue</button></form>{{end}}{{if .Enrolled}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button>Sign out of this browser</button></form>{{end}}<small>Your name is an unverified label, not a verified identity. It is shown to the application you are joining, together with the address above.</small><script>` + previewScript + `</script></html>`
 
 func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "GET" && r.Method != "POST" {
@@ -622,6 +622,10 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Unapproved return destination", 400)
 		return
 	}
+	// notice explains a login transaction that was dropped just below. It is
+	// not a failure of anything the participant did, so it does not mark a
+	// field; it only says why the page is asking again.
+	notice := ""
 	if handoff != "" {
 		s.mu.Lock()
 		tx := s.transactions[handoff]
@@ -632,8 +636,19 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		if !valid {
 			s.logReject(r, "handoff-invalid", "tx_found", tx != nil, "join_browser_cookie", cookieOK,
 				"confirmed", tx != nil && tx.Confirmed, "already_used", tx != nil && tx.Session != nil)
-			http.Error(w, "Login expired. Start again from the application.", 400)
-			return
+			// A login that ran out of time used to end here, on a bare page
+			// telling the participant to start again from the application --
+			// with the code and the name they had just typed thrown away. It
+			// was also the easiest failure to reach, because the clock runs
+			// while somebody reads the form and fixes a rejected name.
+			//
+			// Nothing about a stale transaction makes this browser unwelcome.
+			// Drop it, keep the page, and let them finish joining: they leave
+			// enrolled, and the application starts a fresh login when they
+			// arrive back -- which by then is one Continue, because this
+			// browser has a session cookie.
+			handoff = ""
+			notice = "That login took too long, so it has to start again. Continue below and you will be sent back to the application to finish."
 		}
 	}
 	var ss session
@@ -654,9 +669,19 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	// A code carried here by a scanned QR code. Only ever a prefill: the POST
 	// below re-reads it from the form and Room Pass checks it against the
 	// Room's rotating status exactly as it checks a typed one.
+	//
+	// The marker travels through the POST in a hidden field so that a form
+	// coming back with an error still knows the code was scanned rather than
+	// typed, and can leave it alone. It decides one thing -- pill or box -- and
+	// the value it guards is the participant's own either way, so a forged
+	// marker wins nothing that typing the same code would not.
 	scanned := ""
-	if r.Method == "GET" && !enrolled {
-		scanned = scannedCode(r)
+	if !enrolled {
+		if r.Method == "GET" {
+			scanned = scannedCode(r)
+		} else if r.FormValue("scanned") != "" {
+			scanned = normalizeScannedCode(r.FormValue("code"))
+		}
 	}
 	message := "Enter the room code and choose a display name."
 	if scanned != "" {
@@ -678,7 +703,7 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	// A mistyped code is the one mistake every audience makes, so it returns the form
 	// rather than a dead-end error page: the back button would lose both the typed
 	// name and a CSRF token that is only minted here. Each render issues a fresh one.
-	render := func(status int, failure, field, name string) {
+	render := func(status int, failure, field, code, name string) {
 		csrf, e := randomID()
 		if e != nil {
 			http.Error(w, "Try again later", 503)
@@ -692,6 +717,20 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		// is one that gets silently reused on the next join, long after it
 		// stopped being the code on the screen.
 		clearJoinCodeHandoff(w)
+		// A code the participant cannot correct is worse than no code at all,
+		// so a scan whose code was refused comes back as a field to fix rather
+		// than as the pill that says "this one is taken care of".
+		pill := scanned
+		if field == "code" {
+			pill = ""
+		}
+		// Which also changes what the page is asking for: a scan that came back
+		// as a field to fix must stop the line under the title claiming there is
+		// only a name to fill in.
+		heading := message
+		if form && !enrolled && pill == "" {
+			heading = "Enter the room code and choose a display name."
+		}
 		focus := field
 		if focus == "" && scanned != "" {
 			focus = "name"
@@ -701,36 +740,47 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 		// Email is what the script would compute for the name already in the
 		// box, so a browser with script disabled and a form that came back with
 		// a typed name both still show the address that is actually on offer.
-		_ = page.Execute(w, map[string]any{"Title": room.Spec.Title, "AttributionNote": room.Spec.AttributionNote, "Message": message, "Form": form, "CSRF": csrf, "Handoff": handoff, "Return": dest, "Enrolled": enrolled, "EnrolledName": enrolledName, "EnrolledEmail": enrolledEmail, "Code": scanned, "Error": failure, "Name": name, "Display": displayPreview(name), "Email": emailPreview(name), "Focus": focus, "CodeInvalid": field == "code", "NameInvalid": field == "name"})
+		_ = page.Execute(w, map[string]any{"Title": room.Spec.Title, "AttributionNote": room.Spec.AttributionNote, "Message": heading, "Form": form, "CSRF": csrf, "Handoff": handoff, "Return": dest, "Enrolled": enrolled, "EnrolledName": enrolledName, "EnrolledEmail": enrolledEmail, "Scanned": pill, "Code": code, "Error": failure, "Name": name, "Display": displayPreview(name), "Email": emailPreview(name), "Focus": focus, "CodeInvalid": field == "code", "NameInvalid": field == "name"})
 	}
 	if r.Method == "GET" {
-		render(200, "", "", "")
+		render(200, notice, "", "", "")
 		return
 	}
+	// What the participant typed, kept for every path below that has to show
+	// the form again. Losing it is what made a single mistake cost a retype of
+	// everything.
+	code, typed := typedCode(r.FormValue("code")), r.FormValue("name")
 	if reason := s.csrfReason(r); reason != "" {
 		s.logReject(r, reason,
 			"origin", r.Header.Get("Origin"), "expected_origin", s.cfg.JoinOrigin,
 			"cookie_names", cookieNames(r), "has_handoff", handoff != "", "enrolled", enrolled)
-		http.Error(w, "Invalid form. Reload and try again.", 403)
+		// This is overwhelmingly a form that sat open past the token's ten
+		// minutes, not an attack -- and "reload and try again" was asking the
+		// participant to do by hand what rendering does here, minus the typed
+		// name. Nothing has changed yet, so handing back a fresh token and the
+		// same answers is safe: a forger still cannot read either.
+		render(403, "This page had been open too long. Your answers are still here; please press Continue again.", "", code, typed)
 		return
 	}
 	if !form {
 		s.logReject(r, "enrollment-closed", "message", message)
-		http.Error(w, message, 403)
+		// message already says what happened, and the page says it in the
+		// room's own voice instead of as plain text on a white page.
+		render(403, "", "", code, typed)
 		return
 	}
 	if !enrolled {
 		if !s.joins.Allow() {
 			w.Header().Set("Retry-After", "2")
-			http.Error(w, "Please wait a moment and try again.", 429)
+			render(429, "A lot of people are joining at once. Please press Continue again in a moment.", "", code, typed)
 			return
 		}
-		name, e := validName(r.FormValue("name"))
+		name, e := validName(typed)
 		if e != nil {
-			render(400, e.Error(), "name", r.FormValue("name"))
+			render(400, e.Error(), "name", code, typed)
 			return
 		}
-		ss, e = s.enrollParticipant(r.Context(), r.FormValue("code"), name)
+		ss, e = s.enrollParticipant(r.Context(), code, name)
 		if e != nil {
 			field := ""
 			switch {
@@ -739,7 +789,11 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 			case errors.Is(e, errNameTaken):
 				field = "name"
 			}
-			render(403, e.Error(), field, name)
+			// The folded name goes back in the box, not the raw one: it is what
+			// would have been stored, and it is what the participant has to
+			// change. The code goes back untouched -- a name collision is no
+			// reason to make somebody read the presenter's screen again.
+			render(403, e.Error(), field, code, name)
 			return
 		}
 		if e = s.cookie(w, "__Host-rp-session", ss, int(s.cfg.CookieLifetime.Seconds())); e != nil {
@@ -750,14 +804,19 @@ func (s *Server) join(w http.ResponseWriter, r *http.Request) {
 	if handoff != "" {
 		// Re-read eligibility before authorizing even when a cookie was valid earlier.
 		if _, _, e = s.identity(r.Context(), ss); e != nil {
-			http.Error(w, "Enrollment unavailable", 403)
+			render(403, "Your enrollment could not be confirmed just now. Please press Continue again.", "", code, typed)
 			return
 		}
 		s.mu.Lock()
 		tx := s.transactions[handoff]
 		if tx == nil || !s.now().Before(tx.Expires) || tx.Session != nil {
 			s.mu.Unlock()
-			http.Error(w, "Login expired", 400)
+			// Enrolled, but the transaction died between the check at the top
+			// of this handler and here. Telling someone who is now a member of
+			// the room that their login expired is the least useful true thing
+			// we could say: send them to the application, which starts a login
+			// this browser can finish in one click.
+			http.Redirect(w, r, dest, 303)
 			return
 		}
 		copy := ss
@@ -776,6 +835,28 @@ var errBadCode = errors.New("That code is invalid or joining has closed. Check t
 // The other one: a name already enrolled in this room. Both mark the field the
 // participant can actually change.
 var errNameTaken = errors.New("That name is already taken in this room. Please choose another.")
+
+// maxTypedCodeLength matches the code field's maxlength, so a value that only
+// a forged form could carry is bounded before it goes back into the page.
+const maxTypedCodeLength = 24
+
+// typedCode is the code as the participant typed it, tidied just enough to be
+// put back in the box they typed it into. It is NOT a validity check --
+// controller.Accepts owns that -- only a bound on what is echoed, so a refused
+// code can be corrected in place instead of read off the presenter's screen
+// again. html/template escapes it either way.
+func typedCode(raw string) string {
+	v := strings.TrimSpace(raw)
+	if len(v) > maxTypedCodeLength {
+		v = v[:maxTypedCodeLength]
+	}
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, strings.ToValidUTF8(v, ""))
+}
 
 func (s *Server) enrollParticipant(ctx context.Context, code, name string) (session, error) {
 	result := "storage_error"
@@ -825,6 +906,23 @@ func (s *Server) enrollParticipant(ctx context.Context, code, name string) (sess
 	result = "enrolled"
 	return session{RoomUID: string(room.UID), Name: p.Name, UID: string(p.UID), Expires: s.now().Add(s.cfg.CookieLifetime).Unix()}, nil
 }
+
+// handoffLifetime is how long a login transaction -- and the two browser-binding
+// cookies that pin it to one browser -- stay usable.
+//
+// It has to outlast a person filling in a form, not a redirect. The window
+// covers reading the page, typing a room code and a display name, being told
+// the name is taken, and picking another. Three minutes did not cover that, and
+// running out used to end the login outright.
+//
+// It no longer does -- join() drops a dead transaction and lets the participant
+// finish -- but expiring mid-form still costs them a trip back through the
+// application, so the window is sized for the slow case rather than the quick
+// one. The cost is that abandoned logins hold a MaxHandoffs slot for longer.
+// That is the right thing to trade: what stops a copied login link is the pair
+// of host-only cookies bound to the transaction, not the clock.
+const handoffLifetime = 10 * time.Minute
+
 func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 	state := r.URL.Query().Get("state")
 	if state == "" || len(state) > 2048 || len(r.URL.Query()) != 1 || len(r.URL.Query()["state"]) != 1 {
@@ -856,11 +954,11 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Too many pending logins", 429)
 		return
 	}
-	if e = s.cookie(w, "__Host-rp-browser", browser, 180); e != nil {
+	if e = s.cookie(w, "__Host-rp-browser", browser, int(handoffLifetime.Seconds())); e != nil {
 		http.Error(w, "Unavailable", 503)
 		return
 	}
-	s.transactions[id] = &transaction{State: state, Browser: browser, Expires: s.now().Add(3 * time.Minute)}
+	s.transactions[id] = &transaction{State: state, Browser: browser, Expires: s.now().Add(handoffLifetime)}
 	http.Redirect(w, r, s.cfg.JoinOrigin+"/bind?handoff="+url.QueryEscape(id), 303)
 }
 func (s *Server) complete(w http.ResponseWriter, r *http.Request) {
@@ -929,7 +1027,7 @@ func (s *Server) bind(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid login binding", 403)
 		return
 	}
-	if e := s.cookie(w, "__Host-rp-join-browser", jb, 180); e != nil {
+	if e := s.cookie(w, "__Host-rp-join-browser", jb, int(handoffLifetime.Seconds())); e != nil {
 		http.Error(w, "Unavailable", 503)
 		return
 	}

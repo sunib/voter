@@ -130,11 +130,30 @@ test("a tampered form CSRF token does not enroll", async ({ page }) => {
     });
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(
-    page.getByText("Invalid form. Reload and try again.", { exact: true }),
+    page.getByText(
+      "This page had been open too long. Your answers are still here; please press Continue again.",
+      { exact: true },
+    ),
   ).toBeVisible();
   expect(
     participants().filter((p) => p.spec.displayName === storedName),
   ).toHaveLength(0);
+  // Refused, but still the login page. A token that expired while the form sat
+  // open looks exactly like this, and telling that participant to reload -- and
+  // to retype a room code they can no longer see -- is the wrong answer to much
+  // the commoner cause. The page comes back with a fresh token and everything
+  // they typed, so one more press finishes the join.
+  await expect(page.getByLabel("Room code")).toHaveValue(
+    room().status.joinCode.code,
+  );
+  await expect(page.getByLabel("Display name")).toHaveValue(testName);
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(
+    page.getByText(`Welcome, ${storedName}.`, { exact: true }),
+  ).toBeVisible();
+  expect(
+    participants().filter((p) => p.spec.displayName === storedName),
+  ).toHaveLength(1);
 });
 
 test("closing enrollment removes the browser join form", async ({ page }) => {

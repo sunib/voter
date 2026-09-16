@@ -193,7 +193,7 @@ though Dex authproxy marks it verified.
 | `JOIN_RATE` / `JOIN_BURST` | 20 attempts/second, burst 150 per serving process |
 | `HANDOFF_RATE` / `HANDOFF_BURST` | 20 starts/second, burst 150 per serving process |
 | `MAX_HANDOFFS` | 1,000 pending transactions |
-| Handoff lifetime | 3 minutes |
+| Handoff lifetime | 10 minutes |
 | `COOKIE_LIFETIME_SECONDS` | 86,400 (24 hours), maximum 7 days |
 | Browser form | 4 KiB maximum; name 1–64 UTF-8 bytes |
 | `KUBE_QPS` / `KUBE_BURST` | 100 QPS, burst 200; 8-second individual API timeout |

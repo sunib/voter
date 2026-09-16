@@ -138,6 +138,127 @@ func (b *browser) request(s *Server, method, raw string, form url.Values) *httpt
 	return w
 }
 func newBrowser() *browser { return &browser{cookies: map[string]map[string]*http.Cookie{}} }
+
+// hidden reads a hidden input's value out of a rendered page so that tests
+// drive the form the way a browser does, rather than restating the protocol.
+func hidden(body, name string) string {
+	_, rest, _ := strings.Cut(body, fmt.Sprintf(`name="%s" value="`, name))
+	v, _, _ := strings.Cut(rest, `"`)
+	return v
+}
+
+// Every way of being turned away has to leave the participant on the join page
+// with what they typed still in it. A refused join used to hand back an empty
+// form -- so a name collision, the one rejection nobody can foresee, cost the
+// room code as well, and the code is the part they cannot reconstruct without
+// looking at the presenter's screen again.
+func TestARejectedJoinKeepsWhatWasTyped(t *testing.T) {
+	s, _ := fixture(t, "http://dex.test")
+	if _, e := s.enrollParticipant(context.Background(), "BCDFGH", "Ada"); e != nil {
+		t.Fatal(e)
+	}
+	submit := func(b *browser, form url.Values) *httptest.ResponseRecorder {
+		page := b.request(s, "GET", "https://demo.test/join", nil)
+		form.Set("csrf", hidden(page.Body.String(), "csrf"))
+		form.Set("return", "https://demo.test/app/")
+		return b.request(s, "POST", "https://demo.test/join", form)
+	}
+
+	t.Run("a name already taken does not cost the room code", func(t *testing.T) {
+		w := submit(newBrowser(), url.Values{"code": {"BCD-FGH"}, "name": {"Ada"}})
+		body := w.Body.String()
+		if w.Code != 403 || !strings.Contains(body, "already taken") {
+			t.Fatalf("a taken name was not reported on the form: %d %s", w.Code, body)
+		}
+		if !strings.Contains(body, `placeholder="BCDFGH" value="BCD-FGH"`) {
+			t.Errorf("the code field came back empty: %s", body)
+		}
+		if !strings.Contains(body, `value="Ada"`) {
+			t.Errorf("the name came back empty: %s", body)
+		}
+	})
+
+	t.Run("a mistyped code comes back to be corrected, not retyped", func(t *testing.T) {
+		w := submit(newBrowser(), url.Values{"code": {"NOPE"}, "name": {"Grace"}})
+		body := w.Body.String()
+		if !strings.Contains(body, `value="NOPE" aria-invalid="true"`) {
+			t.Errorf("the refused code was not returned for correction: %s", body)
+		}
+		if !strings.Contains(body, `value="Grace"`) {
+			t.Errorf("the name came back empty: %s", body)
+		}
+	})
+
+	t.Run("a scanned code is not handed back as a field to refill", func(t *testing.T) {
+		b := newBrowser()
+		page := b.request(s, "GET", "https://demo.test/join?code=BCDFGH", nil).Body.String()
+		w := b.request(s, "POST", "https://demo.test/join", url.Values{
+			"csrf": {hidden(page, "csrf")}, "return": {"https://demo.test/app/"},
+			"code": {hidden(page, "code")}, "scanned": {hidden(page, "scanned")}, "name": {"Ada"},
+		})
+		body := w.Body.String()
+		if !strings.Contains(body, `<input type="hidden" name="code" value="BCDFGH">`) {
+			t.Errorf("the scanned code did not survive a refused name: %s", body)
+		}
+		if strings.Contains(body, `placeholder="BCDFGH"`) {
+			t.Errorf("a scanned code came back as a box to fill in: %s", body)
+		}
+	})
+
+	t.Run("a scanned code the room refuses becomes editable after all", func(t *testing.T) {
+		b := newBrowser()
+		page := b.request(s, "GET", "https://demo.test/join?code=ZZZZZZ", nil).Body.String()
+		w := b.request(s, "POST", "https://demo.test/join", url.Values{
+			"csrf": {hidden(page, "csrf")}, "return": {"https://demo.test/app/"},
+			"code": {hidden(page, "code")}, "scanned": {hidden(page, "scanned")}, "name": {"Grace"},
+		})
+		body := w.Body.String()
+		if !strings.Contains(body, `value="ZZZZZZ" aria-invalid="true"`) {
+			t.Errorf("a refused scan left nothing to correct: %s", body)
+		}
+		if !strings.Contains(body, "Enter the room code and choose a display name.") {
+			t.Errorf("the page still says only a name is wanted: %s", body)
+		}
+	})
+}
+
+// A login transaction that ran out of time while somebody filled in the form
+// used to end on a bare page reading "Login expired. Start again from the
+// application." -- with the typed code and name gone. Expiring is not a reason
+// to refuse the browser: the dead transaction is dropped and the join finishes,
+// which leaves the participant enrolled and one Continue away from signed in.
+func TestAnExpiredLoginFinishesOnTheJoinPage(t *testing.T) {
+	s, _ := fixture(t, "http://dex.test")
+	b := newBrowser()
+	w := b.request(s, "GET", "https://login.test/callback/room-pass?state=dex-transaction", nil)
+	for i := 0; i < 3; i++ {
+		if w.Code != 303 {
+			t.Fatalf("binding step %d: %d %s", i, w.Code, w.Body.String())
+		}
+		w = b.request(s, "GET", w.Header().Get("Location"), nil)
+	}
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	form := url.Values{"csrf": {hidden(body, "csrf")}, "handoff": {hidden(body, "handoff")},
+		"return": {hidden(body, "return")}, "code": {"BCDFGH"}, "name": {"Ada"}}
+	// The clock runs while the form is being read, filled in and corrected.
+	s.now = func() time.Time { return time.Now().Add(handoffLifetime + time.Minute) }
+	w = b.request(s, "POST", "https://demo.test/join", form)
+	if w.Code != 303 || w.Header().Get("Location") != "https://demo.test/app/" {
+		t.Fatalf("an expired login did not fall back to the application: %d %s %s", w.Code, w.Header().Get("Location"), w.Body.String())
+	}
+	if _, _, e := s.identity(context.Background(), session{RoomUID: "room-uid", Name: "p-ada", UID: "uid-p-ada", Expires: s.now().Add(time.Hour).Unix()}); e != nil {
+		t.Fatal("the participant was not enrolled after the expired login", e)
+	}
+	// And a stale link opened cold explains itself on the form instead of
+	// replacing it with an error page.
+	w = newBrowser().request(s, "GET", "https://demo.test/join?handoff=long-gone", nil)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), "took too long") {
+		t.Fatalf("a stale login link was a dead end: %d %s", w.Code, w.Body.String())
+	}
+}
 func TestHandoffHeadersReplayAndCSRF(t *testing.T) {
 	var got http.Header
 	var state string
@@ -164,21 +285,25 @@ func TestHandoffHeadersReplayAndCSRF(t *testing.T) {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	// Extract values from the rendered form without duplicating protocol internals.
-	value := func(name string) string {
-		prefix := fmt.Sprintf(`name="%s" value="`, name)
-		_, rest, _ := strings.Cut(w.Body.String(), prefix)
-		v, _, _ := strings.Cut(rest, `"`)
-		return v
-	}
+	value := func(name string) string { return hidden(w.Body.String(), name) }
 	form := url.Values{"csrf": {value("csrf")}, "handoff": {value("handoff")}, "return": {value("return")}, "code": {"BCD-FGH"}, "name": {"Ada"}, "group": {"system:masters"}, "id": {"attacker"}}
 	bad := url.Values{}
 	for k, v := range form {
 		bad[k] = v
 	}
 	bad.Set("csrf", "wrong")
-	if r := b.request(s, "POST", "https://demo.test/join", bad); r.Code != 403 {
+	if w = b.request(s, "POST", "https://demo.test/join", bad); w.Code != 403 {
 		t.Fatal("CSRF accepted")
 	}
+	// Rejected, but not a dead end: the page comes back with the answers still
+	// in it and a fresh token, so the only thing the participant has to do is
+	// press Continue. That also means the stale token in `form` is now the
+	// wrong one -- take the reissued pair the way a browser would.
+	if body := w.Body.String(); !strings.Contains(body, `value="BCD-FGH"`) || !strings.Contains(body, `value="Ada"`) {
+		t.Errorf("a rejected form threw away what was typed: %s", body)
+	}
+	form.Set("csrf", value("csrf"))
+	form.Set("handoff", value("handoff"))
 	w = b.request(s, "POST", "https://demo.test/join", form)
 	if w.Code != 303 {
 		t.Fatal(w.Code, w.Body.String())
@@ -271,7 +396,7 @@ func TestHandoffCapacityAndExpiry(t *testing.T) {
 	if w := b.request(s, "GET", "https://login.test/callback/room-pass?state=two", nil); w.Code != 429 {
 		t.Fatal("capacity not enforced")
 	}
-	s.now = func() time.Time { return time.Now().Add(4 * time.Minute) }
+	s.now = func() time.Time { return time.Now().Add(handoffLifetime + time.Minute) }
 	if w := b.request(s, "GET", "https://login.test/callback/room-pass?state=three", nil); w.Code != 303 {
 		t.Fatal("expired slot not pruned", w.Code)
 	}
