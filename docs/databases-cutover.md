@@ -9,11 +9,11 @@ a talk.
 
 | | Running now | After |
 | --- | --- | --- |
-| Image | `ghcr.io/sunib/voter:sha-b8beaca` | the first green build of `main` at or after `920614d` |
+| Image | `ghcr.io/sunib/voter:sha-b8beaca` | `sha-4651525` — first fully green run since `b8beaca` |
 | Tabs | Quizzes, Coffee, Room | Quizzes, Coffee, **Databases**, Room |
-| `voter-audience` Role | no `databases` rule | `get, list, watch, create, patch, update` |
+| `voter-audience` Role | ~~no `databases` rule~~ **done 2026-09-17** | `get, list, watch, create, patch, update` |
 | `CONFIGBUTLER_DATABASE_GIT_TARGET_NAME` | unset | `demo-c` |
-| CRD, GitTarget, WatchRule | hand-applied, not in Flux | in the Flux checkout |
+| CRD, GitTarget, WatchRule | ~~hand-applied~~ **adopted by Flux 2026-09-17** | in the Flux checkout |
 
 The CRD is already Established and three requests from three teams are already
 in `voter`. Nothing below needs to create them again.
@@ -34,15 +34,17 @@ lands, before anything else is called done. It is step 4 and it is not optional.
 Each is its own commit and its own reconcile. They are separable on purpose: if
 something is wrong, the blast radius is one of these and the revert is obvious.
 
-### 1. RBAC — safe to ship on its own, today
+### 1. RBAC — done, 2026-09-17 (`db3205e`)
 
-Already committed in the platform checkout, waiting on a push.
+Applied and verified. Left here because the reasoning is the useful part and
+because a namespace rebuild would need it again.
 
 ```sh
-cd external/k8s
-git log --oneline -1          # the databases rule on voter-audience
-git push origin main
-flux -n flux-system reconcile kustomization voter-demo --with-source
+cd external/k8s && git push origin main
+# voter-demo sits three deep in the dependency chain, each link on a 10m
+# interval: infra -> infra-config -> voter-demo. Left alone it takes ~30 min.
+flux -n flux-system reconcile kustomization infra-config --with-source
+flux -n flux-system reconcile kustomization voter-demo
 ```
 
 This grants verbs on a type that exists, for a page that is not in the running
@@ -60,9 +62,11 @@ kubectl auth can-i delete databases.platform.configbutler.ai \
   -n voter --as-group=demo:voter-audience --as=demo:someone     # no
 ```
 
-The second `no` is as important as the first `yes`.
+The second `no` is as important as the first `yes`. Both answered correctly on
+the live cluster, for all seven verbs, as `demo:someone` in group
+`demo:voter-audience`.
 
-### 2. The CRD and the demo-c objects into Git — before the image, not after
+### 2. The CRD and demo-c into Git — done, 2026-09-17 (`3b37533`)
 
 Three objects are alive in the cluster that Flux has never heard of: the CRD,
 the `demo-c` GitTarget and its WatchRule. They survive until something rebuilds
@@ -81,6 +85,14 @@ Check: `flux -n flux-system get kustomization voter-demo` reports the new
 revision and `Applied`, and `kubectl -n voter get gittarget demo-c` still shows
 the same `creationTimestamp` it had before — adopted, not replaced.
 
+It did. Both kept their original timestamps and the three Database objects were
+untouched. The CRD now carries **two** Apply owners, `simon-kubectl` and
+`kustomize-controller`, which is harmless while the two agree — they applied the
+same bytes. Hand-applying that CRD again with `--field-manager=simon-kubectl`
+and a *different* body would be a real conflict; let Flux own it from here.
+`demo-c` needed no such care: Flux takes `kubectl-client-side-apply` over
+automatically, and it is now the sole owner.
+
 ### 3. The image
 
 Wait for a green run on `main` and take the digest it reports. Do not take
@@ -90,6 +102,28 @@ Wait for a green run on `main` and take the digest it reports. Do not take
 gh run list --branch main --limit 1          # completed / success
 docker buildx imagetools inspect ghcr.io/sunib/voter:sha-<short> --format '{{.Manifest.Digest}}'
 ```
+
+As of 2026-09-17 that build exists and every job in its run is green:
+
+```
+image: ghcr.io/sunib/voter:sha-4651525@sha256:5a832e76be37c6ee68c3b460f563ec35c0e68c9d5fabf1f3f6050e2b7d248e87
+```
+
+**A published image does not mean a green run.** The `images` job is
+`needs: [ci-container, lint, test]`, and `Browser login` is not in that list —
+so a build whose Playwright specs failed still publishes `sha-<short>` and still
+moves `:main`. That is not a bug in the workflow (an image is useful for
+debugging the very failure), but it does mean the registry cannot be used as a
+signal of health.
+
+It has already happened once: `sha-927c61a` exists and `:main` points at it,
+from a run whose browser specs failed on a reworded notice. Check the run, not
+the registry.
+
+Four runs in a row before that were `cancelled` rather than failed, because each
+push cancelled its predecessor through the concurrency group. A cancelled run
+publishes nothing. If `sha-<short>` is missing for a commit that looks fine,
+that is usually why — push once and let it finish.
 
 In `voter-demo/app.yaml`, one line:
 
@@ -156,7 +190,8 @@ afterwards.
 
 1. **RBAC first** because it is invisible until the image lands, so it can be
    wrong for a day without anyone noticing, and right for a day before anyone
-   needs it.
+   needs it. Which is what happened: it went out while CI was still red, and
+   cost nothing.
 2. **Git adoption second** because it is a no-op now and an incident later.
 3. **Image third** because it is the only step that changes what a browser sees,
    and it should change one thing at a time.
