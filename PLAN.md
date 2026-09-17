@@ -317,9 +317,10 @@ The third tab is built, tested and in the image. What is left is everything that
 lives outside this repository -- see [docs/databases.md](docs/databases.md) for the
 commands and for why each step is separate.
 
-- [ ] `kubectl apply -f voter/config/crd/databases.yaml`. Cluster-scoped, one apply,
-      no controller behind it. Until this exists every Database page renders the API
-      server's "could not find the requested resource", which is at least honest.
+- [x] `kubectl apply -f voter/config/crd/databases.yaml`. Cluster-scoped, one apply,
+      no controller behind it. Applied by hand on 2026-09-17 and Established; `kubectl
+      -n voter get db` answers. NOT in the Flux checkout, so a cluster rebuild loses
+      it -- moving it to `voter-demo/crds/` is a loose end in the demo-c plan.
 - [ ] Add the `platform.configbutler.ai/databases` rule to the `voter-audience` Role in
       `external/k8s/.../voter-demo/participant-rbac.yaml`: `get, list, watch, create,
       patch, update`, and deliberately not `delete`. Without it the pages explain the
@@ -338,6 +339,11 @@ Deferred rather than missing:
       is the entire change. It is a SEPARATE setting from the coffee one on purpose:
       reusing that target would close demo 1's open commit window from a page that
       never touched the menu.
+
+      Now planned rather than merely deferred: [docs/demo-c-plan.md](docs/demo-c-plan.md)
+      has the GitTarget, the WatchRule and the ordering. Two objects and one variable;
+      the reverser's wildcard read already covers the new type and the intent
+      annotation already survives the write.
 
 ## 6. Retained platform work
 

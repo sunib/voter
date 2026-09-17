@@ -36,6 +36,8 @@ https://demo.koudijs.dev/auth/login?connector=github&return=%2Froom
   pilot prerequisites and the boundary between prototype work and deployment.
 - [Databases](docs/databases.md): the platform-team page — what it is built on,
   what has to exist in the cluster before it works, and where the intent goes.
+- [demo-c plan](docs/demo-c-plan.md): the last-minute gitops-reverser change that
+  turns a database request into a commit — two objects and one variable.
 - [Authorization](docs/authorization.md): who can do what, and what is proven.
 - [Talk checklist](docs/talk-checklist.md): where authorization actually lives —
   application, RBAC and admission, and the honest limits of each.

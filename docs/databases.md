@@ -26,16 +26,20 @@ The CRD is at [`voter/config/crd/databases.yaml`](../voter/config/crd/databases.
 
 Three things, in this order. None of them are done by building the image.
 
-### 1. The CRD, applied to the cluster
+### 1. The CRD, applied to the cluster — done
 
 ```sh
-kubectl apply -f voter/config/crd/databases.yaml
+kubectl apply --server-side -f voter/config/crd/databases.yaml
 kubectl get crd databases.platform.configbutler.ai
 ```
 
 Cluster-scoped, so this is one apply for the whole cluster. Until it exists
 every page here answers with the API server's "the server could not find the
 requested resource", which the screens render verbatim.
+
+Applied to `k8s.koudijs.dev` on 2026-09-17 and Established. It is **not** in the
+Flux checkout, so it is the one piece of this demo a cluster rebuild would
+silently drop; [demo-c-plan.md](demo-c-plan.md) carries that as a loose end.
 
 ### 2. The participant Role
 
@@ -130,7 +134,11 @@ CONFIGBUTLER_DATABASE_GIT_TARGET_NAME=<that target's name>
 
 The receipt shape and what the screen does with it already match the coffee
 editor's, so nothing else moves. The annotation stays useful either way: it
-travels into Git with the spec it explains.
+travels into Git with the spec it explains — the reverser strips only
+operational annotations, and this is not one.
+
+That target has a name and a plan now: **demo-c**, in
+[demo-c-plan.md](demo-c-plan.md).
 
 ## The pages
 
