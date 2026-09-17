@@ -268,7 +268,9 @@ The load-bearing claim held: the intent annotation is in the committed document.
   generic subject instead of carrying the requester's own sentence as the commit
   message.
 - The `databases` rule on the `voter-audience` Role, without which the page gets
-  a real 403 for everyone who is not cluster-admin.
+  a real 403 for everyone who is not cluster-admin. It is now **written and
+  committed** in the platform checkout and waiting on a push;
+  [databases-cutover.md](databases-cutover.md) is the order it goes out in.
 
 ## Loose ends
 

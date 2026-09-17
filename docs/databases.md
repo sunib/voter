@@ -41,26 +41,42 @@ Applied to `k8s.koudijs.dev` on 2026-09-17 and Established. It is **not** in the
 Flux checkout, so it is the one piece of this demo a cluster rebuild would
 silently drop; [demo-c-plan.md](demo-c-plan.md) carries that as a loose end.
 
-### 2. The participant Role
+### 2. The participant Role — written, not yet live
 
-The `voter-audience` Role in the platform checkout
-(`external/k8s/k8s.koudijs.dev/2-gitops/voter-demo/participant-rbac.yaml`) needs
-one more rule. It is not in this repository — deployment lives in the platform
-checkout, and adding it there is what puts it in front of the room.
+The rule is in the platform checkout at
+`external/k8s/k8s.koudijs.dev/2-gitops/voter-demo/participant-rbac.yaml`, on the
+`voter-audience` Role, committed there but not pushed. Pushing is what Flux
+reconciles and what puts it in front of the room.
 
 ```yaml
-  # What teams may do with their own database requests. `create` and `patch`
-  # but never `delete`: filing a request and amending one are the demo; removing
-  # somebody else's is not.
   - apiGroups: [platform.configbutler.ai]
     resources: [databases]
     verbs: [get, list, watch, create, patch, update]
 ```
 
-Without it the pages still render — they explain the gap from the API server's
-own answer and leave every button live, so pressing one produces the real 403.
-That is the same behaviour the coffee editor has before the operator pulls the
-switch, and it is worth showing.
+**Granted to the whole room from the start**, unlike the coffee menu, which
+waits for the operator's switch on `/room`. The two demos ask different
+questions: coffee asks what a refusal looks like and what it looks like when
+somebody lifts it; databases asks what happens when a team writes down what it
+needs. The second one needs the room able to write on the first try.
+
+No `delete`, anywhere. Filing a request and amending one are the demo;
+withdrawing somebody else's is not, and the pages do not offer it either. There
+is no per-object restriction and there cannot be one — RBAC narrows by name, not
+by owner, and the page is deliberately everybody's requests rather than only
+yours.
+
+`update` is not used by the application; the editor sends a merge patch. It is
+granted so the same person can `kubectl apply` their own request from a terminal
+and have it land identically, which is a thing the talk does.
+
+Until it is live the pages still render. They explain the gap from the API
+server's own answer and leave every button live, so pressing one produces the
+real 403 — the same behaviour the coffee editor has before the switch, and worth
+seeing once on purpose.
+
+The order in which this ships, and what it ships beside, is
+[databases-cutover.md](databases-cutover.md).
 
 ### 3. Some requests to look at
 

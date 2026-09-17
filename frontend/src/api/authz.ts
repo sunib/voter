@@ -213,6 +213,12 @@ export const DATABASE_REQUIREMENTS: Requirement[] = [
   {
     apiGroup: PLATFORM,
     resource: 'databases',
+    verb: 'get',
+    purpose: 'open one request and keep it current',
+  },
+  {
+    apiGroup: PLATFORM,
+    resource: 'databases',
     verb: 'watch',
     purpose: "see another team's request arrive live",
   },

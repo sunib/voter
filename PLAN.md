@@ -321,15 +321,20 @@ commands and for why each step is separate.
       no controller behind it. Applied by hand on 2026-09-17 and Established; `kubectl
       -n voter get db` answers. NOT in the Flux checkout, so a cluster rebuild loses
       it -- moving it to `voter-demo/crds/` is a loose end in the demo-c plan.
-- [ ] Add the `platform.configbutler.ai/databases` rule to the `voter-audience` Role in
+- [x] Add the `platform.configbutler.ai/databases` rule to the `voter-audience` Role in
       `external/k8s/.../voter-demo/participant-rbac.yaml`: `get, list, watch, create,
-      patch, update`, and deliberately not `delete`. Without it the pages explain the
-      gap and every button still produces the real 403.
-- [ ] Deploy. Not done yet, on purpose: the image carries the page but the demo has
-      not rehearsed with it. Same GitOps path as everything else -- image tag in
-      `voter-demo/app.yaml`, never a live workload mutation.
-- [ ] Seed two or three requests from different teams, so the list reads as
-      "outstanding intent from all teams" rather than as an empty state.
+      patch, update`, and deliberately not `delete`. Granted to the whole room from the
+      start rather than behind the operator's switch -- coffee is the demo about a
+      refusal being lifted; this one is about a team writing down what it needs.
+      Written and committed in the platform checkout, not yet pushed.
+- [ ] Deploy, in the order in [docs/databases-cutover.md](docs/databases-cutover.md).
+      Not done yet, on purpose: the image carries the page but the demo has not
+      rehearsed with it, and the same change moved the coffee editor onto shared code.
+      Same GitOps path as everything else -- image tag in `voter-demo/app.yaml`, never
+      a live workload mutation.
+- [x] Seed two or three requests from different teams, so the list reads as
+      "outstanding intent from all teams" rather than as an empty state. Three are in
+      `voter` as of 2026-09-17.
 
 Deferred rather than missing:
 
