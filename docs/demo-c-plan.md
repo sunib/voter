@@ -174,22 +174,29 @@ nothing extra is needed for "save now".
    commit message is the requester's own sentence and the author is the
    requester.
 
-## The decision I would defer
+## Decided: one folder, flat
 
-**Filing per team rather than flat.** `results/{label:...}.yaml` is what makes
-demo2 land; the equivalent here would be `teams/{label:...}.yaml`, so the folder
-reads as one file per team with their requests accumulating.
+**Every request in one folder, named after the object.** `default:
+"{name}.yaml"`, no subfolders, no grouping. This is settled — not a placeholder
+for something better later.
 
-It does not work today, and the reason is worth knowing rather than
-working around: **placement templates read labels, and the team is in
-`spec.owner.team`.** A template cannot reach into a spec. Making it work means
-the backend stamping a label from the field on create — a real change to
-`participant_databases.go`, plus the question of what happens when someone edits
-`owner.team` afterwards and the label no longer agrees with the spec (the file
-would not move, and Git would file a payments request under retail's name).
+The alternative was filing per team, the way demo2 files per voter:
+`teams/{label:...}.yaml`, one file per team with their requests accumulating.
+It is written down here only so nobody re-opens it on the day, because it does
+not work today and the reason is structural: **placement templates read labels,
+and the team is in `spec.owner.team`.** A template cannot reach into a spec.
 
-Flat is not a lesser version of that; for a queue of requests it is arguably the
-right layout anyway. Do the label properly after the talk, or not at all.
+Making it work would mean the backend stamping a label from that field on
+create — a real change to `participant_databases.go` — plus an answer for what
+happens when someone later edits `owner.team` and the label no longer agrees
+with it. The file would not move, and Git would go on filing a payments request
+under retail's name. A mirror that is quietly wrong about who owns a database is
+worse than a flat folder that is right.
+
+And flat is not the consolation prize. For a queue of outstanding requests, a
+directory listing that reads `checkout-postgresql.yaml`, `ledger-mysql.yaml`,
+`fraud-scoring-postgresql.yaml` **is** the thing you want on a projector: one
+line per ask, in a folder whose length is the size of the backlog.
 
 ## Loose ends
 
