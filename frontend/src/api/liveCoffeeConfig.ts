@@ -42,6 +42,8 @@ export function useLiveCoffeeConfig(
       invalid: 'The stream returned an invalid CoffeeConfig.',
       replaced:
         'This configuration was removed or replaced. Open a new editor.',
+      refreshed:
+        'Configuration refreshed. Your edits are intact; review and save again.',
     },
   })
 }

@@ -37,6 +37,8 @@ export function useLiveDatabase(namespace: string, name: string) {
       invalid: 'The stream returned something that is not a Database.',
       replaced:
         'This database request was removed or replaced. Open it again from the list.',
+      refreshed:
+        'Request refreshed. Your edits are intact; review and save again.',
     },
   })
 }

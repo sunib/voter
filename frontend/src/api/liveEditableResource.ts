@@ -37,9 +37,11 @@ export interface EditableResourceOptions<T> {
   write: (intent: SaveRequest, reason: string) => Promise<SaveReceipt>
   /** Narrow a streamed object to the kind this editor expects. */
   isExpectedKind: (object: unknown) => object is KRMObject & T
-  /** What to say when the object goes away or comes back as the wrong thing.
-   *  In the screen's words, because the screen is where they are read. */
-  copy: { invalid: string; replaced: string }
+  /** The lines a person reads when something happens to the object underneath
+   *  them. In the screen's own words -- a CoffeeConfig is a "configuration" and
+   *  a Database request is not, and the generic phrasing that covers both reads
+   *  as though it were written for neither. */
+  copy: { invalid: string; replaced: string; refreshed: string }
 }
 
 /**
@@ -174,7 +176,7 @@ export function useLiveEditableResource<T>(
       ? 'Live updates overtook the read. Refresh again after reconnecting.'
       : conflicts.value.length
         ? 'Another editor changed the same fields. Review the highlighted conflicts.'
-        : 'Refreshed. Your edits are intact; review and save again.'
+        : copy.refreshed
     return !needsRead.value
   }
   async function save(reason: string) {

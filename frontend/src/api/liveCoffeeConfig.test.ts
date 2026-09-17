@@ -72,6 +72,28 @@ afterEach(() => {
 })
 
 describe('CoffeeConfig library integration', () => {
+  // The exact words, pinned.
+  //
+  // These two sentences are asserted verbatim by live-stream.spec.js, which
+  // runs in a Playwright job behind a k3d cluster and takes six minutes to tell
+  // you that you reworded a notice. Generalizing "Configuration refreshed" to
+  // "Refreshed" while extracting the shared editor engine did exactly that, and
+  // this test is here so the next person finds out in one second instead.
+  //
+  // They are per-resource for a reason: a CoffeeConfig is a "configuration" and
+  // a database request is not, so the copy lives in each binding rather than in
+  // the engine both of them share.
+  it('keeps the refresh notice in the words the browser tests assert', async () => {
+    const { live, host } = await fixture()
+    live.setValue(['spec', 'shopName'], 'Mine')
+    host.mockImplementationOnce(async () => json(object()))
+    await live.refreshFromServer()
+
+    expect(live.notice.value).toBe(
+      'Configuration refreshed. Your edits are intact; review and save again.',
+    )
+  })
+
   // The reported symptom: change one price on the coffee screen and every
   // field appears changed. The cause is not the array being mangled -- it is
   // that a merge patch replaces a list whole, so the library reports the edit
