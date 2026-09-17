@@ -1,14 +1,18 @@
 # demo-c: putting the database requests into Git
 
-A plan, not a change. Nothing in this page has been applied — it is the
-last-minute work needed to make a `Database` request land in
-`ConfigButler/k8s-audit-trail` the way a quiz ballot and a coffee price already
-do, under the name of whoever filed it.
+**Applied and verified on 2026-09-17.** This page stays in the plan voice
+because the reasoning is the useful part, but the GitTarget and the WatchRule are
+live on `k8s.koudijs.dev` and `clusters/k8s.koudijs.dev/demo-c/` exists. What ran
+and what it produced is at the bottom, under "What happened when it ran".
+
+It makes a `Database` request land in `ConfigButler/k8s-audit-trail` the way a
+quiz ballot and a coffee price already do, under the name of whoever filed it.
 
 The whole of it is **two new objects and one environment variable**. That is
 small because the application was built expecting this: `databases.md` ends with
 "when a GitTarget does start watching these", and the backend already has the
-empty setting waiting.
+empty setting waiting. The two objects are done; the variable waits for a
+deploy.
 
 ## What this buys
 
@@ -198,8 +202,82 @@ directory listing that reads `checkout-postgresql.yaml`, `ledger-mysql.yaml`,
 `fraud-scoring-postgresql.yaml` **is** the thing you want on a projector: one
 line per ask, in a folder whose length is the size of the backlog.
 
+## What happened when it ran
+
+Applied with `kubectl apply -f new-page/git-sink-demo-c.yaml` (hand-applied, like
+the CRD — see the loose ends). The target reported `Ready/Succeeded` with one
+watch stream in under eleven seconds.
+
+**The three seeded requests arrived by resync, not by a write.** They already
+existed, so the first reconcile swept them in:
+
+```
+2ae2ee2  ConfigButler Bot <bot@configbutler.ai>
+         chore(demo-c): reconcile 3 databases at rv 3463468
+```
+
+Authored by the bot, correctly: nobody made that change, the mirror simply
+caught up. This is the one commit in the folder that is *not* attributed to a
+person, and it is the right answer.
+
+**demo-c mirrored its own arrival.** `gitops-reverser-config` watches
+`gittargets` and `watchrules`, so the same minute produced
+`gitops-reverser-config/voter/gittargets/demo-c.yaml` and its WatchRule beside
+it, under `chore(config): 2 ConfigButler changes` — authored by the human who
+ran the apply. The configuration wrote itself down. That was free.
+
+**A live edit is attributed to the person who made it.** Patching one request
+with `kubectl` produced:
+
+```
+commit cdb19e1
+Author:    admin <admin@noreply.cluster.local>
+Committer: ConfigButler Bot <bot@configbutler.ai>
+
+chore(demo-c): 1 database request
+
+- [UPDATE] Database/loyalty-points-mysql
+```
+
+and this diff, which is the thing to put on the projector — **the reason changes
+in the same commit as the spec it explains**:
+
+```diff
+   annotations:
+-    platform.configbutler.ai/intent: 'New loyalty scheme launches in Q1 ...'
++    platform.configbutler.ai/intent: 'Bumping to medium: the launch forecast
++      doubled after the campaign was signed off ...'
+ spec:
+   backup:
+-    pointInTimeRecovery: false
+-    retentionDays: 7
++    pointInTimeRecovery: true
++    retentionDays: 35
+-  size: small
+-  tier: standard
++  size: medium
++  tier: business-critical
+```
+
+The load-bearing claim held: the intent annotation is in the committed document.
+
+**Still outstanding**, and both need a deploy rather than this change:
+
+- `CONFIGBUTLER_DATABASE_GIT_TARGET_NAME=demo-c` on the Deployment. Without it a
+  save from the *page* still mirrors — it just lands on the 5s window under the
+  generic subject instead of carrying the requester's own sentence as the commit
+  message.
+- The `databases` rule on the `voter-audience` Role, without which the page gets
+  a real 403 for everyone who is not cluster-admin.
+
 ## Loose ends
 
+- **The GitTarget and WatchRule are hand-applied**, like the CRD. Flux does not
+  know they exist, so they survive until something rebuilds the namespace. The
+  file is already in the platform checkout at
+  `voter-demo/git-sink-demo-c.yaml`; adding that one line to
+  `voter-demo/kustomization.yaml` and pushing is what makes it permanent, and
+  Flux will simply adopt the running objects.
 - **The CRD is hand-applied.** It survives until something rebuilds the cluster.
   It belongs in `voter-demo/crds/` next to the others, and that is a five-minute
   change that should happen before it is forgotten — not because the demo needs

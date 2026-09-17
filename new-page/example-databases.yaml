@@ -1,0 +1,121 @@
+# Three teams, three asks, one folder.
+#
+# This is the seed for the Databases page and for the demo-c mirror. Applying it
+# does two things at once: the page fills with outstanding intent from teams
+# that are not in the room, and -- once the demo-c GitTarget exists -- each
+# document lands in clusters/k8s.koudijs.dev/demo-c/<name>.yaml in the audit
+# trail, carrying the reason it was asked for.
+#
+#   kubectl apply -n voter -f new-page/example-databases.yaml
+#
+# `apply`, not `create`: rehearsing should be repeatable, and a second run of
+# this file should be a no-op rather than an error.
+#
+# To clear them again -- note this also writes three deletions to Git, because
+# demo-c prunes Always:
+#
+#   kubectl -n voter delete databases --all
+#
+# Nothing reconciles any of these. There is no controller, no RDS instance and
+# no CloudNativePG cluster behind them; status.phase stays empty and the page
+# says "Not provisioned" rather than inventing a green pill nobody wrote. The
+# declared intent IS the deliverable. Running the database is the other team's
+# job, and this is the front door they will read.
+---
+apiVersion: platform.configbutler.ai/v1alpha1
+kind: Database
+metadata:
+  name: checkout-postgresql
+  namespace: voter
+  annotations:
+    # The same annotation the page writes when somebody types into "why are you
+    # making this change?". Not an operational annotation, so gitops-reverser
+    # carries it into the mirrored document beside the spec it explains.
+    platform.configbutler.ai/intent: >-
+      Checkout is outgrowing the shared cluster and needs its own store before
+      the Black Friday freeze. We have been on the shared instance for two years
+      and the noisy-neighbour incidents are now monthly.
+spec:
+  engine: postgresql
+  engineVersion: "16"
+  tier: business-critical
+  size: medium
+  region: eu-central-2
+  service: checkout
+  dataClassification: confidential
+  purpose: >-
+    Orders, payments and the idempotency ledger for the checkout flow. If this
+    is down, the shop cannot take money.
+  owner:
+    team: payments-core
+    costCentre: CC-finance-07
+    contact: payments-core@example.com
+    onCallRotation: PD-SCHED-1234
+  backup:
+    pointInTimeRecovery: true
+    retentionDays: 35
+  network:
+    exposure: cluster-only
+  maintenanceWindow: "Sun:02:00-04:00"
+  deletionPolicy: retain
+---
+apiVersion: platform.configbutler.ai/v1alpha1
+kind: Database
+metadata:
+  name: loyalty-points-mysql
+  namespace: voter
+  annotations:
+    platform.configbutler.ai/intent: >-
+      New loyalty scheme launches in Q1 and the points ledger cannot live in the
+      marketing spreadsheet any longer. Standard tier is fine: if it is down for
+      an hour nobody loses money, they just cannot see their balance.
+spec:
+  engine: mysql
+  engineVersion: "8.0"
+  tier: standard
+  size: small
+  region: eu-central-1
+  service: loyalty-points
+  dataClassification: internal
+  purpose: >-
+    Points balances and the accrual history behind the loyalty programme.
+    Rebuildable from the event stream, slowly.
+  owner:
+    team: digital-channels
+    costCentre: CC-finance-23
+    contact: digital-channels@example.com
+  backup:
+    retentionDays: 7
+  network:
+    exposure: vpc
+  deletionPolicy: snapshot-then-delete
+---
+apiVersion: platform.configbutler.ai/v1alpha1
+kind: Database
+metadata:
+  name: fraud-features-postgresql
+  namespace: voter
+  annotations:
+    platform.configbutler.ai/intent: >-
+      Throwaway instance for the fraud model bake-off. We expect to delete this
+      in six weeks and we would rather say so up front than leave you guessing
+      in eighteen months.
+spec:
+  engine: postgresql
+  engineVersion: "16"
+  tier: sandbox
+  size: large
+  region: eu-central-2
+  service: fraud-scoring
+  dataClassification: internal
+  purpose: >-
+    Feature store for the fraud model bake-off. Synthetic and anonymised data
+    only -- no production cardholder data, by agreement with Risk.
+  storageGB: 2000
+  owner:
+    team: data-analytics
+    costCentre: CC-finance-12
+    contact: data-analytics@example.com
+  network:
+    exposure: cluster-only
+  deletionPolicy: delete

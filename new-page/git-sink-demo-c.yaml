@@ -1,0 +1,84 @@
+# demo-c: what the teams asked the platform team for.
+#
+# The third demo folder, and the first one whose documents nothing in the
+# cluster reconciles. A Database has no controller behind it -- the mirrored
+# file IS the deliverable, not a record of one. That is the whole point of the
+# page that writes them: the CRD is the interface, the form is the process, and
+# this folder is the proof.
+#
+# See docs/demo-c-plan.md in the voter repository for why each field is what it
+# is, and for the two facts this depends on: the reverser already may read the
+# type (watch-any), and platform.configbutler.ai/intent is not an operational
+# annotation, so the requester's own words travel into the document.
+apiVersion: configbutler.ai/v1alpha3
+kind: GitTarget
+metadata:
+  name: demo-c
+  namespace: voter
+spec:
+  gitProviderRef:
+    name: k8s-audit-trail
+  branch: main
+  # Sibling of demo1, demo2 and gitops-reverser-config, never nested inside one:
+  # all of them prune with the resync mark-and-sweep, and a folder inside
+  # another target's path asks a converging mirror to reason about documents it
+  # does not own. Immutable -- renaming it later means delete and recreate, and
+  # that is the one operation that loses the folder's history.
+  path: clusters/k8s.koudijs.dev/demo-c
+  placement:
+    byType:
+      # No Secret can reach this target: the WatchRule below names one CRD kind
+      # and nothing else. The route is here because admission refuses a layout
+      # that is not identity-complete unless every sensitive type has a route
+      # where collision is impossible. Same reason as demo1's.
+      v1/secrets: "secrets/{namespace}/{name}{sensitiveSuffix}"
+    # One file per request, flat, at the root of spec.path. A request is one
+    # object with one owner, so the object's own name is the honest filename,
+    # and the folder listing reads as the queue itself -- one line per ask.
+    #
+    # Filing per team instead would need a label, because a placement template
+    # reads labels and the team lives in spec.owner.team. Decided against: see
+    # the plan.
+    default: "{name}.yaml"
+  serializeNamespace: false
+  prune:
+    # A withdrawn request leaves Git. `Always` rather than `OnEvent` so the
+    # resync mark-and-sweep may also infer a deletion the reverser was not
+    # running to observe.
+    mode: Always
+  commit:
+    window: 5s
+    message:
+      # Only used when NOTHING closed the window early -- a kubectl-driven
+      # change like the seed file, or a save made while
+      # CONFIGBUTLER_DATABASE_GIT_TARGET_NAME is still empty. A save from the
+      # page carries the requester's own sentence instead, via a CommitRequest.
+      #
+      # No name in the subject: the Author header already carries it, and one
+      # fact belongs in one place. Same rule as demo1 and demo2.
+      liveTemplate: |-
+        chore(demo-c): {{.Count}} database request{{if ne .Count 1}}s{{end}}
+
+        {{range .Resources -}}
+        - [{{.Operation}}] {{.Kind}}/{{.Name}}
+        {{end -}}
+      reconcileTemplate: "chore(demo-c): reconcile {{.Count}} {{if .Resource}}{{.Resource}}{{else}}resources{{end}}{{with .Revision}} at rv {{.}}{{end}}"
+---
+apiVersion: configbutler.ai/v1alpha3
+kind: WatchRule
+metadata:
+  name: demo-c
+  namespace: voter
+spec:
+  gitTargetRef:
+    name: demo-c
+  rules:
+    # sourceNamespace omitted, which means this WatchRule's own namespace --
+    # "objects in the voter namespace", and nothing from anywhere else.
+    #
+    # One kind. Not the CRD itself (that is cluster-scoped and would need a
+    # ClusterWatchRule), not Secrets, not the app's own objects.
+    - apiGroups: [platform.configbutler.ai]
+      apiVersions: [v1alpha1]
+      resources: [databases]
+      operations: [CREATE, UPDATE, DELETE]
