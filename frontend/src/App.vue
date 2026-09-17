@@ -5,5 +5,10 @@
 </script>
 
 <template>
-  <RouterView />
+  <!-- Keyed by path: two routes share the Database editor component, and one of
+       them streams a named object. Without this, navigating from one request to
+       another would reuse the instance and keep watching the first one. -->
+  <RouterView v-slot="{ Component, route }">
+    <component :is="Component" :key="route.fullPath" />
+  </RouterView>
 </template>

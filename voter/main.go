@@ -98,6 +98,7 @@ func main() {
 	go func() { log.Fatal(metricsServer.Serve(metricsListener)) }()
 	registerOIDCHandlers(mux, oidcClient, cfg, deps.defaultNS)
 	registerParticipantCoffeeHandlers(mux, deps)
+	registerParticipantDatabaseHandlers(mux, deps)
 	registerParticipantStorefrontHandlers(mux, deps)
 	registerParticipantOrderFeedHandlers(mux, deps)
 	registerParticipantQuizHandlers(mux, deps)

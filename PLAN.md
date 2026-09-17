@@ -311,6 +311,34 @@ an unrelated OIDC application through Dex, and upgrade without changing identiti
       Require the concurrency and 200-attendee acceptance tests before presenting the
       completed refactor as ready for the event; the current rollout is an intermediate build.
 
+## 5a. The Databases page
+
+The third tab is built, tested and in the image. What is left is everything that
+lives outside this repository -- see [docs/databases.md](docs/databases.md) for the
+commands and for why each step is separate.
+
+- [ ] `kubectl apply -f voter/config/crd/databases.yaml`. Cluster-scoped, one apply,
+      no controller behind it. Until this exists every Database page renders the API
+      server's "could not find the requested resource", which is at least honest.
+- [ ] Add the `platform.configbutler.ai/databases` rule to the `voter-audience` Role in
+      `external/k8s/.../voter-demo/participant-rbac.yaml`: `get, list, watch, create,
+      patch, update`, and deliberately not `delete`. Without it the pages explain the
+      gap and every button still produces the real 403.
+- [ ] Deploy. Not done yet, on purpose: the image carries the page but the demo has
+      not rehearsed with it. Same GitOps path as everything else -- image tag in
+      `voter-demo/app.yaml`, never a live workload mutation.
+- [ ] Seed two or three requests from different teams, so the list reads as
+      "outstanding intent from all teams" rather than as an empty state.
+
+Deferred rather than missing:
+
+- [ ] The gitops-reverser half. No GitTarget watches Databases, so a save creates no
+      CommitRequest and the intent is recorded as an annotation on the object instead.
+      When a target exists, `CONFIGBUTLER_DATABASE_GIT_TARGET_NAME` on the Deployment
+      is the entire change. It is a SEPARATE setting from the coffee one on purpose:
+      reusing that target would close demo 1's open commit window from a page that
+      never touched the menu.
+
 ## 6. Retained platform work
 
 These are unresolved items from the previous plan, not newly verified cluster facts.

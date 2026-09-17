@@ -56,6 +56,17 @@ type config struct {
 	// commit window should be finalized after a successful CoffeeConfig patch.
 	// Set to "" to disable the save-message side effect entirely.
 	ConfigButlerGitTargetName string `envconfig:"CONFIGBUTLER_GIT_TARGET_NAME" default:"voter-demo"`
+	// ConfigButlerDatabaseGitTargetName is the same thing for the Database
+	// editor, and is EMPTY on purpose: no GitTarget watches
+	// platform.configbutler.ai/databases yet, so there is no window to close and
+	// a database save creates no CommitRequest at all.
+	//
+	// It is a separate setting rather than a reuse of the one above because
+	// reusing it would finalize the COFFEE window from a page that did not
+	// touch the coffee menu -- committing demo 1's half-finished edit under
+	// somebody else's message, mid-demo. When the GitTarget exists, setting
+	// this is the only change needed.
+	ConfigButlerDatabaseGitTargetName string `envconfig:"CONFIGBUTLER_DATABASE_GIT_TARGET_NAME"`
 	// ConfigButlerCommitRequestNamespace overrides where CommitRequest objects
 	// are created. Empty means "use the runtime namespace", which must also be
 	// the GitTarget's namespace.

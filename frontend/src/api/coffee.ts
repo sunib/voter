@@ -7,7 +7,11 @@ import type {
   CoffeeVoucherSpec,
   StorefrontResponse,
 } from './coffeeTypes'
-import { currentCsrfToken } from './session'
+import { requestJson } from './http'
+
+// Re-exported: callers that catch an error from these functions want the type,
+// and coffee.ts is where they already look.
+export type { ApiError } from './http'
 
 export type PublicBuildInfoResponse = {
   gitCommit: string
@@ -28,60 +32,6 @@ export type LoginRequest = {
   stableId: string
   displayName: string
   email: string
-}
-
-export type ApiError = Error & {
-  status: number
-  body?: unknown
-}
-
-function createApiError(status: number, body: unknown): ApiError {
-  const details = body as { message?: unknown; error?: unknown } | null
-  const message =
-    typeof body === 'string'
-      ? body
-      : typeof details?.message === 'string'
-        ? details.message
-        : typeof details?.error === 'string'
-          ? details.error
-          : `Request failed (${status})`
-  const err = new Error(message) as ApiError
-  err.status = status
-  err.body = body
-  return err
-}
-
-async function readJsonOrText(res: Response): Promise<unknown> {
-  const contentType = res.headers.get('content-type') ?? ''
-  if (contentType.includes('application/json')) {
-    return await res.json()
-  }
-  return await res.text()
-}
-
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers)
-  if (init?.body !== undefined && !headers.has('content-type')) {
-    headers.set('content-type', 'application/json')
-  }
-
-  // Every cookie-authenticated mutation needs CSRF proof, or the backend
-  // answers 403. GET and HEAD are not mutations and the backend does not ask.
-  const method = (init?.method ?? 'GET').toUpperCase()
-  if (method !== 'GET' && method !== 'HEAD' && !headers.has('x-csrf-token')) {
-    headers.set('x-csrf-token', currentCsrfToken())
-  }
-
-  const res = await fetch(path, {
-    ...init,
-    headers,
-    credentials: 'include',
-  })
-
-  if (!res.ok) {
-    throw createApiError(res.status, await readJsonOrText(res))
-  }
-  return (await res.json()) as T
 }
 
 export async function getStorefront(

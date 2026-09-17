@@ -9,11 +9,9 @@ package main
 // the honest answer and it stays a 403.
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -25,11 +23,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 )
-
-// maxPatchBytes bounds the merge patch a participant may send. Without this the
-// endpoint would accept an arbitrarily large body and hand it straight to the
-// API server.
-const maxPatchBytes = 64 * 1024
 
 func registerParticipantCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 	cfg := deps.cfg
@@ -60,40 +53,11 @@ func registerParticipantCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 			writeJSON(w, http.StatusOK, projected)
 
 		case http.MethodPatch:
-			patch, err := io.ReadAll(io.LimitReader(r.Body, maxPatchBytes+1))
-			if err != nil {
-				http.Error(w, "failed to read patch body", http.StatusBadRequest)
+			// Body shape, size and "only spec" all live in participant_save.go, so
+			// this handler and the Database editor cannot disagree about them.
+			intent, ok := decodeSaveIntent(w, r)
+			if !ok {
 				return
-			}
-			if len(patch) > maxPatchBytes {
-				http.Error(w, "patch body too large", http.StatusRequestEntityTooLarge)
-				return
-			}
-			if len(strings.TrimSpace(string(patch))) == 0 {
-				http.Error(w, "empty patch body", http.StatusBadRequest)
-				return
-			}
-			if !json.Valid(patch) {
-				http.Error(w, "patch body is not valid JSON", http.StatusBadRequest)
-				return
-			}
-
-			var intent struct {
-				UID             string         `json:"uid"`
-				ResourceVersion string         `json:"resourceVersion"`
-				Patch           map[string]any `json:"patch"`
-			}
-			decoder := json.NewDecoder(bytes.NewReader(patch))
-			decoder.DisallowUnknownFields()
-			if err := decoder.Decode(&intent); err != nil || intent.UID == "" || intent.ResourceVersion == "" || intent.Patch == nil {
-				http.Error(w, "uid, resourceVersion and patch are required", http.StatusBadRequest)
-				return
-			}
-			for key := range intent.Patch {
-				if key != "spec" {
-					http.Error(w, "only spec is editable", http.StatusBadRequest)
-					return
-				}
 			}
 			ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 			defer cancel()
@@ -108,7 +72,7 @@ func registerParticipantCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 				return
 			}
 			intent.Patch["metadata"] = map[string]any{"uid": intent.UID, "resourceVersion": intent.ResourceVersion}
-			patch, err = json.Marshal(intent.Patch)
+			patch, err := json.Marshal(intent.Patch)
 			if err != nil {
 				http.Error(w, "invalid patch", http.StatusBadRequest)
 				return
@@ -134,7 +98,7 @@ func registerParticipantCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 					crNS = ns
 				}
 				crName, crErr := createParticipantCommitRequest(ctx, clients, crNS, target,
-					strings.TrimSpace(r.Header.Get("X-Change-Reason")), cfg.ConfigButlerCloseDelaySeconds)
+					changeReason(r), cfg.ConfigButlerCloseDelaySeconds)
 				switch {
 				case crErr != nil:
 					log.Printf("commitrequest: create failed sub=%s target=%s: %v", s.Subject, target, crErr)
@@ -156,6 +120,13 @@ func registerParticipantCoffeeHandlers(mux *http.ServeMux, deps handlerDeps) {
 }
 
 func createParticipantCommitRequest(ctx context.Context, clients participantClients, ns, target, message string, closeDelaySeconds int32) (string, error) {
+	return createNamedCommitRequest(ctx, clients, ns, target, "coffee-save-", message, closeDelaySeconds)
+}
+
+// createNamedCommitRequest is the same request with the generateName as a
+// parameter, so a Database save is recognisable from a coffee one in
+// `kubectl get commitrequests` without reading the message.
+func createNamedCommitRequest(ctx context.Context, clients participantClients, ns, target, generateName, message string, closeDelaySeconds int32) (string, error) {
 	spec := map[string]any{"gitTargetRef": map[string]any{"name": target}}
 	if message != "" {
 		spec["message"] = message
@@ -172,7 +143,7 @@ func createParticipantCommitRequest(ctx context.Context, clients participantClie
 		"apiVersion": commitRequestAPIVersion,
 		"kind":       "CommitRequest",
 		"metadata": map[string]any{
-			"generateName": "coffee-save-",
+			"generateName": generateName,
 			"namespace":    ns,
 		},
 		"spec": spec,

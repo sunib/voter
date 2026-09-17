@@ -7,6 +7,9 @@ import RoomScreen from './screens/RoomScreen.vue'
 import OrderScreen from './screens/OrderScreen.vue'
 import AdminScreen from './screens/AdminScreen.vue'
 import AdminOrdersScreen from './screens/AdminOrdersScreen.vue'
+import DatabasesScreen from './screens/DatabasesScreen.vue'
+import DatabaseEditScreen from './screens/DatabaseEditScreen.vue'
+import DatabaseNewScreen from './screens/DatabaseNewScreen.vue'
 import VoteResultsScreen from './screens/VoteResultsScreen.vue'
 import AnswerScreen from './screens/AnswerScreen.vue'
 import LoginScreen from './screens/LoginScreen.vue'
@@ -62,6 +65,25 @@ export const router = createRouter({
       path: '/admin',
       name: 'admin',
       component: AdminScreen,
+    },
+    // The platform half: what teams have asked the platform team for. The list
+    // is the page; '/databases/new' is declared BEFORE '/databases/:name' so a
+    // request may not be named "new" and quietly shadow the create page.
+    {
+      path: '/databases',
+      name: 'databases',
+      component: DatabasesScreen,
+    },
+    {
+      path: '/databases/new',
+      name: 'database-new',
+      component: DatabaseNewScreen,
+    },
+    {
+      path: '/databases/:name',
+      name: 'database-edit',
+      component: DatabaseEditScreen,
+      props: true,
     },
     // The other half of the coffee story: what the room ordered. Deliberately
     // not a Kubernetes resource, which is why it is a page and not a tab on the

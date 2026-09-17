@@ -39,6 +39,19 @@ func coffeeConfigGVR() schema.GroupVersionResource {
 	}
 }
 
+// The platform team's "I need a database" API. A plain CRD with no controller
+// behind it: the point of the page that edits these is that the declared intent
+// is the deliverable, and whatever provisions it comes later.
+func databaseGVR() schema.GroupVersionResource {
+	return schema.GroupVersionResource{
+		Group:    "platform.configbutler.ai",
+		Version:  "v1alpha1",
+		Resource: "databases",
+	}
+}
+
+const databaseAPIVersion = "platform.configbutler.ai/v1alpha1"
+
 func toCoffeeConfig(obj *unstructured.Unstructured) (coffeeConfig, error) {
 	var out coffeeConfig
 	if obj == nil {

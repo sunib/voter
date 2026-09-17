@@ -167,6 +167,7 @@ export function missingPermissions(
 }
 
 const EXAMPLES = 'examples.configbutler.ai'
+const PLATFORM = 'platform.configbutler.ai'
 const RBAC = 'rbac.authorization.k8s.io'
 const ROOMPASS = 'roompass.configbutler.ai'
 
@@ -196,6 +197,36 @@ export const ADMIN_REQUIREMENTS: Requirement[] = [
     resource: 'commitrequests',
     verb: 'create',
     purpose: 'press "save now" to commit without waiting for the window',
+  },
+]
+
+/** What the database request pages use. Note what is NOT here: delete. The
+ *  pages do not offer it and the Role does not grant it — withdrawing another
+ *  team's request is not a thing this demo does. */
+export const DATABASE_REQUIREMENTS: Requirement[] = [
+  {
+    apiGroup: PLATFORM,
+    resource: 'databases',
+    verb: 'list',
+    purpose: 'see what every team has asked for',
+  },
+  {
+    apiGroup: PLATFORM,
+    resource: 'databases',
+    verb: 'watch',
+    purpose: "see another team's request arrive live",
+  },
+  {
+    apiGroup: PLATFORM,
+    resource: 'databases',
+    verb: 'create',
+    purpose: 'file a new request',
+  },
+  {
+    apiGroup: PLATFORM,
+    resource: 'databases',
+    verb: 'patch',
+    purpose: 'change a request that already exists',
   },
 ]
 

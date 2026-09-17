@@ -35,6 +35,14 @@ var scopePolicy = gateway.ScopePolicy{
 			Resource: "quizsessions",
 			Scope:    gateway.ResourceScopeNamespaced,
 		},
+		// The database requests, live. This is a COLLECTION watch: the list
+		// page is the one that has to redraw when another team files a request
+		// during the talk, which is the whole point of showing it.
+		{
+			Group:    "platform.configbutler.ai",
+			Resource: "databases",
+			Scope:    gateway.ResourceScopeNamespaced,
+		},
 		// The operator page's QR code follows the join code as it rotates.
 		// Allowlisting the KIND is not permission to read one: the join code is
 		// operator-only credential material living in the Room's status, and a
@@ -69,6 +77,7 @@ func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 	pinned := streamAllowlist{
 		{Group: "examples.configbutler.ai", Version: "v1alpha1", Resource: "coffeeconfigs", Namespace: deps.defaultNS, Name: cfg.CoffeeConfigName},
 		{Group: "examples.configbutler.ai", Version: "v1alpha1", Resource: "quizsessions", Namespace: deps.defaultNS},
+		{Group: "platform.configbutler.ai", Version: "v1alpha1", Resource: "databases", Namespace: deps.defaultNS},
 		{Group: "roompass.configbutler.ai", Version: "v1alpha1", Resource: "rooms", Namespace: deps.defaultNS, Name: cfg.RoomName},
 	}
 
