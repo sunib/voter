@@ -37,9 +37,9 @@ Worth stating, because each one is a step this plan does **not** need.
 
 **1. The CRD is applied.** `databases.platform.configbutler.ai` is Established on
 `k8s.koudijs.dev` as of 2026-09-17, applied by hand with `kubectl apply
---server-side`. `kubectl -n voter get db` answers. It is **not** in the Flux
-checkout, so a namespace or cluster rebuild loses it — see the loose end at the
-bottom.
+--server-side`. `kubectl -n voter get db` answers. It has since been adopted into
+the Flux checkout at `voter-demo/crds/databases.yaml`, so a rebuild no longer
+loses it — see the loose ends.
 
 **2. The reverser may already read the new type.** The cluster runs
 `gitops-reverser-watch-any`, which grants `get`/`list`/`watch` on `*/*`. A type
@@ -204,9 +204,9 @@ line per ask, in a folder whose length is the size of the backlog.
 
 ## What happened when it ran
 
-Applied with `kubectl apply -f new-page/git-sink-demo-c.yaml` (hand-applied, like
-the CRD — see the loose ends). The target reported `Ready/Succeeded` with one
-watch stream in under eleven seconds.
+Applied with `kubectl apply -f new-page/git-sink-demo-c.yaml` — hand-applied at
+the time, and since adopted by Flux in place. The target reported
+`Ready/Succeeded` with one watch stream in under eleven seconds.
 
 **The three seeded requests arrived by resync, not by a write.** They already
 existed, so the first reconcile swept them in:
@@ -267,23 +267,21 @@ The load-bearing claim held: the intent annotation is in the committed document.
   save from the *page* still mirrors — it just lands on the 5s window under the
   generic subject instead of carrying the requester's own sentence as the commit
   message.
-- The `databases` rule on the `voter-audience` Role, without which the page gets
-  a real 403 for everyone who is not cluster-admin. It is now **written and
-  committed** in the platform checkout and waiting on a push;
-  [databases-cutover.md](databases-cutover.md) is the order it goes out in.
+- ~~The `databases` rule on the `voter-audience` Role.~~ **Applied 2026-09-17**
+  (`db3205e`) and verified: six verbs yes, `delete` no, as a room participant.
 
 ## Loose ends
 
-- **The GitTarget and WatchRule are hand-applied**, like the CRD. Flux does not
-  know they exist, so they survive until something rebuilds the namespace. The
-  file is already in the platform checkout at
-  `voter-demo/git-sink-demo-c.yaml`; adding that one line to
-  `voter-demo/kustomization.yaml` and pushing is what makes it permanent, and
-  Flux will simply adopt the running objects.
-- **The CRD is hand-applied.** It survives until something rebuilds the cluster.
-  It belongs in `voter-demo/crds/` next to the others, and that is a five-minute
-  change that should happen before it is forgotten — not because the demo needs
-  it, but because the next rebuild will not know it was ever there.
+- ~~**The GitTarget and WatchRule are hand-applied.**~~ **Adopted 2026-09-17**
+  (`3b37533`). Flux took them over in place: the same `creationTimestamp`, and
+  `kustomize-controller` is now the sole field owner, because it takes
+  `kubectl-client-side-apply` over automatically.
+- ~~**The CRD is hand-applied.**~~ **Adopted 2026-09-17** (`3b37533`), into
+  `voter-demo/crds/databases.yaml`. One thing to know: it now has TWO Apply
+  owners, `simon-kubectl` from the original hand-apply and `kustomize-controller`.
+  That is harmless while they agree — they applied the same bytes — and becomes a
+  real conflict the day somebody hand-applies a different body under the old
+  manager. Let Flux own it from here.
 - **Rehearsal reset.** `kubectl -n voter delete databases --all` — with
   `prune: Always` this also writes every removal to Git, which is worth seeing
   once and not on stage.

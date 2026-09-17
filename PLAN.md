@@ -319,14 +319,15 @@ commands and for why each step is separate.
 
 - [x] `kubectl apply -f voter/config/crd/databases.yaml`. Cluster-scoped, one apply,
       no controller behind it. Applied by hand on 2026-09-17 and Established; `kubectl
-      -n voter get db` answers. NOT in the Flux checkout, so a cluster rebuild loses
-      it -- moving it to `voter-demo/crds/` is a loose end in the demo-c plan.
+      -n voter get db` answers. Since adopted into the Flux checkout at
+      `voter-demo/crds/databases.yaml`, so a rebuild no longer loses it.
 - [x] Add the `platform.configbutler.ai/databases` rule to the `voter-audience` Role in
       `external/k8s/.../voter-demo/participant-rbac.yaml`: `get, list, watch, create,
       patch, update`, and deliberately not `delete`. Granted to the whole room from the
       start rather than behind the operator's switch -- coffee is the demo about a
       refusal being lifted; this one is about a team writing down what it needs.
-      Written and committed in the platform checkout, not yet pushed.
+      Applied 2026-09-17 (`db3205e`) and verified with `kubectl auth can-i` across all
+      seven verbs as a room participant: six yes, `delete` no.
 - [ ] Deploy, in the order in [docs/databases-cutover.md](docs/databases-cutover.md).
       Not done yet, on purpose: the image carries the page but the demo has not
       rehearsed with it, and the same change moved the coffee editor onto shared code.
@@ -338,17 +339,16 @@ commands and for why each step is separate.
 
 Deferred rather than missing:
 
-- [ ] The gitops-reverser half. No GitTarget watches Databases, so a save creates no
-      CommitRequest and the intent is recorded as an annotation on the object instead.
-      When a target exists, `CONFIGBUTLER_DATABASE_GIT_TARGET_NAME` on the Deployment
-      is the entire change. It is a SEPARATE setting from the coffee one on purpose:
-      reusing that target would close demo 1's open commit window from a page that
-      never touched the menu.
+- [ ] The last of the gitops-reverser half: the environment variable. The demo-c
+      GitTarget and WatchRule are applied and mirroring, and are now in the Flux
+      checkout -- [docs/demo-c-plan.md](docs/demo-c-plan.md) records what the run
+      proved. What is left is `CONFIGBUTLER_DATABASE_GIT_TARGET_NAME=demo-c` on the
+      Deployment, which ships with the image in the cutover's step 3.
 
-      Now planned rather than merely deferred: [docs/demo-c-plan.md](docs/demo-c-plan.md)
-      has the GitTarget, the WatchRule and the ordering. Two objects and one variable;
-      the reverser's wildcard read already covers the new type and the intent
-      annotation already survives the write.
+      Without it a page save still reaches Git on the 5s window, under the generic
+      subject; the variable buys the requester's own sentence as the commit message.
+      It is a SEPARATE setting from the coffee one on purpose: reusing that target
+      would close demo 1's open commit window from a page that never touched the menu.
 
 ## 6. Retained platform work
 

@@ -37,16 +37,15 @@ Cluster-scoped, so this is one apply for the whole cluster. Until it exists
 every page here answers with the API server's "the server could not find the
 requested resource", which the screens render verbatim.
 
-Applied to `k8s.koudijs.dev` on 2026-09-17 and Established. It is **not** in the
-Flux checkout, so it is the one piece of this demo a cluster rebuild would
-silently drop; [demo-c-plan.md](demo-c-plan.md) carries that as a loose end.
+Applied to `k8s.koudijs.dev` on 2026-09-17 and Established, and adopted into the
+Flux checkout the same day, so a rebuild no longer drops it.
 
-### 2. The participant Role — written, not yet live
+### 2. The participant Role — done
 
-The rule is in the platform checkout at
-`external/k8s/k8s.koudijs.dev/2-gitops/voter-demo/participant-rbac.yaml`, on the
-`voter-audience` Role, committed there but not pushed. Pushing is what Flux
-reconciles and what puts it in front of the room.
+The rule is on the `voter-audience` Role in the platform checkout at
+`external/k8s/k8s.koudijs.dev/2-gitops/voter-demo/participant-rbac.yaml`, applied
+2026-09-17 and verified with `kubectl auth can-i` across all seven verbs as a
+room participant: six yes, `delete` no.
 
 ```yaml
   - apiGroups: [platform.configbutler.ai]
@@ -70,10 +69,10 @@ yours.
 granted so the same person can `kubectl apply` their own request from a terminal
 and have it land identically, which is a thing the talk does.
 
-Until it is live the pages still render. They explain the gap from the API
-server's own answer and leave every button live, so pressing one produces the
-real 403 — the same behaviour the coffee editor has before the switch, and worth
-seeing once on purpose.
+Before it was live the pages still rendered: they explain the gap from the API
+server's own answer and leave every button live, so pressing one produced the
+real 403 — the same behaviour the coffee editor has before the switch. Worth
+seeing once on purpose, and reachable again by removing the rule.
 
 The order in which this ships, and what it ships beside, is
 [databases-cutover.md](databases-cutover.md).
