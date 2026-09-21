@@ -4,6 +4,9 @@ export type KubeObjectMeta = {
   namespace?: string
   uid?: string
   resourceVersion?: string
+  /** Moves when the spec moves, and not when a controller writes status. What a
+   *  ballot pins -- see createQuizSubmission in api/quiz.ts. */
+  generation?: number
   creationTimestamp?: string
   labels?: Record<string, string>
 }

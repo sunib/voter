@@ -19,7 +19,7 @@ func TestVotingRound(t *testing.T) {
 	cfg := authorizationFixture(t)
 	round := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "examples.configbutler.ai/v1alpha1", "kind": "QuizSession",
-		"metadata": map[string]any{"name": "demo", "namespace": "voter", "uid": "round-uid", "resourceVersion": "1"},
+		"metadata": map[string]any{"name": "demo", "namespace": "voter", "uid": "round-uid", "resourceVersion": "1", "generation": int64(1)},
 		"spec": map[string]any{"state": "live", "questions": []any{
 			map[string]any{"id": "choice", "title": "Choose", "type": "singleChoice", "required": true, "choices": []any{"A", "B"}},
 			map[string]any{"id": "text", "title": "Explain", "type": "freeText"},
@@ -46,7 +46,7 @@ func TestVotingRound(t *testing.T) {
 		mux.ServeHTTP(rec, req)
 		return rec
 	}
-	const valid = `{"resourceVersion":"1","answers":[{"questionId":"choice","singleChoice":"A"},{"questionId":"text","freeText":"hello"}]}`
+	const valid = `{"uid":"round-uid","generation":1,"answers":[{"questionId":"choice","singleChoice":"A"},{"questionId":"text","freeText":"hello"}]}`
 	if rec := request("GET", "/public/rounds/demo", "alice", "", true); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"voted":false`) {
 		t.Fatalf("round before voting: %d %s", rec.Code, rec.Body)
 	}
@@ -54,15 +54,21 @@ func TestVotingRound(t *testing.T) {
 		name, body string
 		want       int
 	}{
-		{"required", `{"resourceVersion":"1","answers":[]}`, 400},
+		{"required", `{"uid":"round-uid","generation":1,"answers":[]}`, 400},
 		{"invalid choice", strings.Replace(valid, `"A"`, `"C"`, 1), 400},
 		{"wrong type", strings.Replace(valid, `"freeText"`, `"singleChoice"`, 1), 400},
-		{"stale round", strings.Replace(valid, `"1"`, `"0"`, 1), 409},
-		// resourceVersion carries the whole staleness check now that the round
-		// UID is gone from the body, so a client that pins nothing is refused
-		// rather than quietly voting into whatever the round has become.
+		// The questions were edited under the voter: generation moved.
+		{"edited round", strings.Replace(valid, `"generation":1`, `"generation":2`, 1), 409},
+		// The round was deleted and recreated under the same name, so it is back
+		// at generation 1 with questions this ballot never saw. Only the UID tells
+		// them apart, which is why the ballot still carries one.
+		{"recreated round", strings.Replace(valid, `"round-uid"`, `"a-newer-round-uid"`, 1), 409},
+		// uid and generation together carry the whole staleness check, so a client
+		// that pins neither is refused rather than quietly voting into whatever the
+		// round has become.
 		{"unpinned round", `{"answers":[{"questionId":"choice","singleChoice":"A"}]}`, 409},
-		{"stale uid is no longer a field", strings.Replace(valid, `{"resourceVersion"`, `{"uid":"round-uid","resourceVersion"`, 1), 400},
+		{"half-pinned round", `{"uid":"round-uid","answers":[{"questionId":"choice","singleChoice":"A"}]}`, 409},
+		{"resourceVersion is no longer a field", strings.Replace(valid, `{"uid"`, `{"resourceVersion":"1","uid"`, 1), 400},
 		{"forged metadata", strings.Replace(valid, `"answers":`, `"metadata":{},"answers":`, 1), 400},
 		{"trailing body", valid + `{}`, 400},
 		{"valid", valid, 201},
@@ -145,7 +151,7 @@ func TestOnlyRoomPassSessionsMayVote(t *testing.T) {
 	cfg := authorizationFixture(t)
 	round := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "examples.configbutler.ai/v1alpha1", "kind": "QuizSession",
-		"metadata": map[string]any{"name": "demo", "namespace": "voter", "uid": "round-uid", "resourceVersion": "1"},
+		"metadata": map[string]any{"name": "demo", "namespace": "voter", "uid": "round-uid", "resourceVersion": "1", "generation": int64(1)},
 		"spec": map[string]any{"state": "live", "questions": []any{
 			map[string]any{"id": "choice", "title": "Choose", "type": "singleChoice", "required": true, "choices": []any{"A", "B"}},
 		}},
@@ -163,7 +169,7 @@ func TestOnlyRoomPassSessionsMayVote(t *testing.T) {
 		mux.ServeHTTP(rec, req)
 		return rec
 	}
-	const ballot = `{"resourceVersion":"1","answers":[{"questionId":"choice","singleChoice":"A"}]}`
+	const ballot = `{"uid":"round-uid","generation":1,"answers":[{"questionId":"choice","singleChoice":"A"}]}`
 
 	rec := as("github", "POST", "/public/rounds/demo", ballot)
 	if rec.Code != 403 || !strings.Contains(rec.Body.String(), "NotAParticipant") {
@@ -216,5 +222,66 @@ func TestQuizAnswerValidation(t *testing.T) {
 				t.Fatalf("validation: %v", err)
 			}
 		})
+	}
+}
+
+// The tally controller writes quizsessions/status on every ballot, and once a
+// minute at rest. That moves metadata.resourceVersion and deliberately leaves
+// metadata.generation alone -- so a ballot filled in before the write has to
+// still be accepted after it.
+//
+// This is the regression test for 2026-09-17, where the ballot pinned
+// resourceVersion: a tally write between drawing the form and pressing Submit
+// cost the voter their ballot, and during the demo there was one about every
+// second. docs/post-demo-2026-09-17.md has the measurements.
+func TestATallyWriteDoesNotInvalidateABallot(t *testing.T) {
+	cfg := authorizationFixture(t)
+	round := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "examples.configbutler.ai/v1alpha1", "kind": "QuizSession",
+		"metadata": map[string]any{"name": "demo", "namespace": "voter", "uid": "round-uid", "resourceVersion": "1", "generation": int64(1)},
+		"spec": map[string]any{"state": "live", "questions": []any{
+			map[string]any{"id": "choice", "title": "Choose", "type": "singleChoice", "required": true, "choices": []any{"A", "B"}},
+		}},
+	}}
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{quizSessions: "QuizSessionList", quizSubmissions: "QuizSubmissionList"}, round)
+	mux := http.NewServeMux()
+	registerParticipantQuizHandlers(mux, handlerDeps{cfg: cfg, defaultNS: "voter", newClients: func(_ config, _ string) (participantClients, error) {
+		return participantClients{dynamic: client}, nil
+	}})
+
+	// What alice's phone captured when it drew the form. It is not read again.
+	const ballot = `{"uid":"round-uid","generation":1,"answers":[{"questionId":"choice","singleChoice":"A"}]}`
+
+	// Meanwhile the room votes and the controller republishes the tally. Status
+	// only: the questions did not change, so generation does not move and
+	// resourceVersion does.
+	rounds := client.Resource(quizSessions).Namespace("voter")
+	live, err := rounds.Get(t.Context(), "demo", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("read the round: %v", err)
+	}
+	live.SetResourceVersion("2")
+	if err := unstructured.SetNestedField(live.Object, int64(7), "status", "counted"); err != nil {
+		t.Fatalf("build the tally: %v", err)
+	}
+	if _, err := rounds.UpdateStatus(t.Context(), live, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("tally write: %v", err)
+	}
+	after, err := rounds.Get(t.Context(), "demo", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("re-read the round: %v", err)
+	}
+	if after.GetResourceVersion() == "1" || after.GetGeneration() != 1 {
+		t.Fatalf("fixture does not reproduce a status write: rv=%q generation=%d",
+			after.GetResourceVersion(), after.GetGeneration())
+	}
+
+	req := authorizedRequest(t, cfg, "POST", "alice")
+	req.URL.Path = "/public/rounds/demo"
+	req.Body = io.NopCloser(strings.NewReader(ballot))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != 201 {
+		t.Fatalf("a tally write cost a voter their ballot: %d %s", rec.Code, rec.Body)
 	}
 }

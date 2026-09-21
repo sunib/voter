@@ -63,9 +63,16 @@ The tally follows the deletions down to zero on its own; `kubectl -n voter get
 quizsessions` shows it in the VOTES column.
 
 **Staleness is not part of this trade.** A browser voting into a round that
-changed under it is still refused, by the `resourceVersion` comparison in the
-vote handler. A recreated object gets a fresh `resourceVersion` just as an edited
-one does, so that check catches both; the UID comparison beside it was redundant.
+changed under it is still refused, by the `uid` and `generation` comparison in
+the vote handler. `generation` moves when the questions are edited; `uid` moves
+when a round is deleted and recreated under the same name, which `generation`
+cannot see because the replacement starts at 1 again.
+
+That check used to be a `resourceVersion` comparison, which covered both cases in
+one field — and also refused every ballot that had been on screen while the tally
+controller wrote `status`, because status writes move `resourceVersion` and not
+`generation`. Most of the room lost its vote to that on 2026-09-17;
+[post-demo-2026-09-17.md](post-demo-2026-09-17.md) is the post-mortem.
 
 ---
 

@@ -120,9 +120,11 @@ test('two participants vote, see durable results, and cannot vote twice or after
         credentials: 'include',
         headers: { 'content-type': 'application/json', 'x-csrf-token': session.csrfToken },
         body: JSON.stringify({
-          // No uid: the handler sets DisallowUnknownFields, so sending one is a
-          // 400 and would hide the 409 this is actually testing for.
-          resourceVersion: round.round.metadata.resourceVersion,
+          // uid and generation, and no resourceVersion: the handler sets
+          // DisallowUnknownFields, so sending one it no longer reads is a 400
+          // and would hide the 409 this is actually testing for.
+          uid: round.round.metadata.uid,
+          generation: round.round.metadata.generation,
           answers: [{ questionId: 'choice', singleChoice: 'GitOps' }],
         }),
       });

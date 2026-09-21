@@ -28,13 +28,22 @@ export interface RoundView {
 export const getQuizSession = (name: string) =>
   request<RoundView>(`/${encodeURIComponent(name)}`)
 /** The backend sets DisallowUnknownFields, so this body and the handler's struct
- *  have to change together: sending a `uid` it no longer reads is a flat 400. */
+ *  have to change together: sending a `resourceVersion` it no longer reads is a
+ *  flat 400.
+ *
+ *  `generation` and not `resourceVersion`, because the round's status carries the
+ *  live tally and a controller rewrites it on every ballot -- which moves
+ *  resourceVersion and not generation. Pinning the wrong one cost a large part of
+ *  the room its vote on 2026-09-17; docs/post-demo-2026-09-17.md. `uid` comes
+ *  along because generation restarts at 1 on a round recreated under the same
+ *  name. */
 export const createQuizSubmission = (
   round: QuizSession,
   answers: QuizSubmission['spec']['answers'],
 ) =>
   request<{ name: string }>(`/${encodeURIComponent(round.metadata.name!)}`, {
-    resourceVersion: round.metadata.resourceVersion,
+    uid: round.metadata.uid,
+    generation: round.metadata.generation,
     answers,
   })
 export interface RoundResults {

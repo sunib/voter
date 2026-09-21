@@ -28,8 +28,9 @@ var quizSubmissions = schema.GroupVersionResource{Group: "examples.configbutler.
 // roundLabel holds the round's NAME, not its UID. That is a deliberate trade --
 // a round recreated under the same name inherits the old one's ballots -- and it
 // is written up, with what keeps it closed and how to recover, as entry 1 of
-// docs/deliberate-simplifications.md. Staleness is unaffected: the vote handler's
-// resourceVersion check catches a recreated round as surely as an edited one.
+// docs/deliberate-simplifications.md. Staleness is unaffected: the vote handler
+// pins the round's uid and generation, which catches a recreated round as surely
+// as an edited one.
 const (
 	roundLabel     = "voter.configbutler.ai/round"
 	submitterLabel = "voter.configbutler.ai/submitter"
@@ -219,8 +220,9 @@ func registerParticipantQuizHandlers(mux *http.ServeMux, deps handlerDeps) {
 			return
 		}
 		var req struct {
-			ResourceVersion string       `json:"resourceVersion"`
-			Answers         []quizAnswer `json:"answers"`
+			UID        string       `json:"uid"`
+			Generation int64        `json:"generation"`
+			Answers    []quizAnswer `json:"answers"`
 		}
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 32*1024))
 		decoder.DisallowUnknownFields()
@@ -232,10 +234,28 @@ func registerParticipantQuizHandlers(mux *http.ServeMux, deps handlerDeps) {
 			writeJSON(w, 400, map[string]string{"error": "Invalid vote."})
 			return
 		}
-		// resourceVersion alone, where this used to compare the round's UID too.
-		// A recreated round gets a fresh resourceVersion just as an edited one
-		// does, so this catches both and the UID added nothing.
-		if req.ResourceVersion == "" || req.ResourceVersion != round.GetResourceVersion() {
+		// What a ballot pins, and why it is these two fields rather than
+		// resourceVersion.
+		//
+		// The question this guard asks is "were these the questions on screen?",
+		// and metadata.generation is the field that answers it: the API server
+		// moves it when the SPEC changes and deliberately leaves it alone when the
+		// status subresource is written.
+		//
+		// resourceVersion answers a different question -- "has this object been
+		// stored again?" -- and every write moves it, status included. The tally
+		// controller in quiz_reconciler.go patches quizsessions/status on every
+		// ballot and once a minute at rest, so pinning resourceVersion refused a
+		// ballot from every phone whose page was older than the last tally. During
+		// the 2026-09-17 demo that was most of them; docs/post-demo-2026-09-17.md
+		// has the measurements.
+		//
+		// The UID is back because generation cannot see a round deleted and
+		// recreated under the same name: the replacement starts at generation 1
+		// carrying different questions, and would accept a ballot answering the
+		// old ones. resourceVersion used to cover that case on its own.
+		if req.UID == "" || req.UID != string(round.GetUID()) ||
+			req.Generation == 0 || req.Generation != round.GetGeneration() {
 			writeJSON(w, 409, map[string]string{"error": "The round changed. Reload the questions before voting."})
 			return
 		}
