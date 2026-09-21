@@ -350,6 +350,36 @@ Deferred rather than missing:
       It is a SEPARATE setting from the coffee one on purpose: reusing that target
       would close demo 1's open commit window from a page that never touched the menu.
 
+## 5b. What the 2026-09-17 demo found
+
+Three defects the talk surfaced, written up in
+[docs/post-demo-2026-09-17.md](docs/post-demo-2026-09-17.md). Two of them were
+never reported by anyone in the room, which is the fourth finding.
+
+- [ ] **A ballot pins the round's `uid` and `generation`, not its
+      `resourceVersion`.** The tally controller patches `quizsessions/status` on
+      every ballot and once a minute at rest; that moves `resourceVersion` and not
+      `generation`, so the old check refused a ballot from every phone whose page
+      predated the last tally. Measured on the idle cluster four days later: the
+      rounds are rewritten every sixty seconds with nothing happening.
+- [ ] **A save conflict recovers by itself when the edits do not overlap.** ~60
+      people edit one `CoffeeConfig`; 26 saves landed in six minutes, three pairs
+      of them in the same second. The loser got the API server's sentence about
+      the *latest version* verbatim, which is what the room reported. A genuine
+      field-level overlap still stops and shows the conflict -- that beat is the
+      demo -- but a bare collision should not.
+- [ ] **Dark mode.** PrimeVue 4 defaults to `darkModeSelector: 'system'` and the
+      token block flips, but ~10 hardcoded light surfaces in `style.css` and ~22
+      `text-black/*` / `bg-white` utilities do not. The answer-option rows read at
+      1.18:1 and the error panel at 1.06:1. Tokens, plus a CI check so the next
+      component cannot reintroduce it.
+- [ ] **Log every refusal.** The backend logs each order and each login and not
+      one refused vote or save, so both defects above had to be reconstructed from
+      `creationTimestamp`s four days later.
+- [ ] **Only patch the tally when it changed.** The sixty-second heartbeat write
+      is harmless once ballots stop pinning `resourceVersion`, but it still wakes
+      every watcher in the room for a timestamp. Cost, not correctness.
+
 ## 6. Retained platform work
 
 These are unresolved items from the previous plan, not newly verified cluster facts.
