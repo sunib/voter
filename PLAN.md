@@ -63,8 +63,16 @@ an entire demo into a general-purpose package.
       Show `draft-conflict` only for actual conflicting paths; otherwise report
       `version-stale` (“Configuration refreshed; review and save again”). A refused
       guard returns `recovering`, not permission to force the response; follow the
-      example's conservative guarded-read recovery before another write. Do not retry the stale payload automatically. Reject saving a
+      example's conservative guarded-read recovery before another write. Reject saving a
       draft against a replacement UID or while the resource is missing/unsynchronized.
+
+      This used to end "do not retry the stale payload automatically", and 313e82d
+      reversed that deliberately. It was written for an editor with one user, where
+      a 409 is rare and worth a person's attention. The whole room shares one
+      CoffeeConfig, so a 409 is the ordinary case, and the editor now re-captures
+      against the version that won and re-sends -- bounded, and only when the edits
+      do not overlap. It never retries the STALE payload: captureSave runs again.
+      An overlap still stops and still needs the explicit choice above.
 - [x] Validate allowed patch paths and projection with the library on the backend.
       Only `spec` is user-editable; metadata.resourceVersion is a precondition, not
       an editable field. Kubernetes remains the authorization/admission authority.
@@ -356,29 +364,39 @@ Three defects the talk surfaced, written up in
 [docs/post-demo-2026-09-17.md](docs/post-demo-2026-09-17.md). Two of them were
 never reported by anyone in the room, which is the fourth finding.
 
-- [ ] **A ballot pins the round's `uid` and `generation`, not its
+All five are done. What is NOT done is deploying them: the running image is
+still `sha-b8beaca`, which carries every defect below. See
+[docs/databases-cutover.md](docs/databases-cutover.md) -- the same cutover, now
+with five more reasons to do it.
+
+- [x] **A ballot pins the round's `uid` and `generation`, not its
       `resourceVersion`.** The tally controller patches `quizsessions/status` on
       every ballot and once a minute at rest; that moves `resourceVersion` and not
       `generation`, so the old check refused a ballot from every phone whose page
       predated the last tally. Measured on the idle cluster four days later: the
       rounds are rewritten every sixty seconds with nothing happening.
-- [ ] **A save conflict recovers by itself when the edits do not overlap.** ~60
+      Done in `bd37c2c`.
+- [x] **A save conflict recovers by itself when the edits do not overlap.** ~60
       people edit one `CoffeeConfig`; 26 saves landed in six minutes, three pairs
       of them in the same second. The loser got the API server's sentence about
       the *latest version* verbatim, which is what the room reported. A genuine
       field-level overlap still stops and shows the conflict -- that beat is the
       demo -- but a bare collision should not.
-- [ ] **Dark mode.** PrimeVue 4 defaults to `darkModeSelector: 'system'` and the
+      Done in `313e82d`.
+- [x] **Dark mode.** PrimeVue 4 defaults to `darkModeSelector: 'system'` and the
       token block flips, but ~10 hardcoded light surfaces in `style.css` and ~22
       `text-black/*` / `bg-white` utilities do not. The answer-option rows read at
       1.18:1 and the error panel at 1.06:1. Tokens, plus a CI check so the next
       component cannot reintroduce it.
-- [ ] **Log every refusal.** The backend logs each order and each login and not
+      Done in `a9a99db`.
+- [x] **Log every refusal.** The backend logs each order and each login and not
       one refused vote or save, so both defects above had to be reconstructed from
       `creationTimestamp`s four days later.
-- [ ] **Only patch the tally when it changed.** The sixty-second heartbeat write
+      Done in `584032e`.
+- [x] **Only patch the tally when it changed.** The sixty-second heartbeat write
       is harmless once ballots stop pinning `resourceVersion`, but it still wakes
       every watcher in the room for a timestamp. Cost, not correctness.
+      Done in `0227c16`.
 
 ## 6. Retained platform work
 

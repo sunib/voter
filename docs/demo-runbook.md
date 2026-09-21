@@ -63,6 +63,29 @@ keep those names.
       fails as "unknown authority", which is five minutes tonight and a dead
       demo on stage.
 
+### The three checks that 2026-09-17 cost us
+
+Each takes under a minute, and between them they would have found every defect
+in [post-demo-2026-09-17.md](post-demo-2026-09-17.md). Two of the three were
+never reported by anybody in the room — the audience has no way to tell a broken
+demo from a demo that is refusing them on purpose, because refusing them on
+purpose is what this one does.
+
+- [ ] **Put a phone in dark mode and walk the whole thing.** Settings → Display →
+      Dark, then join, vote, order, and open `/admin`. Every defect here was
+      invisible in light mode and none of them were subtle: the answer options
+      were blank rectangles. `task frontend:theme` checks the same surfaces
+      without a phone, but it only knows about the surfaces it was told about.
+- [ ] **Two phones, one round, thirty seconds apart.** Open the questions on
+      both. Vote on the first. Wait thirty seconds, then vote on the second. It
+      must be accepted. This is the check for a ballot that went stale because
+      something else wrote to the round — which cost most of the room its vote,
+      silently, while the demo appeared to work.
+- [ ] **Two browsers saving the menu in the same second.** Edit a different field
+      in each and press Save together. Both must land, with no refusal shown to
+      either. Then edit the *same* field in both and save again: that one must
+      stop and show the conflict, because that is the beat the demo is for.
+
 ## Thirty minutes before
 
 - [ ] Pods ready, one replica each. One replica is load bearing: voucher counts
