@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"sigs.k8s.io/yaml"
@@ -165,6 +166,70 @@ func requireParticipant(cfg config, next func(http.ResponseWriter, *http.Request
 				return
 			}
 		}
-		next(w, r, s)
+		recorder := &refusalRecorder{ResponseWriter: w}
+		next(recorder, r, s)
+		recorder.log(r, s)
 	}
+}
+
+// refusalRecorder writes down every refusal a participant was given.
+//
+// Here rather than at each refusal for one reason: a refusal a handler can
+// forget to log is exactly the defect this repairs. Thirty-two call sites write
+// a 4xx, and on 2026-09-17 not one of them wrote a line -- the application
+// logged every coffee order and every login and no refusal at all. So two
+// defects survived a demo in front of two hundred people and had to be
+// reconstructed four days later from the creationTimestamps of the objects that
+// did get written. docs/post-demo-2026-09-17.md.
+//
+// A refusal is the most interesting thing this application does. Most of the
+// talk is about how real the refusals are. It should not have been the only
+// thing it did not write down.
+type refusalRecorder struct {
+	http.ResponseWriter
+	status int
+	// body is the refusal's own words, bounded: these are short JSON objects or
+	// http.Error strings, and a truncated one still says which refusal it was.
+	body []byte
+}
+
+const maxRefusalLogBytes = 256
+
+func (rec *refusalRecorder) WriteHeader(status int) {
+	if rec.status == 0 {
+		rec.status = status
+	}
+	rec.ResponseWriter.WriteHeader(status)
+}
+
+func (rec *refusalRecorder) Write(b []byte) (int, error) {
+	if rec.status == 0 {
+		rec.status = http.StatusOK
+	}
+	if rec.status >= 400 && len(rec.body) < maxRefusalLogBytes {
+		rec.body = append(rec.body, b[:min(len(b), maxRefusalLogBytes-len(rec.body))]...)
+	}
+	return rec.ResponseWriter.Write(b)
+}
+
+// Flush keeps the streaming endpoints streaming. Without it the SSE handler's
+// http.Flusher assertion fails against this wrapper and every subscriber waits
+// for a buffer that is never sent.
+func (rec *refusalRecorder) Flush() {
+	if flusher, ok := rec.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer, which the
+// stream handlers use for deadlines.
+func (rec *refusalRecorder) Unwrap() http.ResponseWriter { return rec.ResponseWriter }
+
+func (rec *refusalRecorder) log(r *http.Request, s participantSession) {
+	if rec.status < 400 {
+		return
+	}
+	log.Printf("refused: %s %s status=%d sub=%s connector=%s: %s",
+		r.Method, r.URL.Path, rec.status, s.Subject, s.Connector,
+		strings.TrimSpace(string(rec.body)))
 }
