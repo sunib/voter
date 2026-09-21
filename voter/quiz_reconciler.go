@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"reflect"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -41,10 +42,14 @@ type quizReconciler struct {
 	// nobody saw, heals without a restart. The watch is the mechanism; this is
 	// the backstop, not a poll wearing a watch's clothes.
 	//
-	// It is also the heartbeat behind "as of 13:22:41" on the projector: a round
-	// nobody is voting in still gets its lastTallyTime moved, so a timestamp that
-	// has stopped means the controller has, which is the one thing that tells a
-	// dead tally apart from a room that has finished voting.
+	// It is also the heartbeat behind "as of 13:22:41" on the projector: a LIVE
+	// round nobody is voting in still gets its lastTallyTime moved, so a
+	// timestamp that has stopped means the controller has, which is the one thing
+	// that tells a dead tally apart from a room that has finished voting.
+	//
+	// Only a live one. A status write costs an event on every open stream -- two
+	// hundred phones -- and a closed or draft round has nobody watching its
+	// timestamp to reassure. See sameTally.
 	resync time.Duration
 	now    func() time.Time
 
@@ -219,6 +224,20 @@ func (r *quizReconciler) reconcile(ctx context.Context, round string) error {
 		return err
 	}
 	status := tallyRound(round, spec.Questions, cachedObjects(r.ballots)).status(cached.GetGeneration(), r.now())
+	// A status write is not free to anyone watching. It moves the object's
+	// resourceVersion, which pushes an event down every open stream -- two
+	// hundred phones, for a round nobody is voting in. lastTallyTime moves on
+	// every pass by construction, so without this the sixty-second resync
+	// rewrites every round in the namespace for ever.
+	//
+	// Live rounds keep the heartbeat anyway. The "as of 13:22:41" on the
+	// projector is what tells a dead tally apart from a room that has finished
+	// voting, and that distinction is only worth anything while a round is open
+	// -- which is also the only time anybody is looking at it. A closed or draft
+	// round goes quiet, and there is no audience to miss it.
+	if spec.State != "live" && sameTally(cached, status) {
+		return nil
+	}
 	// The status a merge patch replaces wholesale: questions is an atomic list
 	// in the CRD, so a choice that drops back to zero when its ballot is deleted
 	// disappears with it rather than lingering from the previous tally.
@@ -229,4 +248,38 @@ func (r *quizReconciler) reconcile(ctx context.Context, round string) error {
 	_, err = r.dynamic.Resource(quizSessions).Namespace(r.namespace).
 		Patch(ctx, round, types.MergePatchType, patch, metav1.PatchOptions{}, "status")
 	return err
+}
+
+// sameTally reports whether the round already carries this result, ignoring the
+// one field that moves on every pass.
+//
+// It compares the SERIALIZED status rather than the decoded one, because that is
+// what the patch would send and therefore what the API server would compare: a
+// difference this cannot see is a difference that would not have been written.
+func sameTally(cached *unstructured.Unstructured, next quizStatus) bool {
+	stored, found, err := unstructured.NestedFieldNoCopy(cached.Object, "status")
+	if err != nil || !found {
+		return false
+	}
+	// Both sides through JSON, not just the proposed one. The stored status came
+	// out of the API server's decoder, where every whole number is an int64; the
+	// proposed one is a Go struct full of ints. reflect.DeepEqual is perfectly
+	// happy to call those different for ever, and the symptom is not a wrong
+	// number on screen -- it is the write this function exists to skip, never
+	// being skipped.
+	normalized := func(value any) (map[string]any, bool) {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return nil, false
+		}
+		var out map[string]any
+		if err := json.Unmarshal(encoded, &out); err != nil {
+			return nil, false
+		}
+		delete(out, "lastTallyTime")
+		return out, true
+	}
+	current, currentOK := normalized(stored)
+	proposed, proposedOK := normalized(next)
+	return currentOK && proposedOK && reflect.DeepEqual(current, proposed)
 }

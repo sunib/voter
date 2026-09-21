@@ -1,0 +1,344 @@
+# The platform team's "database" API — the shape of the sentence on the slide:
+#
+#   "The ________ team needs a ________ database for their new ________ service.
+#    Requirements: ________ tier, owned by team ________, cost centre
+#    CC-finance-__. A ________-sized instance is fine. Provision it now."
+#
+# This is deliberately a PLAIN CustomResourceDefinition. In real life you would
+# generate it from a KRO ResourceGraphDefinition (or Crossplane XRD, or a Kratix
+# Promise) so that something actually reconciles it into an RDS instance, a
+# CloudNativePG cluster, a network policy and a backup schedule. For the talk we
+# only care about the front door: kubectl apply -f database-crd.yaml and every
+# cluster on earth now understands "I need a database", with no controller, no
+# KRO install and no CRD-versioning ceremony.
+#
+# The KRO simple schema that would have produced roughly this:
+#
+#   schema:
+#     apiVersion: v1alpha1
+#     kind: Database
+#     group: platform.configbutler.ai   # omit this and you get databases.kro.run
+#     spec:
+#       engine:  string | required=true enum="postgresql,mysql,mariadb,sqlserver"
+#       tier:    string | required=true enum="sandbox,standard,business-critical"
+#       size:    string | default="small" enum="small,medium,large,xlarge"
+#       owner:   ...
+#
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: databases.platform.configbutler.ai
+spec:
+  group: platform.configbutler.ai
+  scope: Namespaced
+  names:
+    kind: Database
+    listKind: DatabaseList
+    plural: databases
+    singular: database
+    shortNames:
+      - db
+    categories:
+      - platform
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Engine
+          type: string
+          jsonPath: .spec.engine
+        - name: Tier
+          type: string
+          jsonPath: .spec.tier
+        - name: Size
+          type: string
+          jsonPath: .spec.size
+        - name: Team
+          type: string
+          jsonPath: .spec.owner.team
+        - name: Cost centre
+          type: string
+          priority: 1
+          jsonPath: .spec.owner.costCentre
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            A database, as the people who need one would describe it. Intent
+            only: no instance classes, no subnet ids, no parameter groups. The
+            platform team owns the translation from this into whatever the
+            cluster's cloud actually sells.
+          required:
+            - spec
+          properties:
+            spec:
+              type: object
+              required:
+                - engine
+                - tier
+                - owner
+                - service
+              properties:
+
+                # ---- what they asked for -------------------------------------
+
+                engine:
+                  type: string
+                  description: Database engine. The platform team supports four.
+                  enum:
+                    - postgresql
+                    - mysql
+                    - mariadb
+                    - sqlserver
+
+                engineVersion:
+                  type: string
+                  description: >-
+                    Major version, e.g. "16" for PostgreSQL or "8.0" for MySQL.
+                    Leave it out and you get the current platform default, which
+                    means you also get the upgrade when the platform moves.
+                  pattern: '^[0-9]+(\.[0-9]+)?$'
+                  maxLength: 8
+
+                tier:
+                  type: string
+                  description: >-
+                    Service tier. Drives replication, backup retention, patch
+                    window and who gets paged. This is the field the finance
+                    people actually read.
+                  enum:
+                    - sandbox            # single instance, no backups, deleted on Friday
+                    - standard           # nightly backup, 7 day retention, business hours
+                    - business-critical  # HA pair, PITR, 35 day retention, 24/7 on-call
+                  default: standard
+
+                size:
+                  type: string
+                  description: >-
+                    T-shirt size. Deliberately not vCPU and GiB: the mapping is
+                    the platform team's business and changes when the contract
+                    with the cloud changes.
+                  enum:
+                    - small    #  2 vCPU /  8 GiB /  100 GiB storage
+                    - medium   #  4 vCPU / 16 GiB /  500 GiB storage
+                    - large    #  8 vCPU / 32 GiB / 1000 GiB storage
+                    - xlarge   # 16 vCPU / 64 GiB / 4000 GiB storage
+                  default: small
+
+                region:
+                  type: string
+                  description: Where the data is allowed to live.
+                  enum:
+                    - eu-central-2   # Zurich
+                    - eu-central-1   # Frankfurt
+                    - eu-west-1      # Dublin
+                    - us-east-1      # N. Virginia
+                  default: eu-central-2
+
+                # ---- who is asking, and who pays -----------------------------
+
+                owner:
+                  type: object
+                  description: Ownership. Not optional, not "TBD", not a Slack handle.
+                  required:
+                    - team
+                    - costCentre
+                    - contact
+                  properties:
+                    team:
+                      type: string
+                      description: >-
+                        Owning team, as it appears in the org directory.
+                        Lowercase, dash-separated, e.g. "payments-core".
+                      pattern: '^[a-z][a-z0-9-]{1,30}[a-z0-9]$'
+                      maxLength: 32
+                    costCentre:
+                      type: string
+                      description: >-
+                        Finance cost centre the monthly bill lands on. If your
+                        cost centre is not in this list, it is not a cost centre
+                        the platform can charge, and the request stops here.
+                      enum:
+                        - CC-finance-01   # Group Platform & Infrastructure
+                        - CC-finance-04   # Retail Banking
+                        - CC-finance-07   # Payments
+                        - CC-finance-12   # Data & Analytics
+                        - CC-finance-19   # Risk & Compliance
+                        - CC-finance-23   # Digital Channels
+                        - CC-finance-31   # Innovation (charged back, ask first)
+                    contact:
+                      type: string
+                      description: Team mailing list. A person will leave; the list will not.
+                      format: email
+                      maxLength: 128
+                    onCallRotation:
+                      type: string
+                      description: PagerDuty schedule id, required for business-critical.
+                      maxLength: 64
+
+                # ---- what it is for ------------------------------------------
+
+                service:
+                  type: string
+                  description: >-
+                    The service this database belongs to. Must match a service
+                    in the catalogue; this is how the CMDB finds the thing.
+                  pattern: '^[a-z][a-z0-9-]{1,40}[a-z0-9]$'
+                  maxLength: 42
+
+                purpose:
+                  type: string
+                  description: >-
+                    Free text. One or two sentences on what this database is
+                    for, written for the person who finds it in eighteen months
+                    and wonders whether deleting it will end their career.
+                  maxLength: 512
+
+                dataClassification:
+                  type: string
+                  description: >-
+                    Highest classification of data that will be stored. Drives
+                    encryption, audit logging and whether the sandbox tier is
+                    allowed at all.
+                  enum:
+                    - public
+                    - internal
+                    - confidential
+                    - restricted
+                  default: internal
+
+                # ---- the boring parts that are never boring later ------------
+
+                storageGB:
+                  type: integer
+                  description: >-
+                    Override the storage that comes with the t-shirt size. Only
+                    set this if you know something the size table does not.
+                  minimum: 20
+                  maximum: 16384
+
+                backup:
+                  type: object
+                  description: Backup policy. Defaults come from the tier.
+                  properties:
+                    schedule:
+                      type: string
+                      description: Cron expression, UTC. Empty means "whatever the tier says".
+                      maxLength: 64
+                    retentionDays:
+                      type: integer
+                      minimum: 0
+                      maximum: 365
+                    pointInTimeRecovery:
+                      type: boolean
+                      default: false
+
+                network:
+                  type: object
+                  properties:
+                    exposure:
+                      type: string
+                      description: >-
+                        Who can reach it. "internet" needs a signed exception
+                        from Risk & Compliance, and you will be asked for it.
+                      enum:
+                        - cluster-only
+                        - vpc
+                        - corporate-network
+                        - internet
+                      default: cluster-only
+                    allowedCIDRs:
+                      type: array
+                      description: Extra source ranges, on top of the exposure setting.
+                      maxItems: 16
+                      items:
+                        type: string
+                        pattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}$'
+
+                maintenanceWindow:
+                  type: string
+                  description: >-
+                    Preferred weekly window for patching, e.g. "Sun:02:00-04:00".
+                    Business-critical databases get patched in this window and
+                    nowhere else.
+                  pattern: '^(Mon|Tue|Wed|Thu|Fri|Sat|Sun):[0-2][0-9]:[0-5][0-9]-[0-2][0-9]:[0-5][0-9]$'
+
+                deletionPolicy:
+                  type: string
+                  description: >-
+                    What happens to the data when this object is deleted. Yes,
+                    "delete" really deletes it. That is the point of writing it
+                    down where everyone can see it.
+                  enum:
+                    - retain
+                    - snapshot-then-delete
+                    - delete
+                  default: snapshot-then-delete
+
+            status:
+              type: object
+              description: >-
+                Filled in by whatever reconciles this. For the talk it stays
+                empty, which is itself the interesting part.
+              properties:
+                phase:
+                  type: string
+                  enum:
+                    - Pending
+                    - Provisioning
+                    - Ready
+                    - Degraded
+                    - Deleting
+                    - Failed
+                endpoint:
+                  type: string
+                  description: Host:port clients connect to.
+                  maxLength: 253
+                port:
+                  type: integer
+                credentialsSecretRef:
+                  type: string
+                  description: Name of the Secret in this namespace holding the credentials.
+                  maxLength: 253
+                observedGeneration:
+                  type: integer
+                  format: int64
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                      - lastTransitionTime
+                    properties:
+                      type:
+                        type: string
+                        maxLength: 316
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      reason:
+                        type: string
+                        maxLength: 1024
+                      message:
+                        type: string
+                        maxLength: 32768
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      observedGeneration:
+                        type: integer
+                        format: int64
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - type

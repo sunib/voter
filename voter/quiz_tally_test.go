@@ -328,3 +328,76 @@ func TestStatusAndRESTAgree(t *testing.T) {
 		t.Fatalf("REST text = %v", text)
 	}
 }
+
+// A closed round stops being rewritten once its result has settled.
+//
+// The resync exists so a failed write heals without a restart, and it also moved
+// lastTallyTime on every pass -- which meant every round in the namespace was
+// rewritten once a minute for ever, and every rewrite is an event on every open
+// stream. With two hundred phones in the room that is a real cost paid for a
+// timestamp nobody is reading, because the projector only shows the round that
+// is open. docs/post-demo-2026-09-17.md.
+//
+// A LIVE round keeps its heartbeat; TestALiveRoundKeepsItsHeartbeat is the other
+// half of this, and the two must not be merged.
+func TestAClosedRoundStopsBeingRewritten(t *testing.T) {
+	round := tallyFixtureRound("demo")
+	_ = unstructured.SetNestedField(round.Object, "closed", "spec", "state")
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{quizSessions: "QuizSessionList", quizSubmissions: "QuizSubmissionList"},
+		round, ballot("b1", "demo", "2026-09-17T09:45:27Z", nil, answer("choice", "A")))
+	var writes atomic.Int64
+	client.PrependReactor("patch", "quizsessions", func(k8stesting.Action) (bool, runtime.Object, error) {
+		writes.Add(1)
+		return false, nil, nil
+	})
+	r := newQuizReconciler(client, "voter")
+	r.coalesce = 5 * time.Millisecond
+	// Fast enough that ~40 resyncs happen inside the window below. Every one of
+	// them used to be a write.
+	r.resync = 25 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go r.Run(ctx)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && writes.Load() == 0 {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if writes.Load() == 0 {
+		t.Fatal("the round was never tallied at all")
+	}
+	time.Sleep(200 * time.Millisecond)
+	settled := writes.Load()
+	time.Sleep(time.Second)
+	if got := writes.Load(); got != settled {
+		t.Fatalf("a closed round was rewritten %d more times by the resync; the tally has not settled", got-settled)
+	}
+}
+
+// And the half that must keep working: while a round is open, the timestamp on
+// the projector goes on moving, because a timestamp that has stopped is the only
+// thing that tells a dead controller from a room that has finished voting.
+func TestALiveRoundKeepsItsHeartbeat(t *testing.T) {
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{quizSessions: "QuizSessionList", quizSubmissions: "QuizSubmissionList"},
+		tallyFixtureRound("demo"))
+	var writes atomic.Int64
+	client.PrependReactor("patch", "quizsessions", func(k8stesting.Action) (bool, runtime.Object, error) {
+		writes.Add(1)
+		return false, nil, nil
+	})
+	r := newQuizReconciler(client, "voter")
+	r.coalesce = 5 * time.Millisecond
+	r.resync = 25 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go r.Run(ctx)
+
+	time.Sleep(200 * time.Millisecond)
+	settled := writes.Load()
+	time.Sleep(500 * time.Millisecond)
+	if got := writes.Load(); got <= settled {
+		t.Fatalf("a live round stopped publishing its tally time after %d writes", settled)
+	}
+}
