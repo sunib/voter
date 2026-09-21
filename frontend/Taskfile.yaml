@@ -17,10 +17,24 @@ tasks:
       - npm ci
 
   lint:
-    desc: Lint the frontend with ESLint
+    desc: Lint the frontend with ESLint and check that no colour is hardcoded
     deps: [deps]
     cmds:
       - npm run lint
+
+  theme:
+    desc: Screenshot every read surface in both colour schemes and check contrast
+    # The check that would have caught the 2026-09-17 dark-mode defects, which
+    # shipped because nobody had opened the app with a dark phone. It renders the
+    # real components against the real stylesheet, measures computed contrast and
+    # fails under 4.5:1, and leaves a PNG per scheme in theme-shots/ to look at.
+    #
+    # Not in `task lint`: it needs a browser binary (npx playwright install
+    # chromium). `task lint` runs check-theme-tokens.mjs instead, which needs
+    # nothing and catches the cause rather than the symptom.
+    deps: [deps]
+    cmds:
+      - npm run theme:shoot -- --out theme-shots
 
   format:
     desc: Rewrite the frontend with Prettier

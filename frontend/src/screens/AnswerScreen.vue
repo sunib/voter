@@ -151,7 +151,7 @@ async function submit() {
     <div class="space-y-4">
       <div class="flex items-center justify-between">
         <SessionStateBanner :state="state" />
-        <div class="text-xs font-semibold text-black/55">
+        <div class="text-xs font-semibold text-[rgb(var(--muted))]">
           {{ questions.length }} questions
         </div>
       </div>
@@ -161,7 +161,7 @@ async function submit() {
           <div class="p-5">
             <div class="space-y-3">
               <h1 class="text-xl font-extrabold">Can’t load this session</h1>
-              <p class="text-sm text-black/60">{{ loadError }}</p>
+              <p class="text-sm text-[rgb(var(--muted))]">{{ loadError }}</p>
             </div>
           </div>
         </template>
@@ -171,7 +171,7 @@ async function submit() {
         <template #content>
           <div class="p-5">
             <div class="space-y-2">
-              <div class="text-xs font-bold tracking-[0.18em] text-black/55">
+              <div class="text-xs font-bold tracking-[0.18em] text-[rgb(var(--muted))]">
                 LOADING
               </div>
               <div class="text-lg font-extrabold">Fetching questions…</div>
@@ -187,7 +187,7 @@ async function submit() {
               <h1 class="text-xl font-extrabold">
                 Voting is for people who joined through Room Pass.
               </h1>
-              <p class="text-sm text-black/60">
+              <p class="text-sm text-[rgb(var(--muted))]">
                 You are signed in as an operator, so you can open and close
                 rounds and read the results — but a ballot has to belong to
                 someone who came through the door. Scan the room's QR code to
@@ -205,7 +205,7 @@ async function submit() {
               <h1 class="text-xl font-extrabold">
                 You have already voted in this round.
               </h1>
-              <p class="text-sm text-black/60">
+              <p class="text-sm text-[rgb(var(--muted))]">
                 Your QuizSubmission is recorded and cannot be changed. A new
                 round is needed to vote again.
               </p>
@@ -226,7 +226,7 @@ async function submit() {
             <div class="space-y-10">
               <div
                 v-if="questions.length === 0"
-                class="rounded-xl border border-black/10 bg-black/5 p-4 text-sm text-black/70"
+                class="rounded-xl border border-[rgb(var(--line))]/10 bg-[rgb(var(--ink))]/5 p-4 text-sm text-[rgb(var(--muted))]"
               >
                 No questions configured yet.
               </div>
@@ -237,7 +237,7 @@ async function submit() {
                   :model-value="draft.answers[q.id]"
                   @update:model-value="(v) => draft.setAnswer(q.id, v)"
                 />
-                <div class="h-px w-full bg-black/10" />
+                <div class="h-px w-full bg-[rgb(var(--ink))]/10" />
               </div>
             </div>
           </div>
@@ -248,13 +248,13 @@ async function submit() {
     <p
       v-if="closedWhileAnswering"
       role="status"
-      class="mt-4 rounded-xl border border-black/10 bg-black/5 p-4 text-sm"
+      class="mt-4 rounded-xl border border-[rgb(var(--line))]/10 bg-[rgb(var(--ink))]/5 p-4 text-sm"
     >
       <strong>This round has just been closed.</strong> The presenter closed it
       while you were answering, so it can no longer take your vote. Your answers
       are still here, and the results are already available.
     </p>
-    <p v-if="!voted" class="mt-4 text-sm text-black/60">
+    <p v-if="!voted" class="mt-4 text-sm text-[rgb(var(--muted))]">
       Submitting creates your QuizSubmission for this round. You can change your
       answers before submitting, but submitted answers cannot be edited.
     </p>

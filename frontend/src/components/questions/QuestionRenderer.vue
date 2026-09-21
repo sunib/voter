@@ -43,7 +43,7 @@ const scaleUiValue = computed<number>({
     <div class="flex items-start justify-between gap-4">
       <div class="min-w-0">
         <h2 class="text-xl font-extrabold">{{ question.title }}</h2>
-        <p v-if="question.type === 'scale0to10'" class="mt-1 text-sm text-black/60">0 = low, 10 = high</p>
+        <p v-if="question.type === 'scale0to10'" class="mt-1 text-sm text-[rgb(var(--muted))]">0 = low, 10 = high</p>
       </div>
 
       <Tag v-if="question.required" severity="warn" class="!rounded-full !text-[11px] !font-bold !tracking-[0.18em]">
@@ -72,7 +72,7 @@ const scaleUiValue = computed<number>({
       <label
         v-for="c in question.choices ?? []"
         :key="c"
-        class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-black/10 bg-white px-4 py-3 transition hover:border-black/20"
+        class="flex cursor-pointer items-center justify-between gap-3 rounded-xl border border-[rgb(var(--line))]/10 bg-[rgb(var(--surface-raised))] px-4 py-3 transition hover:border-[rgb(var(--line))]/20"
       >
         <div class="flex min-w-0 items-center gap-3">
           <Checkbox v-model="multiValue" :value="c" />
@@ -90,7 +90,7 @@ const scaleUiValue = computed<number>({
     <!-- scale0to10 -->
     <div v-else-if="question.type === 'scale0to10'" class="space-y-3">
       <div class="flex items-center justify-between">
-        <div class="text-xs font-bold tracking-[0.18em] text-black/55">SCORE</div>
+        <div class="text-xs font-bold tracking-[0.18em] text-[rgb(var(--muted))]">SCORE</div>
         <Tag
           :severity="scaleIsSet ? 'info' : 'secondary'"
           class="!rounded-full !text-[11px] !font-bold !tracking-[0.18em]"
@@ -103,12 +103,12 @@ const scaleUiValue = computed<number>({
         <Slider :aria-label="question.title" v-model="scaleUiValue" :min="0" :max="10" :step="1" />
       </div>
 
-      <div class="flex items-center justify-between text-[11px] font-semibold text-black/55">
+      <div class="flex items-center justify-between text-[11px] font-semibold text-[rgb(var(--muted))]">
         <span>0</span>
         <span>10</span>
       </div>
 
-      <div v-if="!scaleIsSet" class="text-xs text-black/55">Drag the slider to set your score.</div>
+      <div v-if="!scaleIsSet" class="text-xs text-[rgb(var(--muted))]">Drag the slider to set your score.</div>
     </div>
 
     <!-- number -->
@@ -122,7 +122,7 @@ const scaleUiValue = computed<number>({
         :input-id="`q_${question.id}_number`"
         class="w-full"
       />
-      <div v-if="question.min !== undefined || question.max !== undefined" class="text-xs text-black/55">
+      <div v-if="question.min !== undefined || question.max !== undefined" class="text-xs text-[rgb(var(--muted))]">
         <span v-if="question.min !== undefined">min {{ question.min }}</span>
         <span v-if="question.min !== undefined && question.max !== undefined"> · </span>
         <span v-if="question.max !== undefined">max {{ question.max }}</span>

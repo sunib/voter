@@ -10,6 +10,33 @@
   --danger: 180 52 35;
   --warning: 177 105 18;
   --shadow: 0 20px 50px rgba(17, 12, 8, 0.08);
+
+  /* Surfaces that sit ON a card: inputs, summary rows, the panels that go warm
+   * or red. These exist because they used to be literal `rgba(255, …)` values
+   * scattered through the file, which is invisible until a dark palette arrives
+   * and every one of them is still white with near-white text on top. The whole
+   * editor read at about 1.2:1 on a dark-mode phone during the 2026-09-17 demo;
+   * docs/post-demo-2026-09-17.md.
+   *
+   * The rule for adding one: if a rule sets a literal colour rather than a
+   * token, it has silently opted out of dark mode. Add the token instead. */
+  --surface-raised: 255 255 255;
+  --surface-dirty: 255 249 232;
+  --surface-conflict: 255 244 242;
+  --surface-danger: 255 245 242;
+  --surface-flash: 224 255 235;
+  /* The foreground for anything sitting on --accent. It has to be a token of its
+   * own: --accent is a dark green in the light palette and a light mint in the
+   * dark one, so a fixed white reads at 3.9:1 on the first and 1.9:1 on the
+   * second. */
+  --on-accent: 255 255 255;
+  /* --accent behind TEXT, which needs to be darker than --accent behind nothing.
+   * The brand green carries white at 3.88:1, under the 4.5:1 floor -- a defect
+   * that predates the dark palette and that nobody had measured. Progress-bar
+   * fills and tints keep --accent; only a solid button with a label on it uses
+   * this. In the dark palette the two are the same colour, because there the
+   * label is dark and --accent is already light enough. */
+  --accent-strong: 9 110 82;
   --font-body:
     'Azeret Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     'Liberation Mono', 'Courier New', monospace;
@@ -29,6 +56,18 @@
     --danger: 255 131 110;
     --warning: 232 173 74;
     --shadow: 0 22px 56px rgba(0, 0, 0, 0.34);
+
+    /* Lifted off --card rather than dropped below it, so "raised" still reads as
+     * raised, and the two state surfaces keep their warm and red cast without
+     * turning into light rectangles. --ink lands at 10.8:1 on the first and
+     * --muted at 6.5:1; the light palette is brighter still. */
+    --surface-raised: 58 49 42;
+    --surface-dirty: 64 52 30;
+    --surface-conflict: 68 42 38;
+    --surface-danger: 58 34 31;
+    --surface-flash: 30 58 45;
+    --on-accent: 14 38 30;
+    --accent-strong: 92 201 164;
   }
 }
 
@@ -391,7 +430,7 @@ p {
 
 .panel--danger {
   border-color: rgb(var(--danger) / 0.35);
-  background: rgba(255, 245, 242, 0.98);
+  background: rgb(var(--surface-danger) / 0.98);
 }
 
 .admin-nav {
@@ -515,7 +554,7 @@ p {
   border: 1px solid rgb(var(--line) / 0.12);
   border-radius: 20px;
   padding: 1rem;
-  background: rgba(255, 255, 255, 0.46);
+  background: rgb(var(--surface-raised) / 0.46);
 }
 
 .product-card {
@@ -574,7 +613,7 @@ p {
   height: 2.3rem;
   border-radius: 999px;
   background: rgb(var(--ink));
-  color: white;
+  color: rgb(var(--card));
 }
 
 .stepper__button:hover,
@@ -621,8 +660,8 @@ p {
   min-height: 2.9rem;
   padding: 0.7rem 1.05rem;
   border-radius: 999px;
-  background: rgb(var(--accent));
-  color: white;
+  background: rgb(var(--accent-strong));
+  color: rgb(var(--on-accent));
   text-decoration: none;
 }
 
@@ -855,7 +894,7 @@ p {
   border-radius: 16px;
   border: 1px solid rgb(var(--line) / 0.14);
   padding: 0.8rem 0.9rem;
-  background: rgba(255, 255, 255, 0.8);
+  background: rgb(var(--surface-raised) / 0.8);
   color: rgb(var(--ink));
   transition:
     border-color 120ms ease,
@@ -872,7 +911,7 @@ p {
 .field--dirty select {
   border-color: rgb(var(--warning) / 0.34);
   box-shadow: 0 0 0 1px rgb(var(--warning) / 0.12);
-  background: rgba(255, 249, 232, 0.9);
+  background: rgb(var(--surface-dirty) / 0.9);
 }
 
 .field--conflict input,
@@ -880,7 +919,7 @@ p {
 .field--conflict select {
   border-color: rgb(var(--danger) / 0.35);
   box-shadow: 0 0 0 1px rgb(var(--danger) / 0.12);
-  background: rgba(255, 244, 242, 0.94);
+  background: rgb(var(--surface-conflict) / 0.94);
 }
 
 .field--flash input,
@@ -971,7 +1010,7 @@ p {
   padding: 0.9rem 1rem;
   border-radius: 18px;
   border: 1px solid rgb(var(--line) / 0.08);
-  background: rgba(255, 255, 255, 0.7);
+  background: rgb(var(--surface-raised) / 0.7);
 }
 
 .save-summary__item--dirty {
@@ -1019,7 +1058,7 @@ p {
   padding: 0.95rem 1rem;
   border-radius: 18px;
   border: 1px solid rgb(var(--line) / 0.08);
-  background: rgba(255, 255, 255, 0.72);
+  background: rgb(var(--surface-raised) / 0.72);
 }
 
 .recent-changes__meta {
@@ -1046,11 +1085,11 @@ p {
 @keyframes field-flash {
   0% {
     box-shadow: 0 0 0 0 rgba(26, 84, 63, 0.24);
-    background: rgba(224, 255, 235, 0.95);
+    background: rgb(var(--surface-flash) / 0.95);
   }
   100% {
     box-shadow: 0 0 0 0 rgba(26, 84, 63, 0);
-    background: rgba(255, 255, 255, 0.8);
+    background: rgb(var(--surface-raised) / 0.8);
   }
 }
 
@@ -1435,7 +1474,7 @@ p {
   width: min(16rem, 60vw);
   padding: 0.8rem;
   border-radius: 20px;
-  background: white;
+  background: white; /* not themeable: a QR code must be dark-on-light to scan */
   line-height: 0;
 }
 

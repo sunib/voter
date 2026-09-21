@@ -8,3 +8,5 @@ external/
 # Task's fingerprint cache (task --status / sources: checksums).
 .task/
 *.ignore.*
+# Theme screenshots from `task frontend:theme` — look at them, do not commit them.
+frontend/theme-shots/

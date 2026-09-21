@@ -100,6 +100,6 @@ button {
   border: 0;
   border-radius: 0.4rem;
   background: #1749a5;
-  color: white;
+  color: white; /* not themeable: a fixed dark blue, legible under either palette */
 }
 </style>
