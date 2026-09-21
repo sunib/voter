@@ -1,5 +1,9 @@
 # Room Pass
 
+For the proposed standalone project, read the [product vision](PRODUCT-VISION.md)
+and [open-source extraction plan](OPEN-SOURCE-PLAN.md). These describe future
+direction; the implementation and operating limits below remain current.
+
 Room Pass enrolls a browser with a room code and an unverified display name, derives a
 synthetic address from that name, supplies the stable identity to Dex, and lets Kubernetes
 enforce RBAC. It has no quiz/coffee
