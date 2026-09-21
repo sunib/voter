@@ -262,7 +262,10 @@ test("a save that keeps losing says so and keeps unsaved input visible", async (
     });
     await bannerText(editor.page).fill("Keep this unsaved edit");
     await editor.page.getByRole("button", { name: /^Save \d+ Change/ }).click();
-    await expect(editor.page.getByText(/their save landed first each time/)).toBeVisible();
+    // The panel, not the phrase: getByText matches the <section> AND the <p>
+    // inside it, which is a strict-mode violation rather than a real ambiguity.
+    // role="alert" is what the editor puts on exactly one element.
+    await expect(editor.page.getByRole("alert")).toContainText(/their save landed first each time/);
     // Bounded: one press of Save is three attempts, and then it stops trying.
     expect(patches).toBe(3);
     await expect(editor.page.getByText(/latest version/)).toHaveCount(0);
