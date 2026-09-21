@@ -242,11 +242,18 @@ test("an unsaved edit survives a concurrent change to a different field", async 
 });
 
 
-test("a rejected save keeps the editor and unsaved input visible", async ({ browser }) => {
+// Every PATCH is refused, so the editor's own retry cannot win either. Two things
+// it must still do: keep the person's typing, and explain itself in OUR words.
+// The API server's sentence about applying changes to the latest version is what
+// the room read off its phones on 2026-09-17 and reported as "the CRD is not the
+// newest version" -- docs/post-demo-2026-09-17.md.
+test("a save that keeps losing says so and keeps unsaved input visible", async ({ browser }) => {
   const editor = await signIn(browser, "rejected-save");
+  let patches = 0;
   try {
     await editor.page.route("**/public/coffeeconfig", async (route) => {
       if (route.request().method() !== "PATCH") return route.continue();
+      patches++;
       await route.fulfill({
         status: 409,
         contentType: "application/json",
@@ -255,7 +262,10 @@ test("a rejected save keeps the editor and unsaved input visible", async ({ brow
     });
     await bannerText(editor.page).fill("Keep this unsaved edit");
     await editor.page.getByRole("button", { name: /^Save \d+ Change/ }).click();
-    await expect(editor.page.getByText("Configuration refreshed. Your edits are intact; review and save again.")).toBeVisible();
+    await expect(editor.page.getByText(/their save landed first each time/)).toBeVisible();
+    // Bounded: one press of Save is three attempts, and then it stops trying.
+    expect(patches).toBe(3);
+    await expect(editor.page.getByText(/latest version/)).toHaveCount(0);
     await expect(bannerText(editor.page)).toHaveValue("Keep this unsaved edit");
     await expect(shopName(editor.page)).toBeVisible();
   } finally {
@@ -295,7 +305,10 @@ test("usage read failures do not block the editor and a live update retries them
 });
 
 
-test("a real Kubernetes 409 preserves input and a new reviewed save succeeds", async ({ browser }) => {
+// A genuine Kubernetes 409 against an edit that touches a DIFFERENT field. There
+// is nothing for a person to review, so one press of Save takes the winner's
+// version and re-sends the same edit on its own. Both writes survive.
+test("a real Kubernetes 409 on a non-overlapping edit re-sends itself", async ({ browser }) => {
   const editor = await signIn(browser, "real-conflict");
   let patches = 0;
   try {
@@ -312,17 +325,18 @@ test("a real Kubernetes 409 preserves input and a new reviewed save succeeds", a
     });
     await bannerText(editor.page).fill("Reviewed local banner");
     const rejected = editor.page.waitForResponse(response => response.url().endsWith("/public/coffeeconfig") && response.request().method() === "PATCH");
+    const saved = editor.page.waitForResponse(response =>
+      response.url().endsWith("/public/coffeeconfig") && response.request().method() === "PATCH" && response.status() === 200);
     await editor.page.getByRole("button", { name: /^Save \d+ Change/ }).click();
     expect((await rejected).status()).toBe(409);
-    await expect(editor.page.getByText("Configuration refreshed. Your edits are intact; review and save again.")).toBeVisible();
-    await expect(bannerText(editor.page)).toHaveValue("Reviewed local banner");
-    expect(coffeeConfig().spec.shopName).toBe("Concurrent winner");
-    expect(patches).toBe(1);
-    const saved = editor.page.waitForResponse(response => response.url().endsWith("/public/coffeeconfig") && response.request().method() === "PATCH");
-    await editor.page.getByRole("button", { name: /^Save \d+ Change/ }).click();
     const receipt = await (await saved).json();
     expect(receipt.saved).toBe(true);
     expect(receipt).not.toHaveProperty("config");
+    // Nobody had to press anything a second time, and nobody was shown a refusal.
+    expect(patches).toBe(2);
+    await expect(editor.page.getByText(/Saved to Kubernetes/)).toBeVisible();
+    await expect(editor.page.getByText(/review and save again/)).toHaveCount(0);
+    await expect(bannerText(editor.page)).toHaveValue("Reviewed local banner");
     expect(coffeeConfig().spec.bannerText).toBe("Reviewed local banner");
     expect(coffeeConfig().spec.shopName).toBe("Concurrent winner");
   } finally { await editor.context.close(); }

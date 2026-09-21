@@ -212,7 +212,11 @@ describe('CoffeeConfig library integration', () => {
     expect(live.commitNotice.value).toBe('Commit service unavailable')
   })
 
-  it('refreshes a stale version without inventing field conflicts or retrying the write', async () => {
+  // The whole room shares one CoffeeConfig, so a 409 is the ordinary outcome of
+  // two people saving in the same second rather than a rare one. When the losing
+  // edit does not touch what the winning one changed there is nothing for anybody
+  // to decide, and asking was only ever noise -- see the 2026-09-17 post-mortem.
+  it('re-sends a stale save by itself when the edits do not overlap', async () => {
     const { live, host, requests } = await fixture()
     live.setValue(['spec', 'shopName'], 'Mine')
     host
@@ -220,14 +224,58 @@ describe('CoffeeConfig library integration', () => {
       .mockResolvedValueOnce(json(object('2')))
     await live.save('')
     expect(live.conflicts.value).toEqual([])
-    expect(live.notice.value).toContain('review and save again')
+    expect(live.error.value).toBe('')
+    expect(live.notice.value).toContain('Saved to Kubernetes')
     expect(live.draft.value?.spec.shopName).toBe('Mine')
     expect(requests.map((request) => request.method ?? 'GET')).toEqual([
       'PATCH',
       'GET',
+      'PATCH',
     ])
+    // The retry carries the same edits against the version that won, never a
+    // newer version stapled onto the original patch.
+    expect(JSON.parse(String(requests[2]!.body))).toEqual({
+      uid: 'coffee',
+      resourceVersion: '2',
+      patch: { spec: { shopName: 'Mine' } },
+    })
+  })
+
+  // The other half of the same rule, and the one that keeps the demo's beat: two
+  // people editing the SAME field still stops and still shows its markers.
+  it('stops at a real conflict rather than retrying over somebody else', async () => {
+    const { live, host, requests } = await fixture()
+    live.setValue(['spec', 'shopName'], 'Mine')
+    host
+      .mockResolvedValueOnce(json({ error: 'stale' }, 409))
+      .mockResolvedValueOnce(json(object('2', 'Theirs')))
     await live.save('')
-    expect(JSON.parse(String(requests[2]!.body)).resourceVersion).toBe('2')
+    expect(live.conflicts.value.map((conflict) => conflict.path)).toEqual([
+      ['spec', 'shopName'],
+    ])
+    expect(live.notice.value).toContain('conflict')
+    expect(live.canSave.value).toBe(false)
+    expect(requests.map((request) => request.method ?? 'GET')).toEqual([
+      'PATCH',
+      'GET',
+    ])
+  })
+
+  // Somebody else typed the same thing first. There is no patch left to send, and
+  // saying "saved" would claim a write that never happened.
+  it('reports that a change had already been made when nothing is left to send', async () => {
+    const { live, host, requests } = await fixture()
+    live.setValue(['spec', 'shopName'], 'Mine')
+    host
+      .mockResolvedValueOnce(json({ error: 'stale' }, 409))
+      .mockResolvedValueOnce(json(object('2', 'Mine')))
+    await live.save('')
+    expect(live.conflicts.value).toEqual([])
+    expect(live.notice.value).toContain('nothing left to save')
+    expect(requests.map((request) => request.method ?? 'GET')).toEqual([
+      'PATCH',
+      'GET',
+    ])
   })
 
   it('rejects a delayed conflict GET overtaken by the watch and requires a fresh read', async () => {

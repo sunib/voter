@@ -41,8 +41,33 @@ export interface EditableResourceOptions<T> {
    *  them. In the screen's own words -- a CoffeeConfig is a "configuration" and
    *  a Database request is not, and the generic phrasing that covers both reads
    *  as though it were written for neither. */
-  copy: { invalid: string; replaced: string; refreshed: string }
+  copy: {
+    invalid: string
+    replaced: string
+    refreshed: string
+    alreadyDone: string
+    lostTheRace: string
+  }
 }
+
+/** How many times one press of Save may reach the API server.
+ *
+ *  A save carries the resourceVersion the editor was holding, so two people
+ *  saving the same object in the same second means one of them gets a 409. That
+ *  is correct, and on stage it is also the ordinary case rather than the rare
+ *  one: the whole room shares a single CoffeeConfig, and on 2026-09-17 twenty-six
+ *  saves landed in six minutes with three pairs inside the same second.
+ *
+ *  When the losing edit does not touch what the winning one changed there is
+ *  nothing for a person to decide, so the editor re-reads and sends again
+ *  instead of asking. A genuine field-level conflict still stops and still shows
+ *  its markers -- two people editing the same price is a thing this demo is
+ *  about, and it stays visible. A bare collision is not that, and was only ever
+ *  noise.
+ *
+ *  Bounded rather than open-ended: a room that never stops saving must not
+ *  produce a browser that never stops trying. */
+const saveAttempts = 3
 
 /**
  * One live, editable Kubernetes object: draft, conflicts, save capture,
@@ -189,38 +214,59 @@ export function useLiveEditableResource<T>(
         await refreshFromServer()
         return
       }
-      const intent = store.captureSave(uid.value!)
-      if (!intent) return
-      const receipt = await write(intent, reason)
-      if (disposed) return
-      commitNotice.value =
-        receipt.commitError ??
-        (receipt.commitRequested
-          ? 'Commit request accepted. A Git commit has not yet been observed.'
-          : '')
-      notice.value =
-        'Saved to Kubernetes. Waiting for live synchronization; later edits remain unsaved.'
-      // One guarded read recovers a missing echo without adopting a save object.
-      recoveryTimer = setTimeout(() => {
-        void refreshFromServer()
-          .then((accepted) => {
-            if (accepted)
-              notice.value =
-                'Saved to Kubernetes. Live view synchronized; any remaining changes are unsaved.'
-          })
-          .catch((cause: unknown) => {
-            error.value = (cause as Error).message
-          })
-      }, 1500)
+      for (let attempt = 1; ; attempt++) {
+        // Re-captured every attempt, and safe to: captureSave reads the draft
+        // and the store's current server version without consuming either, so a
+        // retry sends the same edits against the version that just won.
+        const intent = store.captureSave(uid.value!)
+        if (!intent) {
+          // Nothing left to send. On a retry that means the change arrived by
+          // somebody else's hand while this editor was losing the race, which is
+          // a result worth reporting rather than a silent no-op.
+          if (attempt > 1) notice.value = copy.alreadyDone
+          return
+        }
+        try {
+          const receipt = await write(intent, reason)
+          if (disposed) return
+          commitNotice.value =
+            receipt.commitError ??
+            (receipt.commitRequested
+              ? 'Commit request accepted. A Git commit has not yet been observed.'
+              : '')
+          notice.value =
+            'Saved to Kubernetes. Waiting for live synchronization; later edits remain unsaved.'
+          // One guarded read recovers a missing echo without adopting a save object.
+          recoveryTimer = setTimeout(() => {
+            void refreshFromServer()
+              .then((accepted) => {
+                if (accepted)
+                  notice.value =
+                    'Saved to Kubernetes. Live view synchronized; any remaining changes are unsaved.'
+              })
+              .catch((cause: unknown) => {
+                error.value = (cause as Error).message
+              })
+          }, 1500)
+          return
+        } catch (cause) {
+          if (disposed) return
+          if ((cause as ApiError).status !== 409) throw cause
+          // Somebody saved first. Take their version and look at what they
+          // touched. refreshFromServer reports false for the cases a retry must
+          // not paper over -- the object was replaced, or the live stream
+          // overtook the read -- and each of those leaves its own notice.
+          const reconciled = await refreshFromServer()
+          if (!reconciled || conflicts.value.length > 0) return
+          if (attempt === saveAttempts) {
+            error.value = copy.lostTheRace
+            return
+          }
+        }
+      }
     } catch (cause) {
       if (disposed) return
-      if ((cause as ApiError).status === 409) {
-        try {
-          await refreshFromServer()
-        } catch (readError) {
-          error.value = (readError as Error).message
-        }
-      } else error.value = (cause as Error).message
+      error.value = (cause as Error).message
     } finally {
       saving.value = false
     }

@@ -39,6 +39,10 @@ export function useLiveDatabase(namespace: string, name: string) {
         'This database request was removed or replaced. Open it again from the list.',
       refreshed:
         'Request refreshed. Your edits are intact; review and save again.',
+      alreadyDone:
+        'Somebody else had already asked for this change. There is nothing left to save.',
+      lostTheRace:
+        'Somebody else is editing this request too, and their save landed first each time. Your edits are kept — press Save again.',
     },
   })
 }

@@ -44,6 +44,10 @@ export function useLiveCoffeeConfig(
         'This configuration was removed or replaced. Open a new editor.',
       refreshed:
         'Configuration refreshed. Your edits are intact; review and save again.',
+      alreadyDone:
+        'Somebody else had already made this change. There is nothing left to save.',
+      lostTheRace:
+        'Somebody else is editing the menu too, and their save landed first each time. Your edits are kept — press Save again.',
     },
   })
 }
