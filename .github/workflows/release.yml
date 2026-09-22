@@ -1,0 +1,128 @@
+# Versions, and the tags a cluster can follow.
+#
+# Until now the only name a build had was its commit: `sha-26c52b3`, pinned by
+# digest in the platform repo and moved by hand every time. That is precise and
+# unreadable, and it made every deploy a copy-paste of a digest. release-please
+# gives the same artifact a NUMBER, and the number is what k8s.koudijs.dev
+# follows -- Flux's image automation watches the 1.x range and writes the bump
+# back into Git itself.
+#
+# Design copied from gitops-reverser, minus everything this repository does not
+# need: no Helm chart, no SBOM, no release assets, so no draft-release dance.
+# What is kept is the rule that matters -- a release is cut ONLY from a commit
+# whose full CI run went green.
+#
+# That rule is why this runs on workflow_run rather than on push. ci.yml already
+# describes what "green" means for this repository; triggering on its completion
+# reuses that answer instead of restating it, and no release can be cut past a
+# red build. The cost is that this workflow reads its commit from the triggering
+# run, never from the ref it happens to be checked out at.
+name: Release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_OWNER: sunib
+
+permissions:
+  contents: read
+
+# Never cancel a release halfway through retagging; a following push queues.
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # A failed, cancelled or skipped CI run releases nothing. workflow_run fires
+    # on every conclusion, so this is the gate, not a formality.
+    if: github.event.workflow_run.conclusion == 'success'
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: Run release-please
+        id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # Give the already-built image its version. NOTHING is rebuilt here: ci.yml
+  # published this exact digest as sha-<short> minutes ago, and a rebuild would
+  # produce a different artifact from the one that was tested. imagetools create
+  # writes new tags onto the same manifest.
+  #
+  # Both images, always together. room-pass and voter are released from one
+  # repository at one version, and letting them drift apart would make "which
+  # room-pass goes with voter 1.4?" a question somebody has to answer.
+  retag:
+    name: Tag ${{ matrix.image }} ${{ needs.release-please.outputs.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [voter, room-pass]
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Log in to the container registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login "${REGISTRY}" -u "${{ github.actor }}" --password-stdin
+
+      - name: Move the version tags onto the tested digest
+        id: retag
+        env:
+          # The commit CI actually ran on, not whatever main points at now.
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+          IMAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          REPO="${REGISTRY}/${IMAGE_OWNER}/${IMAGE}"
+          SOURCE="${REPO}:sha-${HEAD_SHA:0:7}"
+          MAJOR="${VERSION%%.*}"
+          MINOR="${VERSION%.*}"
+
+          # Fail loudly rather than tag nothing: if ci.yml did not publish this
+          # image, the release must not look like it shipped one.
+          docker buildx imagetools inspect "${SOURCE}" > /dev/null
+
+          docker buildx imagetools create \
+            -t "${REPO}:${VERSION}" \
+            -t "${REPO}:${MINOR}" \
+            -t "${REPO}:${MAJOR}" \
+            "${SOURCE}"
+
+          DIGEST="$(docker buildx imagetools inspect "${REPO}:${VERSION}" \
+            --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          echo "digest=${DIGEST}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### ${IMAGE} ${VERSION}"
+            echo
+            echo "Tagged \`${VERSION}\`, \`${MINOR}\` and \`${MAJOR}\` onto the digest CI tested."
+            echo
+            echo '```text'
+            echo "${REPO}:${VERSION}@${DIGEST}"
+            echo '```'
+            echo
+            echo "k8s.koudijs.dev follows the \`${MAJOR}\` range and updates itself."
+          } >> "$GITHUB_STEP_SUMMARY"

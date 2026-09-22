@@ -76,10 +76,56 @@ A push to `main` publishes two tags per image:
 - `sha-<short sha>` — immutable, one per commit.
 - `main` — moves with the branch.
 
-The job summary prints the pushed digest as `ghcr.io/sunib/<image>@sha256:…`.
-**That is what belongs in the platform repository**: release images should be
-referenced by digest, not by tag (see [PLAN.md](../PLAN.md) section 5). `main` is
-for a quick manual pull, not for Flux.
+Neither is what the cluster follows. A **release** adds three more, and those
+are the ones that matter:
+
+- `1.4.2` — the release.
+- `1.4` — the latest patch of that minor.
+- `1` — the latest release of that major. **This is what k8s.koudijs.dev
+  tracks.**
+
+Nothing is rebuilt to produce them. `release.yml` retags the digest that
+`ci.yml` already built and tested for that same commit, so the thing carrying
+version `1.4.2` is byte-for-byte the thing the browser specs ran against.
+
+## Releases
+
+Versions come from [release-please](https://github.com/googleapis/release-please),
+configured in `release-please-config.json`, and are computed from commit
+messages — so the conventional-commit prefix this repository already uses is
+load-bearing now, not a style preference:
+
+| prefix | effect |
+| --- | --- |
+| `fix:` | patch — 1.4.2 → 1.4.3 |
+| `feat:` | minor — 1.4.2 → 1.5.0 |
+| `feat!:` or a `BREAKING CHANGE:` footer | major — and a major is **never** deployed automatically |
+| `docs:`, `test:`, `chore:`, `ci:`, `refactor:` | no release |
+
+The loop:
+
+1. Merge to `main`. `ci.yml` runs and publishes `sha-<short sha>`.
+2. `release.yml` waits for that run to go **green** — it triggers on
+   `workflow_run`, so a red build can never be released — then opens or updates
+   a `chore(main): release X.Y.Z` pull request with the changelog.
+3. Merge that pull request. release-please tags `vX.Y.Z` and cuts the GitHub
+   release; `retag` moves the version tags onto the tested digest.
+4. Flux's image automation in the platform repository elects the new version
+   from the `1.x` range, writes `image: …:X.Y.Z@sha256:…` into `app.yaml` **in
+   Git**, and the ordinary reconcile deploys it.
+
+Step 4 is why nobody copies a digest out of a job summary any more. The digest
+is still pinned — Flux writes it — so Git keeps saying exactly what runs; it is
+just no longer a human doing the writing. See
+`k8s.koudijs.dev/2-gitops/voter-demo/image-automation.yaml` in the platform
+repository.
+
+### Releasing by hand is a bug
+
+If a cluster needs a change that has not been released, the fix is to release
+it. Editing an image line in the platform repository still works, and Flux's
+automation will overwrite it at the next scan, which is the intended outcome and
+not a race worth winning.
 
 ### Architecture
 
