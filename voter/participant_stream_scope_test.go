@@ -62,3 +62,54 @@ func TestStreamAllowlistPinsTheVersion(t *testing.T) {
 		t.Fatal("a v1 scope was allowed by a v1alpha1 allowlist")
 	}
 }
+
+// The REAL policy this time, not a copy of it.
+//
+// The allowlist test above builds its own list, which is right for testing the
+// matching rule and useless for catching the failure that actually happened: a
+// screen following a kind the shared machinery had never been told about. That
+// one does not surface as a refusal, it surfaces as INTERNAL, because there is
+// no watch to fan out -- which is how the Databases pages failed on 2026-09-22.
+func TestScopePolicyAdmitsWhatTheScreensFollow(t *testing.T) {
+	const ns = "voter"
+	for _, tc := range []struct {
+		name  string
+		scope gateway.Scope
+	}{
+		{"the coffee menu", gateway.Scope{Group: "examples.configbutler.ai", Version: "v1alpha1", Resource: "coffeeconfigs", Namespace: ns, Name: "demo-coffee"}},
+		{"rounds opening and closing", gateway.Scope{Group: "examples.configbutler.ai", Version: "v1alpha1", Resource: "quizsessions", Namespace: ns}},
+		{"the database requests, as a list", gateway.Scope{Group: "platform.configbutler.ai", Version: "v1alpha1", Resource: "databases", Namespace: ns}},
+		{"one database request, as an editor", gateway.Scope{Group: "platform.configbutler.ai", Version: "v1alpha1", Resource: "databases", Namespace: ns, Name: "loyalty-points-mysql"}},
+		// Named, because a save follows the ONE receipt it just created.
+		{"the commit receipt a save creates", gateway.Scope{Group: "configbutler.ai", Version: "v1alpha3", Resource: "commitrequests", Namespace: ns, Name: "database-save-pw52m"}},
+		{"the room's rotating join code", gateway.Scope{Group: "roompass.configbutler.ai", Version: "v1alpha1", Resource: "rooms", Namespace: ns, Name: "demo"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := scopePolicy.Validate(tc.scope); err != nil {
+				t.Fatalf("scope %+v: want admitted, got %v", tc.scope, err)
+			}
+		})
+	}
+}
+
+// ...and that it is still an allowlist. Adding a kind must not quietly become
+// adding a category of kinds.
+func TestScopePolicyStillDeniesByDefault(t *testing.T) {
+	const ns = "voter"
+	for _, tc := range []struct {
+		name  string
+		scope gateway.Scope
+	}{
+		{"secrets", gateway.Scope{Version: "v1", Resource: "secrets", Namespace: ns}},
+		{"the grant the operator switch creates", gateway.Scope{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings", Namespace: ns}},
+		// Same API group as commitrequests, and not the same permission.
+		{"the GitTarget a receipt points at", gateway.Scope{Group: "configbutler.ai", Version: "v1alpha3", Resource: "gittargets", Namespace: ns}},
+		{"commit receipts in EVERY namespace", gateway.Scope{Group: "configbutler.ai", Version: "v1alpha3", Resource: "commitrequests"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := scopePolicy.Validate(tc.scope); err == nil {
+				t.Fatalf("scope %+v: want refused, got allowed", tc.scope)
+			}
+		})
+	}
+}

@@ -103,6 +103,8 @@ export function useLiveEditableResource<T>(
   const error = ref('')
   const notice = ref('')
   const commitNotice = ref('')
+  /** The CommitRequest a save just created, for whoever wants to follow it. */
+  const commitRequest = ref('')
   const saving = ref(false)
   const recoveryDraft = shallowRef<T | null>(null)
   const needsRead = ref(false)
@@ -229,11 +231,14 @@ export function useLiveEditableResource<T>(
         try {
           const receipt = await write(intent, reason)
           if (disposed) return
-          commitNotice.value =
-            receipt.commitError ??
-            (receipt.commitRequested
-              ? 'Commit request accepted. A Git commit has not yet been observed.'
-              : '')
+          // Only a FAILURE is worth a sentence here. Acceptance is not news,
+          // and saying it froze the screen on a half-truth: the commit landed
+          // seconds later and nothing came back to say so. The name is the
+          // thread the screen pulls instead -- see api/commitStatus.ts.
+          commitNotice.value = receipt.commitError ?? ''
+          commitRequest.value = receipt.commitRequested
+            ? (receipt.commitRequest ?? '')
+            : ''
           notice.value =
             'Saved to Kubernetes. Waiting for live synchronization; later edits remain unsaved.'
           // One guarded read recovers a missing echo without adopting a save object.
@@ -307,6 +312,7 @@ export function useLiveEditableResource<T>(
     error,
     notice,
     commitNotice,
+    commitRequest,
     saving,
     canSave,
     recoveryDraft,

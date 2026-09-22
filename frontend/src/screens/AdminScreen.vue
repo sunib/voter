@@ -6,6 +6,7 @@ import { formatConflictValue, humanizePath } from '../adminFormatters'
 import { formatMoney, getVoucherUsage } from '../api/coffee'
 import { useLiveCoffeeConfig } from '../api/liveCoffeeConfig'
 import { currentSession } from '../api/session'
+import { shortSha, useCommitStatus } from '../api/commitStatus'
 import { ADMIN_REQUIREMENTS } from '../api/authz'
 import { useAuthorization } from '../api/useAuthorization'
 import AdminNav from '../components/admin/AdminNav.vue'
@@ -33,12 +34,24 @@ const {
   saving,
   error: loadError,
   commitNotice,
+  commitRequest,
   notice,
   canSave,
   state,
   recoveryDraft,
   redactions,
 } = live
+
+// Follows the receipt the save just handed back until ConfigButler reports the
+// commit pushed, so the line under the form is the state of Git rather than the
+// state of Git at the instant of the save.
+const commit = useCommitStatus(session.namespace)
+const { state: commitState, sha: commitSha, detail: commitDetail } = commit
+const failedCommitCopy =
+  'Your change is saved in Kubernetes. ConfigButler stopped trying to commit it.'
+watch(commitRequest, (name) => {
+  if (name) commit.follow(name)
+})
 const loading = computed(
   () =>
     !draftConfig.value &&
@@ -441,10 +454,23 @@ onBeforeUnmount(clearAllFlashes)
         <p>{{ voucherUsageError }}</p>
       </section>
 
-      <section v-if="commitNotice" class="panel panel--warning">
+      <!-- A commit that did NOT happen is news and keeps the panel. A commit
+           that did is a footnote, and reads as one: see .commit-trail. -->
+      <section
+        v-if="commitNotice || commitState === 'failed'"
+        class="panel panel--warning"
+      >
         <h2>Git commit status</h2>
-        <p>{{ commitNotice }}</p>
+        <p>{{ commitNotice || commitDetail || failedCommitCopy }}</p>
       </section>
+      <p v-else-if="commitState === 'pending'" class="commit-trail">
+        Committing to Git…
+      </p>
+      <p v-else-if="commitState === 'committed'" class="commit-trail">
+        Committed to Git<template v-if="commitSha">
+          · {{ shortSha(commitSha) }}</template
+        >
+      </p>
 
       <section class="admin-grid">
         <article class="panel">

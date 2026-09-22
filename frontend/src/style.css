@@ -422,6 +422,23 @@ p {
   max-width: 40rem;
 }
 
+/* The commit trail: present, quiet, and never a panel.
+ *
+ * A save that reached Git used to announce itself from a warning-coloured box
+ * with a heading, which gave a routine success the visual weight of a problem.
+ * It is a footnote to the save, so it looks like one: one muted line, no rule,
+ * no heading, nothing at all until there is something to say. A FAILURE still
+ * gets the panel -- that one is news.
+ *
+ * --muted is the same token the metadata copy uses, so this inherits the
+ * contrast that was fixed for dark phones after the 2026-09-17 demo rather
+ * than inventing a paler grey of its own. */
+.commit-trail {
+  margin: 0.6rem 0 0;
+  color: rgb(var(--muted));
+  font-size: 0.85rem;
+}
+
 .panel {
   margin-top: 1rem;
   padding: 1.2rem;

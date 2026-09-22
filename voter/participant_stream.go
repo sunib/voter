@@ -43,6 +43,20 @@ var scopePolicy = gateway.ScopePolicy{
 			Resource: "databases",
 			Scope:    gateway.ResourceScopeNamespaced,
 		},
+		// The receipt for a save, followed until ConfigButler reports the
+		// commit pushed. The page opens this pinned to the ONE CommitRequest
+		// its own save created, whose name it learns from the write's response
+		// -- it is never a collection watch in practice, even though the
+		// allowlist below would admit one.
+		//
+		// Nothing here is credential material: a CommitRequest carries the
+		// requester's own sentence and the sha it became, and the sentence is
+		// already on its way into a Git commit message in public.
+		{
+			Group:    "configbutler.ai",
+			Resource: "commitrequests",
+			Scope:    gateway.ResourceScopeNamespaced,
+		},
 		// The operator page's QR code follows the join code as it rotates.
 		// Allowlisting the KIND is not permission to read one: the join code is
 		// operator-only credential material living in the Room's status, and a
@@ -78,6 +92,9 @@ func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 		{Group: "examples.configbutler.ai", Version: "v1alpha1", Resource: "coffeeconfigs", Namespace: deps.defaultNS, Name: cfg.CoffeeConfigName},
 		{Group: "examples.configbutler.ai", Version: "v1alpha1", Resource: "quizsessions", Namespace: deps.defaultNS},
 		{Group: "platform.configbutler.ai", Version: "v1alpha1", Resource: "databases", Namespace: deps.defaultNS},
+		// Empty name: a CommitRequest is created with generateName, so the one
+		// name worth pinning does not exist until the save that makes it.
+		{Group: "configbutler.ai", Version: "v1alpha3", Resource: "commitrequests", Namespace: deps.defaultNS},
 		{Group: "roompass.configbutler.ai", Version: "v1alpha1", Resource: "rooms", Namespace: deps.defaultNS, Name: cfg.RoomName},
 	}
 
