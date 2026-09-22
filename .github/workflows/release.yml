@@ -24,6 +24,24 @@ on:
     workflows: [CI]
     types: [completed]
     branches: [main]
+  # The escape hatch, for when a release exists but its images do not.
+  #
+  # retag runs off release-please's output, so a release that was created any
+  # other way -- by hand, after a failure, or recovering from a release pull
+  # request release-please declined to recognise -- leaves version tags that
+  # point at nothing. This runs the retag half alone, against a commit you name.
+  # It cannot create or move a release; it only moves tags onto an image CI
+  # already built and tested.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to tag, without the v -- e.g. 1.1.0"
+        required: true
+        type: string
+      source_sha:
+        description: "Commit whose CI image to retag. Its sha-<short> tag must exist."
+        required: true
+        type: string
 
 env:
   REGISTRY: ghcr.io
@@ -43,8 +61,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # A failed, cancelled or skipped CI run releases nothing. workflow_run fires
-    # on every conclusion, so this is the gate, not a formality.
-    if: github.event.workflow_run.conclusion == 'success'
+    # on every conclusion, so this is the gate, not a formality. A manual
+    # dispatch skips this job entirely: it retags, it does not release.
+    if: >-
+      ${{ github.event_name == 'workflow_run'
+          && github.event.workflow_run.conclusion == 'success' }}
     permissions:
       contents: write
       pull-requests: write
@@ -70,11 +91,17 @@ jobs:
   # repository at one version, and letting them drift apart would make "which
   # room-pass goes with voter 1.4?" a question somebody has to answer.
   retag:
-    name: Tag ${{ matrix.image }} ${{ needs.release-please.outputs.version }}
+    name: Tag ${{ matrix.image }} ${{ inputs.version || needs.release-please.outputs.version }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
+    # !cancelled() rather than a bare condition, because a manual dispatch
+    # SKIPS release-please and a skipped dependency would otherwise skip this
+    # job too.
+    if: >-
+      ${{ !cancelled()
+          && (needs.release-please.outputs.release_created == 'true'
+              || github.event_name == 'workflow_dispatch') }}
     permissions:
       packages: write
     strategy:
@@ -91,9 +118,10 @@ jobs:
       - name: Move the version tags onto the tested digest
         id: retag
         env:
-          # The commit CI actually ran on, not whatever main points at now.
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
-          VERSION: ${{ needs.release-please.outputs.version }}
+          # The commit CI actually ran on, not whatever main points at now --
+          # or the one named by hand on a dispatch.
+          HEAD_SHA: ${{ inputs.source_sha || github.event.workflow_run.head_sha }}
+          VERSION: ${{ inputs.version || needs.release-please.outputs.version }}
           IMAGE: ${{ matrix.image }}
         run: |
           set -euo pipefail
