@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { readCommitOutcome, shortSha } from './commitStatus'
+import { commitURL, readCommitOutcome, shortSha } from './commitStatus'
 
 // The real status of CommitRequest/database-save-pw52m, taken off the cluster
 // on 2026-09-22. This is the object whose commit the editor claimed not to have
@@ -108,5 +108,24 @@ describe('shortSha', () => {
   it('is what a commit is called out loud', () => {
     expect(shortSha('d82837fe657832ddf7f04c24b3a268eeaa16cd96')).toBe('d82837f')
     expect(shortSha('')).toBe('')
+  })
+})
+
+describe('commitURL', () => {
+  const template =
+    'https://github.com/ConfigButler/k8s-audit-trail/commit/{sha}'
+
+  it('addresses the commit by its FULL sha, not the seven shown', () => {
+    expect(commitURL(template, 'd82837fe657832ddf7f04c24b3a268eeaa16cd96')).toBe(
+      'https://github.com/ConfigButler/k8s-audit-trail/commit/d82837fe657832ddf7f04c24b3a268eeaa16cd96',
+    )
+  })
+
+  // No template configured, or a commit with no sha: the screen falls back to
+  // plain text. A link that 404s argues against the very claim the line makes.
+  it('returns nothing to link to when it cannot build a real link', () => {
+    expect(commitURL('', 'd82837fe')).toBe('')
+    expect(commitURL(template, '')).toBe('')
+    expect(commitURL('', '')).toBe('')
   })
 })

@@ -59,6 +59,23 @@ export function shortSha(sha: string): string {
 }
 
 /**
+ * The commit's address in whatever forge holds the audit trail.
+ *
+ * Returns "" when there is no template or no sha, and the caller renders the
+ * sha as text instead. A link that 404s is worse than no link: the claim the
+ * line is making is "this became a commit", and a dead link quietly argues the
+ * opposite.
+ *
+ * The FULL sha goes in the URL even though the page shows seven characters. A
+ * short sha resolves today and can collide later; the address should still work
+ * when somebody opens it from a screenshot next year.
+ */
+export function commitURL(template: string, sha: string): string {
+  if (!template || !sha) return ''
+  return template.replace('{sha}', sha)
+}
+
+/**
  * Follows one CommitRequest at a time.
  *
  * Pinned by name, so the stream carries this participant's own receipt and not

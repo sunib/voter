@@ -67,6 +67,15 @@ type config struct {
 	// somebody else's message, mid-demo. When the GitTarget exists, setting
 	// this is the only change needed.
 	ConfigButlerDatabaseGitTargetName string `envconfig:"CONFIGBUTLER_DATABASE_GIT_TARGET_NAME"`
+	// AuditTrailCommitURLTemplate turns a commit sha into a link a participant
+	// can open. "{sha}" is substituted; anything else is passed through.
+	//
+	// It is configuration rather than something discovered from the cluster on
+	// purpose. The repository is named in a GitProvider the application has no
+	// grant to read, and asking for one -- to render a hyperlink -- would be
+	// spending real permission on decoration. This is one string in the
+	// Deployment, and empty means the sha renders as text.
+	AuditTrailCommitURLTemplate string `envconfig:"AUDIT_TRAIL_COMMIT_URL_TEMPLATE"`
 	// ConfigButlerCommitRequestNamespace overrides where CommitRequest objects
 	// are created. Empty means "use the runtime namespace", which must also be
 	// the GitTarget's namespace.

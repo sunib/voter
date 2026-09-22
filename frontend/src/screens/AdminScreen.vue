@@ -6,7 +6,7 @@ import { formatConflictValue, humanizePath } from '../adminFormatters'
 import { formatMoney, getVoucherUsage } from '../api/coffee'
 import { useLiveCoffeeConfig } from '../api/liveCoffeeConfig'
 import { currentSession } from '../api/session'
-import { shortSha, useCommitStatus } from '../api/commitStatus'
+import { commitURL, shortSha, useCommitStatus } from '../api/commitStatus'
 import { ADMIN_REQUIREMENTS } from '../api/authz'
 import { useAuthorization } from '../api/useAuthorization'
 import AdminNav from '../components/admin/AdminNav.vue'
@@ -49,6 +49,11 @@ const commit = useCommitStatus(session.namespace)
 const { state: commitState, sha: commitSha, detail: commitDetail } = commit
 const failedCommitCopy =
   'Your change is saved in Kubernetes. ConfigButler stopped trying to commit it.'
+// Empty unless the deployment names where its audit trail can be read, in which
+// case the sha stays plain text rather than becoming a link to nowhere.
+const commitLink = computed(() =>
+  commitURL(session.commitURLTemplate, commitSha.value),
+)
 watch(commitRequest, (name) => {
   if (name) commit.follow(name)
 })
@@ -468,8 +473,16 @@ onBeforeUnmount(clearAllFlashes)
       </p>
       <p v-else-if="commitState === 'committed'" class="commit-trail">
         Committed to Git<template v-if="commitSha">
-          · {{ shortSha(commitSha) }}</template
-        >
+          ·
+          <a
+            v-if="commitLink"
+            class="text-link"
+            :href="commitLink"
+            target="_blank"
+            rel="noopener noreferrer"
+            >{{ shortSha(commitSha) }}</a
+          ><template v-else>{{ shortSha(commitSha) }}</template>
+        </template>
       </p>
 
       <section class="admin-grid">

@@ -30,6 +30,10 @@ export interface Session {
   coffeeConfigName: string
   /** The Room whose join code the operator page renders. */
   roomName: string
+  /** Turns a commit sha into a link, with "{sha}" substituted. Empty when the
+   *  deployment has not been told where its audit trail is readable, in which
+   *  case a sha is shown as plain text -- a dead link would be worse. */
+  commitURLTemplate: string
 }
 
 // The CSRF token the backend issued for this session.

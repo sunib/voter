@@ -331,9 +331,16 @@ jobs:
           persist-credentials: false
 
       - name: Provide the CI container
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        # The composite action, exactly as lint, test and images use it. Logging
+        # in and hoping to PULL cannot work on a pull request: ci-container
+        # builds with push: false there and uploads the image as an artifact, so
+        # `docker run` got "manifest unknown" and the job died in six seconds.
+        # It went unnoticed because this repository pushes to main, where the
+        # image really is in the registry -- the first release pull request is
+        # what surfaced it.
+        uses: ./.github/actions/ci-container
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 

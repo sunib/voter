@@ -74,6 +74,9 @@ func registerOIDCHandlers(mux *http.ServeMux, p *oidcProvider, cfg config, names
 			"namespace":        namespace,
 			"coffeeConfigName": cfg.CoffeeConfigName,
 			"roomName":         cfg.RoomName,
+			// So a save can link the commit it became. Empty when unset, which
+			// the page renders as a plain sha rather than a dead link.
+			"commitURLTemplate": cfg.AuditTrailCommitURLTemplate,
 		})
 	})
 
