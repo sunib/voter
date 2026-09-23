@@ -11,13 +11,18 @@ a library, so they are pinned by what the cluster reported — events, condition
 and controller logs — and by the source lines that produce them, rather than by
 a test in this repository.
 
-Against **0.47.0** (`ghcr.io/configbutler/gitops-reverser:0.47.0`), which the
-demo cluster now runs. Three earlier entries — a routine watch reconnect graded
-as a Warning, `closeDelaySeconds` defaulting to `0`, and a compile-time branch
-worker queue — were resolved in that release, by `d0601a59`, `46bbf3c5` and
-`c6127229` respectively, and have been dropped from this page rather than kept
-as history. What remains is three items, none of them urgent, and the second
-is a suggestion we expect may be declined.
+Against **0.49.1** (`ghcr.io/configbutler/gitops-reverser:0.49.1`), which the
+demo cluster now runs. Four earlier entries have been resolved and dropped from
+this page rather than kept as history: a routine watch reconnect graded as a
+Warning, `closeDelaySeconds` defaulting to `0` and a compile-time branch worker
+queue, in 0.47.0 by `d0601a59`, `46bbf3c5` and `c6127229`; and **a live commit
+message that could not name the resourceVersion it wrote, in 0.48.0 by
+`d814ecfe`**. That last one was this page's item 3, it is what we most wanted,
+and it is now on every body line these four targets commit.
+
+What remains is two items, neither urgent, plus one narrow residue of item 3
+that the fix did not close. The second item is a suggestion we expect may be
+declined.
 
 ---
 
@@ -126,47 +131,48 @@ we originally proposed — that one we withdraw.
 
 ---
 
-## 3. A live commit message cannot name the resourceVersion it wrote
+## 3. `liveTemplate`'s field list is still not the field list
 
-**2026-09-16 · feature request · `spec.commit.message.liveTemplate`**
+**2026-09-23 · documentation · `spec.commit.message.liveTemplate` CRD description**
 
-We wanted a commit subject that carries the resourceVersion of the object the
-commit mirrors — for a conference talk, where the argument is that the
-Kubernetes API is the place concurrent editors meet and the repository is the
-record. A message reading `1 change in demo1 at rv 184213` makes the optimistic
--concurrency story visible in the artifact it produces, rather than only in the
-browser that produced it.
+This is what is left of the item 0.48.0 closed, and it is the cheap half of it.
 
-It cannot be written today. `ResourceRef` (`internal/git/types.go:629`) exposes
-`Operation`, `APIVersion`, `Group`, `Version`, `Resource`, `Kind`, `Namespace`,
-`Name` and `Labels`, and `LiveCommitMessageData` adds `Author`, `GitTarget`,
-`Count`, `Operations`, `Resources` and `RequestMessage`. No version field on
-either. `ReconcileCommitMessageData` does carry `Revision`, which is what we now
-render on reconcile commits — so the concept exists in the template vocabulary,
-just not on the live path.
+The feature we asked for shipped and we are running it. Every live commit these
+four targets make now ends its body lines in the version that commit wrote:
 
-The mirrored document cannot supply it either, and should not:
-`internal/sanitize/sanitize.go:84` deletes `metadata.resourceVersion`, which is
-correct — a mirror that kept it would rewrite the file on every no-op write.
+```text
+chore(config): 4 ConfigButler changes
 
-Two things made this more expensive to discover than it needed to be, and both
-are cheaper to fix than the feature:
+- [UPDATE] GitTarget voter/demo-c@6210582
+- [UPDATE] GitTarget voter/demo1@6210583
+- [UPDATE] GitTarget voter/demo2@6210586
+- [UPDATE] GitTarget voter/gitops-reverser-config@6210589
+```
 
-1. **The CRD's field list is already out of date.** `liveTemplate`'s description
-   says "Resources exposes Operation, Group, Version, Resource, Namespace, Name,
-   and APIVersion" and omits `Kind` and `Labels`, both of which we use and both
-   of which work. A reader checking whether a field exists cannot trust the list,
-   so they end up in `internal/`.
-2. **Nothing validates a template's field names.** `kubectl apply
-   --dry-run=server` accepts `{{.NoSuchField}}` without complaint; the failure
-   arrives at commit time, and per the CRD a failed render fails the commit. For
-   a config whose whole job is to run unattended during a live demo, admission is
-   where we would want to find that out. A dry render against a zero-valued
-   sample at admission would catch every typo we could make.
+The residue is the sub-point we filed alongside the request, which the rewrite
+did not clear. `liveTemplate`'s description now names `ResourceVersion` and
+`Generation`, and it still says `Resources` exposes "Operation, Group, Version,
+Resource, Namespace, Name, APIVersion" — with no `Kind` and no `Labels`. Both
+exist, both work, and both are load-bearing here: `demo-c` and the config target
+render `{{.Kind}}` on every body line, and `demo2` reads a round name out of the
+labels. So the list was edited without being corrected, which is the failure
+mode that makes a list worse than no list: a reader who checks it concludes a
+field is absent and goes to `internal/` to find out, exactly as we did.
 
-We worked around (2) by rendering each template locally against copies of the
-0.47.0 structs before deploying it. That is a reasonable thing for us to do once;
-it is not a reasonable thing to expect of every operator writing a template.
+The fix is one sentence in `api/v1alpha3/gitprovider_types.go`, and we would put
+it below anything on this page that involves behaviour.
+
+**What we are no longer asking for.** The other sub-point — that nothing catches
+a template typo before commit time — we withdraw as filed. `ValidateCommitConfig`
+dry-renders all three templates against sample windows, and 0.48.0 widened those
+samples to carry labels and a kind, so an unknown field is refused when the
+`GitTarget` is validated rather than months later mid-window. We proved this the
+direct way before deploying this upgrade: we ran our four templates through that
+function against 0.49.1's own structs, with the retired `{{.Revision}}` spelling
+as a negative control, and it refused the control with a sentence naming both
+spellings. It is still not *admission* — `kubectl apply --dry-run=server` accepts
+a bad template — and we would still prefer it there. But "the failure arrives at
+commit time" is not what the code does, and we should not have written it.
 
 ---
 
