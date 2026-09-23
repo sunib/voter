@@ -21,8 +21,9 @@ message that could not name the resourceVersion it wrote, in 0.48.0 by
 and it is now on every body line these four targets commit.
 
 What remains is two items, neither urgent, plus one narrow residue of item 3
-that the fix did not close. The second item is a suggestion we expect may be
-declined.
+that the fix did not close, and one new entry that is mostly measurement: where
+a save's four-to-seven seconds actually go now that 0.49.0 removed the round
+trips it could. The second item is a suggestion we expect may be declined.
 
 ---
 
@@ -173,6 +174,114 @@ as a negative control, and it refused the control with a sentence naming both
 spellings. It is still not *admission* — `kubectl apply --dry-run=server` accepts
 a bad template — and we would still prefer it there. But "the failure arrives at
 commit time" is not what the code does, and we should not have written it.
+
+---
+
+## 4. A save waits out a deadline the write has already beaten
+
+**2026-09-23 · measurement, and one suggestion · `CommitRequest.spec.closeDelaySeconds`**
+
+### First, the part that worked
+
+0.49.0's fetch removal is visible from the consumer side, and it is worth saying
+so plainly before we ask for anything. On this cluster,
+`gitopsreverser_git_fetches_total` has **no `reason="publication"` series at
+all** — not a zero, the series has never been created, because the head of a
+publication cycle has not fetched once since the upgrade. The only series
+present is `forced_recheck`. That is §1.4's claim holding in production rather
+than in a golden file.
+
+So this entry is not "it is slow". It is: here is where the remaining time
+actually goes, now that the round trips you could remove are gone.
+
+### The budget we measured
+
+Two real participant saves through the Database editor, taken from the worker's
+own log lines (`CommitRequest attach enqueued` → `attached to open window` →
+`CommitRequest resolved`), and from the histograms:
+
+| Phase | Cost |
+| --- | --- |
+| Attach → window opens (the audit fact arrives) | 0–1.0s |
+| Window open → finalize | **2.0s**, always |
+| Finalize → pushed | ~2.0s |
+| Resolved → status readable by the caller | ~1–2s |
+
+Sourced, in order, from `attribution_resolution_wait_seconds` (`tier="exact"`,
+mean 0.699s over the two saves); `closeDelaySeconds`, anchored at attach
+receipt; `git_push_duration_seconds`, where **7 of 7 samples fall in the 1–2.5s
+bucket** at a 1.76s mean; and the finalized request's own `age: 6.99s` against a
+resolve at t+5.
+
+End to end, `4s` and `6.99s`. The second save attached to its window in the same
+second it was enqueued; the first took a full second.
+
+### The observation
+
+`closeDelaySeconds` is a deadline anchored at attach receipt, and the CRD is
+explicit that "normal flush triggers can close an attached window early". On
+these targets nothing does. The only other trigger is the GitTarget's own
+`window: 5s`, which is longer than the delay, so the deadline is the *only*
+thing that ends the window — and a write that landed at t+0 still waits until
+t+2. In this shape the field is not a collect-up-to; it is a sleep.
+
+That is the cost Phases 1 to 3 of
+`docs/design/commitrequest-save-wait-options.md`
+are designed to remove, and we said on this page that we were "not blocked on
+the race being removed rather than mitigated". We are not revising that to
+*blocked*. We are revising the number attached to it: the mitigation costs two
+of the four-to-seven seconds a participant waits, every time, and it is the only
+term in the table that is pure waiting rather than work.
+
+### The one thing we would change now
+
+**Give `closeDelaySeconds` sub-second granularity.** It is `*int32` in whole
+seconds with `Minimum=0`, so the values are 2 (a full second of dead time after
+the write landed), 1, and 0 — which the field's own documentation says "will
+usually find nothing pending". One usable step between "correct" and "usually
+broken" is not much of a dial.
+
+And whether `1` is safe is not decided anywhere in this product. It is decided
+by `--audit-webhook-batch-max-wait` on the **API server**, which may hold the
+audit event that names the write's author for that long before shipping it. Ours
+was `1s`, our measured attribution waits were 0.5–1.0s, and one of the two saves
+above attached to its window at *exactly* t+1.0s. So `1` was a coin flip, the
+losing side of which is `NoWindowInGrace` — item 1 on this page, still
+indistinguishable from success. We fixed it by changing the API server to
+`250ms`, not by changing anything you own.
+
+The inconsistency is what makes this feel like an oversight rather than a
+trade-off: `--author-attribution-grace` is already a duration (`attribution.grace:
+"3s"` in the chart) and can be tuned to a cluster's measured audit latency. The
+field on the hot path is the coarse one.
+
+**What we are not asking for.** Not a smaller default — 2 is right while the
+field is whole seconds, and we would not want a default that assumes a fast
+audit path. Not removal of the deadline before the happens-before work lands;
+the timer is the honest mitigation until then.
+
+### Two smaller things we saw while measuring
+
+**Startup pays the full grace per re-observed object, head-of-line.** After a
+restart, the operator re-observes each watched object as an `event_kind="write"`,
+and those writes happened before it was running, so no fact can match them. We
+recorded **9 such resolutions at exactly 3.000s each — 27 seconds of waiting**,
+all `tier="absent"`, and `ResolveAuthor`'s own comment says the span is measured
+"on the watch shard's own goroutine". Nine objects makes that invisible. A target
+mirroring hundreds would spend that serially before its first commit. If a
+bootstrap or replay observation can be told apart from a live write at the point
+`ResolveAuthor` is called, skipping the wait for one costs nothing, because the
+fact it is waiting for provably cannot arrive.
+
+**The route warning fired one second before the route worked.** At `07:57:58` we
+were told "no audit facts have ever arrived on this audit route; every commit
+through it is authored as attribution-unresolved" — and at `07:57:59` the log
+says "Published first audit attribution fact". The warning is accurate about what
+had happened and wrong about what it meant, and per the code comment reaching the
+threshold latches it whether or not the caller logs, so the route's one warning
+was spent on a startup race. An operator reading that line reaches for the mTLS
+configuration for a route that was about to start working. A grace before the
+first warning, or a retraction once a fact does arrive, would have saved the trip.
 
 ---
 
