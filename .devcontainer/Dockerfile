@@ -59,6 +59,10 @@ RUN apt-get update \
 # K3D_VERSION -> https://github.com/k3d-io/k3d
 # FLUX_VERSION -> https://github.com/fluxcd/flux2
 # FLUX_OPERATOR_VERSION -> https://github.com/controlplaneio-fluxcd/flux-operator
+#   Track the version the cluster RUNS, not the latest: see the FluxInstance
+#   stall documented in 2-gitops/clusters/course-cluster/operator.yaml, where an
+#   operator older than the Flux distribution JSON-patches a CRD path that no
+#   longer exists and fails closed while everything else stays Ready.
 # TASK_VERSION -> https://github.com/go-task/task/releases
 # ACTIONLINT_VERSION -> https://github.com/rhysd/actionlint/releases
 # HADOLINT_VERSION -> https://github.com/hadolint/hadolint/releases
@@ -78,12 +82,12 @@ RUN apt-get update \
 ENV PATH="/go/bin:/usr/local/go/bin:${PATH}" \
     KUBECTL_VERSION=v1.37.0 \
     KUSTOMIZE_VERSION=5.8.1 \
-    KUBEBUILDER_VERSION=4.15.0 \
+    KUBEBUILDER_VERSION=4.16.0 \
     GOLANGCI_LINT_VERSION=v2.13.2 \
-    HELM_VERSION=v4.2.4 \
+    HELM_VERSION=v4.3.0 \
     K3D_VERSION=v5.9.0 \
     FLUX_VERSION=2.9.5 \
-    FLUX_OPERATOR_VERSION=0.59.0 \
+    FLUX_OPERATOR_VERSION=0.60.0 \
     TASK_VERSION=v3.53.1 \
     ACTIONLINT_VERSION=1.7.12 \
     HADOLINT_VERSION=2.15.1 \
@@ -91,14 +95,14 @@ ENV PATH="/go/bin:/usr/local/go/bin:${PATH}" \
     COSIGN_VERSION=v3.1.3 \
     ORAS_VERSION=1.3.4 \
     NODE_MAJOR=24 \
-    MARKDOWNLINT_CLI2_VERSION=0.23.2 \
-    VALE_VERSION=3.20.0 \
+    MARKDOWNLINT_CLI2_VERSION=0.23.3 \
+    VALE_VERSION=3.22.0 \
     TRIVY_VERSION=0.74.0 \
-    TALOSCTL_VERSION=v1.13.4 \
-    TALM_VERSION=v0.31.0 \
-    TOFU_VERSION=1.12.3 \
+    TALOSCTL_VERSION=v1.14.1 \
+    TALM_VERSION=v0.35.0 \
+    TOFU_VERSION=1.12.6 \
     SOPS_VERSION=v3.13.3 \
-    AGE_VERSION=v1.3.1
+    AGE_VERSION=v1.3.2
 
 # Fail early on unsupported architectures instead of producing a partial image.
 RUN test "$(dpkg --print-architecture)" = "amd64" \
@@ -170,6 +174,17 @@ RUN curl -fsSL -o /usr/local/bin/talosctl "https://github.com/siderolabs/talos/r
     && chmod 0755 /usr/local/bin/talosctl
 
 # talm - Helm-style Talos machine-config templating (cozystack/talm).
+#
+# TALM_VERSION AND TALOSCTL_VERSION TRACK THE CLUSTER'S TALOS VERSION, not the
+# latest release. talm embeds Talos machinery and registers only the config
+# document kinds that machinery knows, so a talm older than the cluster renders
+# a newer document fine and then refuses to apply it:
+#
+#   "EtcFileConfig" "v1alpha1": not registered
+#
+# which reads like a broken template rather than a stale tool. talm v0.35.0
+# embeds machinery v1.14.0, matching 1-talos/Chart.yaml's talosVersion and the
+# nodes' v1.14.0. Bump all three together, or not at all.
 RUN curl -fsSL "https://github.com/cozystack/talm/releases/download/${TALM_VERSION}/talm-linux-amd64.tar.gz" \
     | tar -xzO talm > /usr/local/bin/talm \
     && chmod 0755 /usr/local/bin/talm

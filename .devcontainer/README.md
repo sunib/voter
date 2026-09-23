@@ -225,6 +225,14 @@ rather than picked fresh, so the platform runbook and this container agree on
 what `tofu`, `talm` and `talosctl` mean. SOPS is the one exception, pinned to `v3.13.3` to match
 gitops-reverser's runtime image.
 
+`talm` and `talosctl` are a second exception, and they track the *cluster's*
+Talos version rather than the latest release. `talm` embeds Talos machinery and
+registers only the config document kinds that machinery knows, so a `talm` older
+than the cluster will render a newer document happily and then refuse to apply
+it — `"EtcFileConfig" "v1alpha1": not registered`, which reads like a broken
+template rather than a stale tool. They are on v0.35.0 / v1.14.0 to match
+`1-talos/Chart.yaml` and the nodes. Bump all three together.
+
 None of these touch a cluster on their own. Applying always requires an explicit target, which is
 the plan's rule that opening a devcontainer must never apply to the work cluster.
 
