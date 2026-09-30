@@ -1,8 +1,10 @@
-# k8s-front adoption in Voter
+# krm-foyer adoption in Voter
 
 Status: recommendation for planning; no implementation or deployment change authorized
-by this document. The [product design](../k8s-front/README.md) and
-[BFF decision guide](../k8s-front/bff-choice.md) remain independent of Voter.
+by this document. The [product design](https://github.com/ConfigButler/krm-foyer/blob/main/docs/design.md)
+and [BFF decision guide](https://github.com/ConfigButler/krm-foyer/blob/main/docs/bff-choice.md)
+live in their own repository, [ConfigButler/krm-foyer](https://github.com/ConfigButler/krm-foyer),
+and remain independent of Voter. The service was called k8s-front while it was designed here.
 
 ## Recommendation
 

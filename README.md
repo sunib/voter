@@ -32,7 +32,7 @@ https://demo.koudijs.dev/auth/login?connector=github&return=%2Froom
 - [What is left](PLAN.md): the single remaining-work list.
 - [Demo runbook](docs/demo-runbook.md): the talk as a stage copy — what to
   press, in order, the commands behind each step, and what to do when it breaks.
-- [k8s-front adoption](docs/k8s-front-adoption.md): Voter-specific recommendation,
+- [krm-foyer adoption](docs/k8s-front-adoption.md): Voter-specific recommendation,
   pilot prerequisites and the boundary between prototype work and deployment.
 - [Databases](docs/databases.md): the platform-team page — what it is built on,
   what has to exist in the cluster before it works, and where the intent goes.
