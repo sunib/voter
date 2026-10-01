@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.0](https://github.com/sunib/voter/compare/v1.1.0...v1.2.0) (2026-10-01)
+
+
+### Features
+
+* run against Room Pass 2.x, which now lives in sunib/room-pass ([e467f8e](https://github.com/sunib/voter/commit/e467f8e753cba20efa44cb338869b4a65af8f0f2))
+
+
+### Documentation
+
+* item 3 shipped in 0.48.0, and what is left of it ([b2320c5](https://github.com/sunib/voter/commit/b2320c59ac389656126feecb2a39495a0a37ff94))
+* move the k8s-front design to its own repository, krm-foyer ([05146e5](https://github.com/sunib/voter/commit/05146e55fe2fc5ab948d5343c54acb05c5ec1f39))
+* where a save's four to seven seconds actually go ([7b3166a](https://github.com/sunib/voter/commit/7b3166a8c20562e66c889b681c4026587acc0063))
+
 ## [1.1.0](https://github.com/sunib/voter/compare/v1.0.0...v1.1.0) (2026-09-22)
 
 
