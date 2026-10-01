@@ -8,6 +8,11 @@
 # others by the time it was looked at. multi-ecosystem-groups folds Go, npm,
 # actions and docker into a single weekly bump, so there is one CI run to read
 # and one thing to merge.
+#
+# The price of one pull request is that one bad bump makes all of it red. So
+# npm and docker take no majors here: a TypeScript, Vite or Node major is a
+# migration someone schedules, not a Monday bump, and left in it would hold
+# every safe update back with it. Check for majors by hand now and then.
 version: 2
 multi-ecosystem-groups:
   all-dependencies:
@@ -29,6 +34,9 @@ updates:
       - "/test/browser"
     patterns: ["*"]
     multi-ecosystem-group: "all-dependencies"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -45,3 +53,6 @@ updates:
       - "/voter"
     patterns: ["*"]
     multi-ecosystem-group: "all-dependencies"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
