@@ -10,7 +10,7 @@
 ############################################
 # Frontend bundle
 ############################################
-FROM node:22-alpine AS frontend
+FROM node:26-alpine AS frontend
 WORKDIR /app
 
 ARG GIT_COMMIT
