@@ -10,7 +10,9 @@
 ############################################
 # Frontend bundle
 ############################################
-FROM node:22-alpine AS frontend
+# The same Node major as the devcontainer's NODE_MAJOR, an LTS line: the bundle
+# is built here with what it was developed and tested with.
+FROM node:24-alpine AS frontend
 WORKDIR /app
 
 ARG GIT_COMMIT
