@@ -2,17 +2,24 @@
 # digest, tool versions in .devcontainer/Dockerfile's ENV block. Pinning without
 # an update mechanism is just an old dependency with extra steps, so Dependabot
 # is what keeps the pins moving.
+#
+# One pull request for all of it. Four ecosystems used to mean four weekly pull
+# requests, each running the full CI on its own and each one stale against the
+# others by the time it was looked at. multi-ecosystem-groups folds Go, npm,
+# actions and docker into a single weekly bump, so there is one CI run to read
+# and one thing to merge.
 version: 2
+multi-ecosystem-groups:
+  all-dependencies:
+    schedule:
+      interval: "weekly"
+
 updates:
   - package-ecosystem: "gomod"
     directories:
       - "/voter"
-    schedule:
-      interval: "weekly"
-    groups:
-      go-dependencies:
-        patterns:
-          - "*"
+    patterns: ["*"]
+    multi-ecosystem-group: "all-dependencies"
 
   - package-ecosystem: "npm"
     # The browser suite pins Playwright; a directory left off this list
@@ -20,21 +27,13 @@ updates:
     directories:
       - "/frontend"
       - "/test/browser"
-    schedule:
-      interval: "weekly"
-    groups:
-      npm-dependencies:
-        patterns:
-          - "*"
+    patterns: ["*"]
+    multi-ecosystem-group: "all-dependencies"
 
   - package-ecosystem: "github-actions"
     directory: "/"
-    schedule:
-      interval: "weekly"
-    groups:
-      github-actions:
-        patterns:
-          - "*"
+    patterns: ["*"]
+    multi-ecosystem-group: "all-dependencies"
 
   - package-ecosystem: "docker"
     # The devcontainer/CI base image plus the application Dockerfile, so
@@ -44,9 +43,5 @@ updates:
     directories:
       - "/.devcontainer"
       - "/voter"
-    schedule:
-      interval: "weekly"
-    groups:
-      docker-dependencies:
-        patterns:
-          - "*"
+    patterns: ["*"]
+    multi-ecosystem-group: "all-dependencies"
