@@ -215,26 +215,51 @@ Dex provides OAuth 2.0/OIDC protocol endpoints and signed tokens. `room-oauth` w
 suggest a standalone authorization server that the project does not implement.
 A future native OIDC provider is a separate product decision, not a prerequisite.
 
-- [ ] Extract `room-pass/` with its useful history into a public repository under the
+- [x] Extract `room-pass/` with its useful history into a public repository under the
       chosen owner; update the Go module/import path, independent CI, image publishing,
       versioned CRDs/manifests, license/attribution, contribution and security docs.
       Audit the exported history for private fixture data before publication.
-- [ ] Move Voter/CoffeeConfig/browser-live tests out of the Room Pass component suite
+      Done 2026-09-30/10-01 as [sunib/room-pass](https://github.com/sunib/room-pass):
+      personal account, not ConfigButler, so it is not a company asset. Module
+      `github.com/sunib/room-pass`, API group **`room-pass.koudijs.dev`**, fixture
+      hosts `*.room-pass.test`. First release from there is **2.0.0**, a major
+      on purpose, so Flux's 1.x policy never picks it up on its own. Contribution and
+      security docs are still missing. The in-tree `room-pass/` here is now a stale copy:
+      do not fix things in it, fix them in sunib/room-pass.
+- [x] Move Voter/CoffeeConfig/browser-live tests out of the Room Pass component suite
       into Voter's integration suite. Keep Room Pass's minimal independent OIDC example
       and room-auth/browser, envtest, handoff, race and load tests in its own project.
       Neither build may require the other's checkout or parent Taskfile/devcontainer.
-- [ ] Make Voter consume a released Room Pass image/manifests in its fixture. Its
+      Done 2026-10-01: `test/e2e/` (fixture), `test/browser/` (voting, operator,
+      live-stream, `rehearse-production.mjs`), `voter/test/loadtest` (`task
+      voter:voteload`).
+- [x] Make Voter consume a released Room Pass image/manifests in its fixture. Its
       runtime integration is through Dex/OIDC, not Go imports from Room Pass. Remove
       the in-tree source after the external release and consumer smoke tests pass.
+      Done 2026-10-01: the fixture applies sunib/room-pass `deploy/base` and
+      `config/crd` at `v2.0.0` with the published image by digest, all pinned in
+      `test/e2e/room-pass/kustomization.yaml`; the in-tree `room-pass/` is gone.
 - [ ] Separate demo policy from the component: `demo:` group validation and
       `@koudijs.dev.test` identity formatting are current assumptions. Define an
       operator-controlled allowed group namespace/allowlist with a restrictive default,
       immutable identity settings and synthetic attribution semantics. Do not simply
       remove validation or let room authors choose privileged groups.
-- [ ] Preserve existing `roompass.configbutler.ai/v1alpha1` objects, UIDs, cookie keys,
-      connector ID `room-pass`, subject construction and audience-group behavior in
-      the first extraction release. Repository/image naming must not trigger identity
-      migration. Version any later protocol or CRD change explicitly.
+- [ ] ~~Preserve existing `roompass.configbutler.ai/v1alpha1` objects~~ -- reversed on
+      2026-10-01: the group moved to `room-pass.koudijs.dev` in 2.0.0, because a group
+      is cheapest to change while exactly one cluster runs it. Still preserved: cookie
+      keys, connector ID `room-pass`, subject construction (derived from the display
+      name, so re-enrolling under the same name gives the same subject) and
+      audience-group behavior. The cutover below is what this costs.
+- [x] **Cut Voter and k8s.koudijs.dev over to Room Pass 2.x.** Done 2026-10-01.
+      k8s.koudijs.dev runs 2.0.0 under `room-pass.koudijs.dev` with a new Room
+      `demo`; its ImagePolicy follows `>=2.0.0 <3.0.0`. The pre-2.0 Room and its 70
+      Participants stay, inert, in `room-v1.yaml` with the old CRDs -- the
+      Kustomization prunes, so they must stay listed until that record is retired
+      on purpose. Two `Room` kinds now coexist there: name the resource in full
+      (`rooms.room-pass.koudijs.dev`) in every kubectl command. Voter names the new
+      group, no longer builds or publishes `ghcr.io/sunib/room-pass`, and runs its
+      browser suite against the released image. Still owed: remove sunib/voter's
+      write access to the `room-pass` package on ghcr.io.
 - [ ] Publish a non-Voter example that completes room-code login to an ordinary OIDC
       app without that app knowing Kubernetes. Kubernetes remains Room Pass's storage
       prerequisite for this release; database independence and multiple active rooms

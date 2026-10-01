@@ -255,7 +255,7 @@ breaks the demo, which is the property to preserve in the implementation.
 
 All in [`voter/quiz_tally_test.go`](../voter/quiz_tally_test.go),
 [`frontend/src/api/quizResults.test.ts`](../frontend/src/api/quizResults.test.ts)
-and [`room-pass/test/browser/voting.spec.js`](../room-pass/test/browser/voting.spec.js).
+and [`test/browser/voting.spec.js`](../test/browser/voting.spec.js).
 
 - **Go, controller** — `TestTallyRound`: correct tally, an invalid ballot counted
   in `filed` and not in `counted`, a ballot carrying no round label at all

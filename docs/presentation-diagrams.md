@@ -4,7 +4,7 @@ How Voter, Dex, Room Pass and `kube-apiserver` fit together — drawn for people
 ask about tokens, blast radius and what the audit log says.
 
 Sources: [ARCHITECTURE.md](../ARCHITECTURE.md), [authorization.md](authorization.md),
-[handoff.md](../room-pass/docs/handoff.md) and the platform's `_authentication-config.tpl`.
+[handoff.md](https://github.com/sunib/room-pass/blob/main/docs/handoff.md) and the platform's `_authentication-config.tpl`.
 Platform rows last verified against the live cluster 2026-09-11.
 
 ## Three claims to open with

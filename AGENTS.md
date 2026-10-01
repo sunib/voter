@@ -16,9 +16,10 @@ cd external/k8s && git pull --rebase
 **This is not hygiene, it is correctness.** That repository now has a writer
 that is not a person. Flux's image automation
 (`k8s.koudijs.dev/2-gitops/voter-demo/image-automation.yaml`) commits to `main`
-on its own whenever a new 1.x release of this app is published — it rewrites the
-`image:` lines in `app.yaml` and `room-pass.yaml` with the elected version and
-its digest.
+on its own whenever a new release is published — a 1.x of this app rewrites the
+`image:` line in `app.yaml`, a 2.x of Room Pass (its own project,
+`sunib/room-pass`, since 2.0.0) the one in `room-pass.yaml`, each with the
+elected version and its digest.
 
 So a local checkout goes stale without anybody doing anything, and the two ways
 that bites are both quiet:

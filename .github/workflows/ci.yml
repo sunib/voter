@@ -9,8 +9,8 @@
 #   * changing what CI checks means editing Taskfile.yaml, not YAML here;
 #   * moving to another CI system means writing a file that calls the same tasks.
 #
-# The images published to ghcr.io are built by `task image-room-pass` and
-# `task image-voter` for the same reason: there is no second, workflow-only
+# The image published to ghcr.io is built by `task image-voter` for the same
+# reason: there is no second, workflow-only
 # definition of how a shipped artifact is built.
 #
 # Trust model, one rule: untrusted (pull request) code is built and tested, but
@@ -246,7 +246,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run the tests
-        # voter and room-pass Go tests, plus the frontend type-check and
+        # voter Go tests, plus the frontend type-check and
         # production build. Reproduce with: task test
         run: |
           docker run --rm \
@@ -259,51 +259,10 @@ jobs:
               task test
             '
 
-      - name: Check that the generated Room Pass CRDs are current
-        # A change to room-pass/api/v1alpha1 that was never regenerated otherwise
-        # ships a CRD that rejects the field the controller expects. Fix a failure
-        # with: task room-pass:generate
-        run: |
-          docker run --rm \
-            -v "${GITHUB_WORKSPACE}:${CI_WORKDIR}" \
-            -w "${CI_WORKDIR}" \
-            "${CI_CONTAINER}" \
-            bash -lc '
-              set -e
-              git config --global --add safe.directory "$PWD"
-              task room-pass:verify-generate
-            '
-
-      - name: Run the Room Pass API integration tests
-        # envtest: a real API server and etcd, no cluster. setup-envtest downloads
-        # the binaries on first use, so this is a separate step -- a download
-        # failure reads as itself rather than as a test failure.
-        run: |
-          docker run --rm \
-            -v "${GITHUB_WORKSPACE}:${CI_WORKDIR}" \
-            -w "${CI_WORKDIR}" \
-            "${CI_CONTAINER}" \
-            bash -lc '
-              set -e
-              git config --global --add safe.directory "$PWD"
-              task test-integration
-            '
-
-      - name: Verify Dex network isolation
-        # Real pod traffic and NetworkPolicy enforcement, including a policy
-        # removal control. The task creates and destroys its own k3d cluster.
-        run: |
-          docker run --rm \
-            -v "${GITHUB_WORKSPACE}:${CI_WORKDIR}" \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            -w "${CI_WORKDIR}" \
-            "${CI_CONTAINER}" \
-            bash -lc 'task test-network'
-
   # The browser check gets its own job, deliberately.
   #
   # It used to be the last step of `test`, and `images` needs `test`. Bringing
-  # up a cold k3d cluster, building the room-pass image and deploying Dex and
+  # up a cold k3d cluster, building the voter image and deploying Dex and
   # Traefik then had to fit in whatever was left of that job's 30 minutes --
   # and on 2026-09-10 it did not, so the job was cancelled at its timeout and
   # the image jobs were SKIPPED. A slow cluster bringup silently stopped a
@@ -344,7 +303,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify room authentication in Chromium
+      - name: Run the editor, stream and voting tests in Chromium
         run: |
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:${CI_WORKDIR}" \
@@ -353,8 +312,8 @@ jobs:
             "${CI_CONTAINER}" \
             bash -lc '
               set -e
-              trap "task room-pass:e2e-down" EXIT
-              task room-pass:e2e-up
+              trap "task e2e-down" EXIT
+              task e2e-up
               task test-browser
             '
 
@@ -362,10 +321,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: room-auth-browser-results
+          name: browser-results
           path: |
-            room-pass/test/browser/test-results/
-            room-pass/test/browser/playwright-report/
+            test/browser/test-results/
+            test/browser/playwright-report/
           if-no-files-found: ignore
           retention-days: 7
 
@@ -381,8 +340,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: room-pass
-            task: image-room-pass
           - name: voter
             task: image-voter
     env:

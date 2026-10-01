@@ -5,7 +5,6 @@
 #   * .devcontainer/Dockerfile, which copies only the dependency manifests;
 #   * voter/Dockerfile, which builds the frontend bundle and the Go backend into
 #     one image and therefore needs both frontend/ and voter/ sources.
-# room-pass/ still builds from its own narrower context and is unaffected.
 #
 # Without this file every build would ship external/ (~200MB of vendored
 # checkouts) and frontend/node_modules to the daemon.
@@ -16,8 +15,6 @@
 # 2. Dependency manifests, used for cache warm-up layers.
 !voter/go.mod
 !voter/go.sum
-!room-pass/go.mod
-!room-pass/go.sum
 !frontend/package.json
 !frontend/package-lock.json
 

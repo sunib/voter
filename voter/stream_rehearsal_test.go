@@ -1,6 +1,6 @@
 package main
 
-// Opt-in integration rehearsal against ONLY the disposable Room Pass fixture.
+// Opt-in integration rehearsal against ONLY the disposable e2e fixture (test/e2e).
 // Uses 200 real Kubernetes service-account tokens in fixture-signed Voter
 // sessions. Browser tests separately exercise Dex/OIDC login and rendering.
 import (
@@ -45,11 +45,11 @@ func TestFixtureSharedStreamRehearsal(t *testing.T) {
 	if os.Getenv("VOTER_STREAM_REHEARSAL") != "1" {
 		t.Skip("set VOTER_STREAM_REHEARSAL=1 for the disposable fixture rehearsal")
 	}
-	raw, err := clientcmd.LoadFromFile("../room-pass/.local/kubeconfig")
+	raw, err := clientcmd.LoadFromFile("../.local/kubeconfig")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if raw.CurrentContext != "k3d-room-pass-e2e" {
+	if raw.CurrentContext != "k3d-voter-e2e" {
 		t.Fatal("refusing a non-fixture kubeconfig")
 	}
 	rc, err := clientcmd.NewDefaultClientConfig(*raw, &clientcmd.ConfigOverrides{}).ClientConfig()
@@ -63,11 +63,11 @@ func TestFixtureSharedStreamRehearsal(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
 	defer cancel()
-	gateway, err := exec.CommandContext(ctx, "docker", "network", "inspect", "k3d-room-pass-e2e", "--format", "{{(index .IPAM.Config 0).Gateway}}").Output()
+	gateway, err := exec.CommandContext(ctx, "docker", "network", "inspect", "k3d-voter-e2e", "--format", "{{(index .IPAM.Config 0).Gateway}}").Output()
 	if err != nil {
 		t.Fatal(err)
 	}
-	ca, err := os.ReadFile("../room-pass/.local/tls.crt")
+	ca, err := os.ReadFile("../.local/tls.crt")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,19 +76,19 @@ func TestFixtureSharedStreamRehearsal(t *testing.T) {
 		t.Fatal("invalid fixture CA")
 	}
 	tr := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}, DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, network, net.JoinHostPort(strings.TrimSpace(string(gateway)), "18443"))
+		return (&net.Dialer{}).DialContext(ctx, network, net.JoinHostPort(strings.TrimSpace(string(gateway)), "19443"))
 	}}
 	defer tr.CloseIdleConnections()
 	client := &http.Client{Transport: tr}
-	const app = "https://app.roompass.test:18443"
-	pods, err := cs.CoreV1().Pods("room-pass").List(ctx, metav1.ListOptions{LabelSelector: "app=voter"})
+	const app = "https://app.voter.test:19443"
+	pods, err := cs.CoreV1().Pods("voter").List(ctx, metav1.ListOptions{LabelSelector: "app=voter"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(pods.Items) != 1 {
 		t.Fatal("rehearsal requires exactly one Voter pod after rollout")
 	}
-	metricsPath := "/api/v1/namespaces/room-pass/pods/" + pods.Items[0].Name + ":9090/proxy/metrics"
+	metricsPath := "/api/v1/namespaces/voter/pods/" + pods.Items[0].Name + ":9090/proxy/metrics"
 	fetchMetrics := func() string {
 		t.Helper()
 		body, err := cs.CoreV1().RESTClient().Get().AbsPath(metricsPath).DoRaw(ctx)
@@ -141,7 +141,7 @@ func TestFixtureSharedStreamRehearsal(t *testing.T) {
 	defer func() {
 		cleanup, stop := context.WithTimeout(context.Background(), 30*time.Second)
 		defer stop()
-		_ = cs.RbacV1().RoleBindings("room-pass").Delete(cleanup, ns, metav1.DeleteOptions{})
+		_ = cs.RbacV1().RoleBindings("voter").Delete(cleanup, ns, metav1.DeleteOptions{})
 		_ = cs.CoreV1().Namespaces().Delete(cleanup, ns, metav1.DeleteOptions{})
 	}()
 	const count = 200
@@ -170,7 +170,7 @@ func TestFixtureSharedStreamRehearsal(t *testing.T) {
 		cookies[i] = rec.Result().Cookies()[0]
 	}
 	binding := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: ns}, Subjects: subjects, RoleRef: rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: "voter"}}
-	binding, err = cs.RbacV1().RoleBindings("room-pass").Create(ctx, binding, metav1.CreateOptions{})
+	binding, err = cs.RbacV1().RoleBindings("voter").Create(ctx, binding, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestFixtureSharedStreamRehearsal(t *testing.T) {
 		}
 	}()
 	open := func(i int) (*rehearsalStream, error) {
-		req, e := http.NewRequestWithContext(ctx, "GET", app+"/public/stream?group=examples.configbutler.ai&version=v1alpha1&resource=coffeeconfigs&namespace=room-pass&name=demo-coffee", nil)
+		req, e := http.NewRequestWithContext(ctx, "GET", app+"/public/stream?group=examples.configbutler.ai&version=v1alpha1&resource=coffeeconfigs&namespace=voter&name=demo-coffee", nil)
 		if e != nil {
 			return nil, e
 		}
@@ -277,7 +277,7 @@ func TestFixtureSharedStreamRehearsal(t *testing.T) {
 	}
 	t.Log("actual API server CoffeeConfig watch increase: 1")
 	// This mutation is restricted to the fixture's demo object; restore only the field changed.
-	path := "/apis/examples.configbutler.ai/v1alpha1/namespaces/room-pass/coffeeconfigs/demo-coffee"
+	path := "/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/coffeeconfigs/demo-coffee"
 	old, err := cs.CoreV1().RESTClient().Get().AbsPath(path).DoRaw(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -339,7 +339,7 @@ func TestFixtureSharedStreamRehearsal(t *testing.T) {
 	// Remove just one identity's grant from an already-warm scope.
 	binding.Subjects = subjects[1:]
 	started = time.Now()
-	_, err = cs.RbacV1().RoleBindings("room-pass").Update(ctx, binding, metav1.UpdateOptions{})
+	_, err = cs.RbacV1().RoleBindings("voter").Update(ctx, binding, metav1.UpdateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +362,7 @@ func TestFixtureSharedStreamRehearsal(t *testing.T) {
 		default:
 		}
 	}
-	usage, e := cs.CoreV1().RESTClient().Get().AbsPath("/apis/metrics.k8s.io/v1beta1/namespaces/room-pass/pods").Param("labelSelector", "app=voter").DoRaw(ctx)
+	usage, e := cs.CoreV1().RESTClient().Get().AbsPath("/apis/metrics.k8s.io/v1beta1/namespaces/voter/pods").Param("labelSelector", "app=voter").DoRaw(ctx)
 	if e == nil {
 		t.Logf("Voter resource sample: %s", usage)
 	} else {

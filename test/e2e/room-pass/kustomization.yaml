@@ -1,0 +1,46 @@
+# Room Pass in Voter's fixture, as RELEASED by sunib/room-pass.
+#
+# The version is pinned three times below, and the three must move together:
+# the deploy/base ref, the CRD ref, and the image. Dependabot does not see this
+# file, so a Room Pass release reaches the fixture only when somebody bumps it
+# here -- the same deliberate step the demo cluster takes for a new major.
+#
+# To bump: take the tag, then the digest from
+#   docker buildx imagetools inspect ghcr.io/sunib/room-pass:<version>
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: voter
+resources:
+  - https://github.com/sunib/room-pass//deploy/base?ref=v2.0.0
+  - https://raw.githubusercontent.com/sunib/room-pass/v2.0.0/config/crd/room-pass.koudijs.dev_rooms.yaml
+  - https://raw.githubusercontent.com/sunib/room-pass/v2.0.0/config/crd/room-pass.koudijs.dev_participants.yaml
+images:
+  - name: room-pass
+    newName: ghcr.io/sunib/room-pass
+    newTag: 2.0.0
+    digest: sha256:eb5fee5161e52eb6de3983c811ddc883838cbee1dfea33fb013374696e189416
+patches:
+  # deploy/base carries Room Pass's own fixture origins (*.room-pass.test).
+  # These are this fixture's: the join page and the issuer each get a host,
+  # and the only return URL is the Voter application.
+  - target:
+      kind: Deployment
+      name: room-pass
+    patch: |
+      - op: replace
+        path: /spec/template/spec/containers/0/env
+        value:
+          - name: ROOM_NAME
+            value: demo
+          - name: ROOM_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: JOIN_ORIGIN
+            value: https://join.voter.test:19443
+          - name: ISSUER_ORIGIN
+            value: https://login.voter.test:19443
+          - name: DEX_UPSTREAM
+            value: http://dex:5556
+          - name: ALLOWED_RETURN_URLS
+            value: https://app.voter.test:19443/

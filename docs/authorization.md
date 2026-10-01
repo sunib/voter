@@ -155,13 +155,21 @@ and test an authorization mechanism for that explicitly.
 | --- | --- |
 | [Voter authorization](../voter/authorization_test.go) | Real handler gates, request-scoped credentials, ignored forged headers, upstream 401/403/409, partial save |
 | [Voter OIDC](../voter/oidc_test.go) | Cookie tampering/expiry/version, CSRF, return paths, callback browser binding/expiry/rejected-attempt replay |
-| [Room Pass server](../room-pass/internal/server/server_test.go) | Enrollment lifecycle, stopped/expired Room, tampered cookie, handoff replay and CSRF |
-| [Room Pass API](../room-pass/test/integration/api_test.go) | CRD API behavior using envtest |
-| [Dex network boundary](../room-pass/test/network/network_test.go) | Real Dex, allowed/denied pod matrix, Service and Pod IP, policy removal/restoration; `task test-network` runs in CI |
-| [Browser login](../room-pass/test/browser/room-auth.spec.js) | Chromium enrollment/return flow, invalid code, CSRF, closed enrollment and cookie flags; CI retains video |
-| [Room Pass e2e](../room-pass/test/e2e/e2e_test.go) | Local Dex/Kubernetes fixture; separate from CI and the real app browser |
+| [Voter in the browser](../test/browser/) | Real Chromium through Traefik, Dex and a released Room Pass: participants refused the operator page, RBAC withdrawal from one of two viewers, voting; CI retains video |
 
-Run `task voter:test`, `task room-pass:test`, and `task test-integration`.
+Room Pass's own evidence lives with Room Pass, in
+[sunib/room-pass](https://github.com/sunib/room-pass), and runs in that
+project's CI, not this one's:
+
+| Test file | What it establishes |
+| --- | --- |
+| [Room Pass server](https://github.com/sunib/room-pass/blob/main/internal/server/server_test.go) | Enrollment lifecycle, stopped/expired Room, tampered cookie, handoff replay and CSRF |
+| [Room Pass API](https://github.com/sunib/room-pass/blob/main/test/integration/api_test.go) | CRD API behavior using envtest |
+| [Dex network boundary](https://github.com/sunib/room-pass/blob/main/test/network/network_test.go) | Real Dex, allowed/denied pod matrix, Service and Pod IP, policy removal/restoration |
+| [Browser login](https://github.com/sunib/room-pass/blob/main/test/browser/room-auth.spec.js) | Chromium enrollment/return flow, invalid code, CSRF, closed enrollment and cookie flags |
+| [Room Pass e2e](https://github.com/sunib/room-pass/blob/main/test/e2e/e2e_test.go) | Local Dex/Kubernetes fixture with a minimal OIDC client |
+
+Here, run `task voter:test`, and `task e2e-up && task test-browser` for the browser layer.
 For concurrent credential checks run `cd voter && go test -race ./...`.
 
 The HTTP upstream in Voter tests is a controlled stand-in: it establishes that
@@ -170,7 +178,7 @@ The next layer is rendered platform CEL and real-token RBAC tests for all three
 connectors, followed by browser and audit-to-Git acceptance. The implementation
 plan tracks those remaining proofs.
 
-See [network suite details](../room-pass/test/network/README.md) for testing the
+See [network suite details](https://github.com/sunib/room-pass/blob/main/test/network/README.md) for testing the
 actual platform policy file and the distinction between local k3s and live Cilium.
 
 ## Shared streams

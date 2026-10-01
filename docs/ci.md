@@ -26,9 +26,10 @@ Three things follow from that:
 |---|---|---|
 | `ci-container` | Builds `.devcontainer/Dockerfile --target ci` and asserts every tool is present | `task ci-image` |
 | `devcontainer` | Builds `--target dev` and asserts the developer tools are present | `docker build --target dev -f .devcontainer/Dockerfile .` |
-| `lint` | golangci-lint (both Go modules), hadolint, actionlint, ESLint | `task lint` |
-| `test` | Go tests, frontend type-check and build, CRD staleness, envtest | `task test && task room-pass:verify-generate && task test-integration` |
-| `images` | Builds `room-pass` and `voter`; publishes on a push to `main` | `task build` |
+| `lint` | golangci-lint, hadolint, actionlint, ESLint | `task lint` |
+| `test` | Go tests, frontend type-check and build | `task test` |
+| `browser` | Chromium against the k3d fixture: Traefik, Dex, a released Room Pass, Voter | `task e2e-up && task test-browser` |
+| `images` | Builds `voter`; publishes on a push to `main` | `task build` |
 
 `ci-container` runs first because every other job runs inside its output. On a
 pull request that image is handed along as an artifact; on a trusted run it is
@@ -42,27 +43,25 @@ One rule: **untrusted code is built and tested, but never meets a write token.**
 
 Pull requests build the CI container and pass it between jobs as an artifact,
 because a fork's `GITHUB_TOKEN` is read-only and cannot pull from or push to
-`ghcr.io`. They build both application images and push neither. Only a push to
+`ghcr.io`. They build the application image and push nothing. Only a push to
 `refs/heads/main` publishes — deliberately not "any event that is not a pull
 request", which would let a `workflow_dispatch` on a topic branch publish.
 
 GitHub enforces the fork half of this regardless of the permissions the workflow
 declares; the declarations exist so the intent is reviewable.
 
-## The two images
+## The image
 
 | Image | Built from | Contents |
 |---|---|---|
-| `ghcr.io/sunib/room-pass` | `room-pass/` | The Room Pass gate: Room/Participant controller, join page, session and Dex header adapter |
 | `ghcr.io/sunib/voter` | `voter/` + `frontend/` | The Go backend and Dex OIDC client, serving the compiled Vue bundle from `STATIC_DIR` |
 
-There is deliberately no third image. The frontend bundle is built into the
+There is deliberately no second image. The frontend bundle is built into the
 Voter image and served by the Go binary, so the two can never sit at different
 revisions; the separate NGINX frontend image and the `voter-auth-service` image
 are both retired.
 
-Both are built by `task image-room-pass` and `task image-voter` — the same
-commands CI runs, with the same build args. There is no workflow-only definition
+It is built by `task image-voter` — the same command CI runs, with the same build args. There is no workflow-only definition
 of how a shipped artifact is built. To publish somewhere else:
 
 ```bash
@@ -162,8 +161,7 @@ plain `task` form for everyday work.
 
 The waivers are deliberate and each one records why, so they can be revisited:
 
-- [`.golangci.yml`](../.golangci.yml) — `ST1005` is off because Room Pass renders
-  its errors to participants as prose; `ST1013` is off because the handlers use
+- [`.golangci.yml`](../.golangci.yml) — `ST1013` is off because the handlers use
   numeric HTTP statuses consistently and staticcheck flags only a subset. The
   `unused` waiver on three `voter` functions is tied to the migration that
   will delete them.
@@ -180,18 +178,19 @@ cleanup.
 The backlog lives in [`.github/README.md`](../.github/README.md), next to the
 workflow it describes, so there is one list rather than two that drift.
 
-The short version: the Room Pass end-to-end suite is the significant gap — until
-it runs, a green pipeline does not mean a participant can log in.
+The `browser` job does drive a real login — Voter, Dex and a released Room Pass —
+so a green pipeline does mean a participant can log in to the fixture. What it
+does not cover is GitHub or LinkedIn login, or the platform's own Dex.
 
-## Dex network regression gate
+## Browser gate
 
-The test job also runs `task test-network` with the Docker socket mounted. This
-creates and removes a dedicated k3d cluster and verifies allowed and denied pod
-traffic to real Dex using the platform policy snapshot. See the
-[network suite](../room-pass/test/network/README.md) for cases, controls and how
-to test a platform policy edit directly. This gate does not require private
-repository access, live cluster credentials or external-provider login secrets.
+The `browser` job builds the local fixture ([`test/e2e/up.sh`](../test/e2e/up.sh)),
+runs `task test-browser` in Chromium, then tears the fixture down. Browser videos,
+failure traces and the HTML report are retained as `browser-results` for seven days.
 
-The test job also builds the Room Pass local fixture and runs `task test-browser`
-in Chromium, then tears the fixture down. Browser videos, failure traces and the
-HTML report are retained as `room-auth-browser-results` for seven days.
+Room Pass in that fixture is the published release pinned in
+[`test/e2e/room-pass/kustomization.yaml`](../test/e2e/room-pass/kustomization.yaml),
+not a build from source. Room Pass's own suites — the Dex network boundary,
+envtest, its login tests — run in [sunib/room-pass](https://github.com/sunib/room-pass)'s
+CI. This repository stopped building and publishing `ghcr.io/sunib/room-pass` when
+Room Pass moved out at 2.0.0.

@@ -15,7 +15,7 @@ func TestStreamAllowlistRefusesWhatItDoesNotName(t *testing.T) {
 	allow := streamAllowlist{
 		{Group: "examples.configbutler.ai", Version: "v1alpha1", Resource: "coffeeconfigs", Namespace: ns, Name: "demo-coffee"},
 		{Group: "examples.configbutler.ai", Version: "v1alpha1", Resource: "quizsessions", Namespace: ns},
-		{Group: "roompass.configbutler.ai", Version: "v1alpha1", Resource: "rooms", Namespace: ns, Name: "demo"},
+		{Group: "room-pass.koudijs.dev", Version: "v1alpha1", Resource: "rooms", Namespace: ns, Name: "demo"},
 	}
 
 	scope := func(group, resource, namespace, name string) gateway.Scope {
@@ -32,12 +32,12 @@ func TestStreamAllowlistRefusesWhatItDoesNotName(t *testing.T) {
 		{"every round in the namespace", scope("examples.configbutler.ai", "quizsessions", ns, ""), true},
 		{"one round by name", scope("examples.configbutler.ai", "quizsessions", ns, "demo-round-1"), true},
 		{"rounds in another namespace", scope("examples.configbutler.ai", "quizsessions", "kube-system", ""), false},
-		{"the configured Room", scope("roompass.configbutler.ai", "rooms", ns, "demo"), true},
+		{"the configured Room", scope("room-pass.koudijs.dev", "rooms", ns, "demo"), true},
 		// The join code is operator-only credential material, so the endpoint
 		// serves exactly one Room and never a collection of them.
-		{"another Room", scope("roompass.configbutler.ai", "rooms", ns, "other-room"), false},
-		{"every Room", scope("roompass.configbutler.ai", "rooms", ns, ""), false},
-		{"participants, which nothing streams", scope("roompass.configbutler.ai", "participants", ns, ""), false},
+		{"another Room", scope("room-pass.koudijs.dev", "rooms", ns, "other-room"), false},
+		{"every Room", scope("room-pass.koudijs.dev", "rooms", ns, ""), false},
+		{"participants, which nothing streams", scope("room-pass.koudijs.dev", "participants", ns, ""), false},
 		{"a core resource", scope("", "secrets", ns, "voter-oidc-client"), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -82,7 +82,7 @@ func TestScopePolicyAdmitsWhatTheScreensFollow(t *testing.T) {
 		{"one database request, as an editor", gateway.Scope{Group: "platform.configbutler.ai", Version: "v1alpha1", Resource: "databases", Namespace: ns, Name: "loyalty-points-mysql"}},
 		// Named, because a save follows the ONE receipt it just created.
 		{"the commit receipt a save creates", gateway.Scope{Group: "configbutler.ai", Version: "v1alpha3", Resource: "commitrequests", Namespace: ns, Name: "database-save-pw52m"}},
-		{"the room's rotating join code", gateway.Scope{Group: "roompass.configbutler.ai", Version: "v1alpha1", Resource: "rooms", Namespace: ns, Name: "demo"}},
+		{"the room's rotating join code", gateway.Scope{Group: "room-pass.koudijs.dev", Version: "v1alpha1", Resource: "rooms", Namespace: ns, Name: "demo"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := scopePolicy.Validate(tc.scope); err != nil {

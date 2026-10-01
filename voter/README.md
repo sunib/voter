@@ -105,5 +105,6 @@ registry use `task image-voter REGISTRY=<registry> IMAGE_OWNER=<owner> TAG=<revi
 
 Deployment and demo CRDs are maintained in the external platform repository under
 `2-gitops/voter-demo/`. The legacy root `k8s/` and `k8s-examples/` resources have
-been removed. Room Pass's maintained deployment and disposable e2e fixture remain
-under `room-pass/`.
+been removed. Room Pass is its own project,
+[sunib/room-pass](https://github.com/sunib/room-pass); this repository's
+disposable e2e fixture, which runs a released Room Pass, is under `test/e2e/`.

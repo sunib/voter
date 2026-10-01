@@ -129,7 +129,7 @@ purpose is what this one does.
 
       ```bash
       kubectl -n voter get coffeeconfig demo-coffee -o jsonpath='{.spec.bannerText}{"\n"}'
-      kubectl -n voter get room demo -o jsonpath='{.spec.title}: {.spec.attributionNote}{"\n"}'
+      kubectl -n voter get rooms.room-pass.koudijs.dev demo -o jsonpath='{.spec.title}: {.spec.attributionNote}{"\n"}'
       ```
 
       If the banner says Git, patch it back:
@@ -437,7 +437,7 @@ The order feed needs no reset. Restarting the pod empties it.
 
 | Symptom | Do this |
 |---|---|
-| Nobody can join | `kubectl -n voter get room demo -o yaml`, check `endsAt` and `enrollment` |
+| Nobody can join | `kubectl -n voter get rooms.room-pass.koudijs.dev demo -o yaml`, check `endsAt` and `enrollment` |
 | Join works, voting 403s | `kubectl -n voter get rolebinding voter-audience` |
 | Results bars do not move | Check the "as of" timestamp. If stuck, reload; the page falls back to reading on demand and a Refresh results button appears |
 | Nothing reaching Git | `kubectl -n gitops-reverser logs deploy/gitops-reverser`, check the GitProvider secret. The reverser runs in its own namespace, not `voter` |

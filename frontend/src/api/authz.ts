@@ -169,7 +169,7 @@ export function missingPermissions(
 const EXAMPLES = 'examples.configbutler.ai'
 const PLATFORM = 'platform.configbutler.ai'
 const RBAC = 'rbac.authorization.k8s.io'
-const ROOMPASS = 'roompass.configbutler.ai'
+const ROOM_PASS = 'room-pass.koudijs.dev'
 
 /** What the coffee menu editor uses. Declared here rather than described in
  *  prose on the screen, so the page and the Role cannot drift apart quietly. */
@@ -241,13 +241,13 @@ export const DATABASE_REQUIREMENTS: Requirement[] = [
  *  hold some and not others. */
 export const ROOM_REQUIREMENTS: Requirement[] = [
   {
-    apiGroup: ROOMPASS,
+    apiGroup: ROOM_PASS,
     resource: 'rooms',
     verb: 'get',
     purpose: 'read the room and its rotating join code',
   },
   {
-    apiGroup: ROOMPASS,
+    apiGroup: ROOM_PASS,
     resource: 'rooms',
     verb: 'watch',
     purpose: 'follow the code as it rotates, without polling',

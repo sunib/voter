@@ -143,7 +143,7 @@ it('separates a refusal from a fault, keeping the code and the message', async (
   await event({
     type: 'error',
     code: 'FORBIDDEN',
-    message: 'rooms.roompass.configbutler.ai "demo" is forbidden',
+    message: 'rooms.room-pass.koudijs.dev "demo" is forbidden',
     terminal: true,
   })
   await vi.waitFor(() => expect(live.errorCode.value).toBe('FORBIDDEN'))

@@ -2,7 +2,7 @@
 // The operator's page. Everything here is guarded by Kubernetes, not by a check
 // in this component.
 //
-// room-pass/cmd/room-qr argues that the join code belongs in a terminal tool
+// cmd/room-qr in sunib/room-pass argues that the join code belongs in a terminal tool
 // rather than a web page, because it is operator-only credential material and a
 // page would mean "building an operator login for that page and getting it
 // exactly right". This page takes that bet, and the way it stays honest is that
@@ -32,7 +32,7 @@ const session = currentSession()
 const namespace = session?.namespace ?? ''
 
 const roomScope = {
-  group: 'roompass.configbutler.ai',
+  group: 'room-pass.koudijs.dev',
   version: 'v1alpha1',
   resource: 'rooms',
   namespace,

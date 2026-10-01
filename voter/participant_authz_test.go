@@ -112,7 +112,7 @@ const authzNamespace = "voter"
 
 func roomObject(name, group string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "roompass.configbutler.ai/v1alpha1",
+		"apiVersion": "room-pass.koudijs.dev/v1alpha1",
 		"kind":       "Room",
 		"metadata":   map[string]any{"name": name, "namespace": authzNamespace},
 		"spec":       map[string]any{"audienceGroup": group},

@@ -1,0 +1,17 @@
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+  - level: Metadata
+    resources:
+      - group: room-pass.koudijs.dev
+        resources: [rooms, rooms/status, participants]
+      - group: ''
+        resources: [secrets]
+  # Who changed the menu or cast a ballot, with the body: the record the demo's
+  # Git sink turns into commits, kept here for debugging a failed spec.
+  - level: RequestResponse
+    namespaces: [voter]
+    resources:
+      - group: examples.configbutler.ai
+        resources: [coffeeconfigs, quizsessions, quizsubmissions]
+  - level: None

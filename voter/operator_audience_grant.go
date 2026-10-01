@@ -41,7 +41,7 @@ import (
 
 func roomsGVR() schema.GroupVersionResource {
 	return schema.GroupVersionResource{
-		Group:    "roompass.configbutler.ai",
+		Group:    "room-pass.koudijs.dev",
 		Version:  "v1alpha1",
 		Resource: "rooms",
 	}

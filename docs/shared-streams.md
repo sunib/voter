@@ -101,11 +101,11 @@ The browser suite covers real Dex/Room Pass login, conditional saves and conflic
 plus real RBAC withdrawal from one of two viewers, denied warm-cache reconnection,
 preserved unsaved input and continued updates for the remaining viewer.
 
-The opt-in load test is restricted to `room-pass/.local/kubeconfig` and requires its
-context to be `k3d-room-pass-e2e`. Run it separately from the browser suites:
+The opt-in load test is restricted to `.local/kubeconfig` at the repository root and
+requires its context to be `k3d-voter-e2e`. Run it separately from the browser suites:
 
 ```bash
-task room-pass:e2e-up
+task e2e-up
 task test-browser
 task voter:test-stream-rehearsal
 ```

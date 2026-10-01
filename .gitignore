@@ -10,3 +10,6 @@ external/
 *.ignore.*
 # Theme screenshots from `task frontend:theme` — look at them, do not commit them.
 frontend/theme-shots/
+
+# The e2e fixture's kubeconfig, TLS key and cookie keys (test/e2e/up.sh).
+/.local/

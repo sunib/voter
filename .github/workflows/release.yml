@@ -87,9 +87,10 @@ jobs:
   # produce a different artifact from the one that was tested. imagetools create
   # writes new tags onto the same manifest.
   #
-  # Both images, always together. room-pass and voter are released from one
-  # repository at one version, and letting them drift apart would make "which
-  # room-pass goes with voter 1.4?" a question somebody has to answer.
+  # One image. Room Pass used to be released from here too, at Voter's version;
+  # since 2.0.0 it is sunib/room-pass and tags ghcr.io/sunib/room-pass itself.
+  # This repository must not write to that package any more: a release here
+  # would add 1.x tags beside that project's own.
   retag:
     name: Tag ${{ matrix.image }} ${{ inputs.version || needs.release-please.outputs.version }}
     runs-on: ubuntu-latest
@@ -107,7 +108,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [voter, room-pass]
+        image: [voter]
     steps:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0

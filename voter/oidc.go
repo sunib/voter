@@ -414,8 +414,9 @@ func noStore(w http.ResponseWriter) {
 // host and the hand-off stops arriving, by design.
 
 // joinCodeHandoffCookie is the name Room Pass reads. Keep it in step with the
-// constant of the same name in room-pass/internal/server -- the two modules
-// cannot share it, so this is a contract kept by tests and documentation.
+// constant of the same name in internal/server of sunib/room-pass -- the two
+// projects cannot share it, so this is a contract kept by tests and
+// documentation. Room Pass 2.0.0 kept the name.
 //
 // It is deliberately a PLAIN cookie, not a signed one. The value is a room
 // code, which is untrusted input however it arrives: Room Pass checks it

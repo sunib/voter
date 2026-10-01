@@ -62,9 +62,9 @@ var scopePolicy = gateway.ScopePolicy{
 		// operator-only credential material living in the Room's status, and a
 		// participant's RBAC grants nothing on rooms at all. That refusal is
 		// Kubernetes', not this allowlist's, which is the whole point of having
-		// both -- see room-pass/cmd/room-qr for why this material is guarded.
+		// both -- see cmd/room-qr in sunib/room-pass for why this material is guarded.
 		{
-			Group:    "roompass.configbutler.ai",
+			Group:    "room-pass.koudijs.dev",
 			Resource: "rooms",
 			Scope:    gateway.ResourceScopeNamespaced,
 		},
@@ -95,7 +95,7 @@ func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 		// Empty name: a CommitRequest is created with generateName, so the one
 		// name worth pinning does not exist until the save that makes it.
 		{Group: "configbutler.ai", Version: "v1alpha3", Resource: "commitrequests", Namespace: deps.defaultNS},
-		{Group: "roompass.configbutler.ai", Version: "v1alpha1", Resource: "rooms", Namespace: deps.defaultNS, Name: cfg.RoomName},
+		{Group: "room-pass.koudijs.dev", Version: "v1alpha1", Resource: "rooms", Namespace: deps.defaultNS, Name: cfg.RoomName},
 	}
 
 	g := &gateway.Gateway{

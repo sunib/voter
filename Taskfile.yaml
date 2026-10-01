@@ -2,7 +2,7 @@
 #
 # Section 8 of the platform implementation plan asks for one consistent set of
 # commands -- `task setup`, `task lint`, `task test`, `task build` -- plus
-# component tasks such as `task room-pass:test`. This file is that vocabulary.
+# component tasks such as `task voter:test`. This file is that vocabulary.
 #
 # It is also the CI contract. The GitHub workflow in .github/workflows/ci.yml
 # does not know how to lint or test anything: it builds the container from
@@ -12,9 +12,6 @@
 version: '3'
 
 includes:
-  room-pass:
-    taskfile: ./room-pass/Taskfile.yaml
-    dir: ./room-pass
   voter:
     taskfile: ./voter/Taskfile.yaml
     dir: ./voter
@@ -42,7 +39,6 @@ tasks:
     desc: Install dependencies for every component
     cmds:
       - task: voter:deps
-      - task: room-pass:deps
       - task: frontend:deps
 
   lint:
@@ -54,10 +50,9 @@ tasks:
       - task: frontend:lint
 
   lint-golang:
-    desc: Lint both Go modules with golangci-lint (config in .golangci.yml)
+    desc: Lint the Go module with golangci-lint (config in .golangci.yml)
     cmds:
       - task: voter:lint
-      - task: room-pass:lint
 
   lint-dockerfiles:
     desc: Lint every Dockerfile with hadolint (config in .hadolint.yaml)
@@ -66,7 +61,7 @@ tasks:
       - .devcontainer/Dockerfile
       - '*/Dockerfile'
     cmds:
-      - hadolint .devcontainer/Dockerfile voter/Dockerfile room-pass/Dockerfile
+      - hadolint .devcontainer/Dockerfile voter/Dockerfile
 
   lint-actions:
     desc: Lint the GitHub Actions workflows with actionlint
@@ -83,25 +78,37 @@ tasks:
     desc: Run every component's tests
     cmds:
       - task: voter:test
-      - task: room-pass:test
       - task: frontend:test
 
-  test-integration:
-    desc: Run tests that need a real API server (envtest), but no cluster
-    cmds:
-      - task: room-pass:integration
+  # --- End-to-end fixture -----------------------------------------------------
+  #
+  # A disposable k3d cluster with Traefik, Dex, a RELEASED Room Pass and the
+  # Voter image built from this checkout. See test/e2e/up.sh; the Room Pass
+  # version it runs is pinned in test/e2e/room-pass/kustomization.yaml.
+  #
+  #   task e2e-up && task test-browser && task e2e-down
 
-  test-e2e:
-    desc: Run the Room Pass end-to-end suite against a local k3d cluster
-    # Not part of `task test` and not run by CI yet: it creates a k3d cluster,
-    # deploys Dex and Traefik and drives a real login. See room-pass/Taskfile.yaml.
+  e2e-up:
+    desc: Build and start the local end-to-end fixture (k3d cluster voter-e2e)
     cmds:
-      - task: room-pass:e2e
+      - bash test/e2e/up.sh
+
+  e2e-down:
+    desc: Delete only the fixture cluster and its Docker resources
+    cmds:
+      - bash test/e2e/down.sh
+
+  test-browser:
+    desc: Run the Playwright editor, stream and voting tests (requires task e2e-up)
+    dir: test/browser
+    cmds:
+      - npm ci
+      - npx playwright install --with-deps chromium
+      - npm test
 
   build:
     desc: Build every published container image locally (no push)
     cmds:
-      - task: image-room-pass
       - task: image-voter
 
   # --- Container images -------------------------------------------------------
@@ -113,15 +120,7 @@ tasks:
   #
   #   task image-voter                              # build, load into local docker
   #   task image-voter TAG=test PUSH=true           # build and push
-  #   task image-room-pass REGISTRY=zot.z65.nl IMAGE_OWNER=voter
-
-  image-room-pass:
-    desc: Build the Room Pass image (ghcr.io/sunib/room-pass)
-    cmds:
-      - task: image
-        vars:
-          NAME: room-pass
-          CONTEXT: ./room-pass
+  #   task image-voter REGISTRY=zot.z65.nl IMAGE_OWNER=voter
 
   image-voter:
     desc: Build the Voter application image (ghcr.io/sunib/voter)
@@ -195,14 +194,4 @@ tasks:
   clean:
     desc: Remove build output and task fingerprints
     cmds:
-      - rm -rf .task frontend/dist voter/bin room-pass/bin
-
-  test-network:
-    desc: Verify Dex pod isolation and permitted callers in a disposable cluster
-    cmds:
-      - task: room-pass:test-network
-
-  test-browser:
-    desc: Run Playwright room login tests (requires task room-pass:e2e-up)
-    cmds:
-      - task: room-pass:browser
+      - rm -rf .task frontend/dist voter/bin

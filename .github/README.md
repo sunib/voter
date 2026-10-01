@@ -41,22 +41,7 @@ locally with the command printed in its own log.
 
 Roughly in the order they earn their keep.
 
-### 1. Room Pass end-to-end suite in CI
-
-`task test-e2e` creates a k3d cluster, deploys Dex and Traefik and drives a real
-login, including the cross-host gate handoff. It is the check that matters most
-for stage 2 of the platform implementation plan, and right now nothing in CI
-runs it — the `test` job only covers unit tests, the frontend build and envtest.
-
-The work: a job that installs k3d on the runner (or runs it via the CI
-container's docker-outside-of-docker socket, as the `images` job already does),
-runs `task room-pass:e2e-up`, `task room-pass:e2e`, and tears down in an
-`if: always()` step. Budget for it being the slowest job by far, and for it being
-the flakiest — the reverser's e2e job is the model for how to keep it honest.
-
-Until this lands, "CI is green" does not mean a participant can actually log in.
-
-### 2. Image vulnerability scanning
+### 1. Image vulnerability scanning
 
 `trivy` is already in the CI container and unused. Missing before it can gate:
 
@@ -71,7 +56,7 @@ Until this lands, "CI is green" does not mean a participant can actually log in.
 Put the two-pass structure (report everything, then gate on a subset) in a
 `task scan-image`, not in workflow steps.
 
-### 3. Markdown and prose linting
+### 2. Markdown and prose linting
 
 `markdownlint-cli2` and `vale` are in the container and inert. This repository's
 existing documents have never been checked against either, so switching them on
@@ -79,7 +64,7 @@ today starts red — that is a documentation cleanup, not a CI task, and it shou
 be its own change. `vale` additionally needs a style under `.vale.ini` before it
 does anything at all.
 
-### 4. Retire the legacy backend paths
+### 3. Retire the legacy backend paths
 
 It is not published and not to be deployed again; it stays linted and tested only
 while its replacement is written. When section 7 of the plan is done and the
@@ -90,19 +75,14 @@ participant-ID-token paths have taken over:
   solely for its three leftover functions;
 - drop it from `dependabot.yml`, `task lint-dockerfiles` and the root Taskfile.
 
-### 5. Restore the two staticcheck checks
+### 4. Restore the staticcheck check
 
-Both waivers in [`.golangci.yml`](../.golangci.yml) name the condition for
-lifting them:
+The waiver in [`.golangci.yml`](../.golangci.yml) names the condition for
+lifting it: **ST1013** (numeric HTTP statuses) — lift after one sweep converting
+the call sites in `voter/` to `http.StatusX`. Enabling it before that gates on
+the arbitrary subset staticcheck happens to flag.
 
-- **ST1005** (capitalized error strings) — lift once Room Pass join errors carry
-  a separate user-facing message field instead of putting participant prose in
-  the error itself.
-- **ST1013** (numeric HTTP statuses) — lift after one sweep converting all ~50
-  call sites in `room-pass/internal/server` to `http.StatusX`. Enabling it before
-  that gates on the arbitrary subset staticcheck happens to flag.
-
-### 6. Frontend tests
+### 5. Frontend tests
 
 `task frontend:test` currently runs `npm run build`, which does type-check via
 `vue-tsc` — a real check, but not a test suite. When a runner lands (Vitest), put

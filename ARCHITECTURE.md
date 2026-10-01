@@ -236,8 +236,8 @@ remain protected, with no bypass route to the authproxy assertion endpoint. The
 standalone fixture routes issuer traffic through Room Pass; the shared platform also
 routes other connectors through Traefik. Preserve each topology's header sanitization,
 callback routing and network isolation instead of treating their manifests as interchangeable.
-See [handoff.md](room-pass/docs/handoff.md) for the protocol and
-[csp-form-action.md](room-pass/docs/csp-form-action.md) for browser redirect constraints.
+See [handoff.md](https://github.com/sunib/room-pass/blob/main/docs/handoff.md) for the protocol and
+[csp-form-action.md](https://github.com/sunib/room-pass/blob/main/docs/csp-form-action.md) for browser redirect constraints.
 
 A participant may also arrive by scanning the presenter's QR code, which encodes
 `/auth/login?code=<current>&return=<path>`. The destination rides in the Voter login
@@ -252,7 +252,7 @@ It is untrusted by construction: it becomes a prefill and is checked against the
 valid codes through the ordinary POST, so a forged one is a wrong code and a stale one is
 an expired code. Voter vouches for nothing it carries, holds none of Room Pass's keys,
 and never signs it. Room Pass keeps the typed path for anyone who cannot scan. The
-contract is in [qr-join.md](room-pass/docs/qr-join.md).
+contract is in [qr-join.md](https://github.com/sunib/room-pass/blob/main/docs/qr-join.md).
 
 A rejected code or name re-renders the join form with the reason on it and the offending
 field marked, rather than a dead-end error page: the code an audience mistypes is the

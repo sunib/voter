@@ -43,7 +43,8 @@ https://demo.koudijs.dev/auth/login?connector=github&return=%2Froom
 - [Authorization](docs/authorization.md): who can do what, and what is proven.
 - [Talk checklist](docs/talk-checklist.md): where authorization actually lives —
   application, RBAC and admission, and the honest limits of each.
-- [Room Pass](room-pass/README.md): the enrollment component and local fixture.
+- [Room Pass](https://github.com/sunib/room-pass): the enrollment component, its
+  own project since 2.0.0. Voter consumes its releases.
 - [Frontend](FRONTEND.md): UI design notes.
 
 Earlier design notes — the ForwardAuth/impersonation model, the `auth-service`
@@ -57,16 +58,17 @@ system that no longer exists.
 task setup             # install dependencies
 task lint              # Go, Dockerfiles, workflows, frontend
 task test              # Go tests plus frontend type-check/build
-task test-integration  # Room Pass API tests with envtest
-task test-network      # real Dex pod isolation in a disposable cluster (CI)
-task test-e2e          # local k3d + Dex + Traefik fixture; not in CI
+task e2e-up            # local k3d fixture: Traefik, Dex, released Room Pass, Voter
+task test-browser      # Chromium against that fixture (CI runs both)
+task e2e-down
 ```
 
 CI runs the same tasks in the repository's container. See [CI](docs/ci.md).
-It publishes `ghcr.io/sunib/room-pass` and `ghcr.io/sunib/voter`; Voter contains
-both `voter/` and the compiled `frontend/`.
+It publishes `ghcr.io/sunib/voter`, which contains both `voter/` and the compiled
+`frontend/`. `ghcr.io/sunib/room-pass` is published by
+[sunib/room-pass](https://github.com/sunib/room-pass), not from here.
 
 The application deployment is GitOps, owned by the Flux Kustomization `voter-demo`
 in the platform checkout at `external/k8s/k8s.koudijs.dev/2-gitops/voter-demo/`.
-Do not `kubectl apply` into the `voter` namespace. Room Pass keeps its own
-component manifests and disposable local fixture under `room-pass/`.
+Do not `kubectl apply` into the `voter` namespace. The Room Pass version the e2e
+fixture runs is pinned in [`test/e2e/room-pass/`](test/e2e/room-pass/kustomization.yaml).

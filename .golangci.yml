@@ -1,5 +1,5 @@
-# golangci-lint configuration for both Go modules in this repository
-# (voter/ and room-pass/). `task lint-golang` runs it, and CI runs the
+# golangci-lint configuration for the Go module in this repository (voter/).
+# `task lint-golang` runs it, and CI runs the
 # same task inside the CI container — so a failure here is reproducible with
 # one command locally.
 #
@@ -16,12 +16,11 @@ linters:
 
   settings:
     staticcheck:
-      # "all" minus two style checks that fight this codebase on purpose.
-      # golangci-lint's default list, minus two more. The ST10xx entries other
-      # than ours are staticcheck's own defaults: they are doc-comment style
-      # checks (ST1000 package comments, ST1021 "comment on exported type X
-      # should begin with X"), and ST1021 in particular misreads the kubebuilder
-      # markers above every type in room-pass/api/v1alpha1 as the doc comment.
+      # "all" minus a style check that fights this codebase on purpose:
+      # golangci-lint's default list, minus one more. The ST10xx entries other
+      # than ours are staticcheck's own defaults: doc-comment style checks
+      # (ST1000 package comments, ST1021 "comment on exported type X should
+      # begin with X").
       checks:
         - all
         - "-ST1000"
@@ -30,17 +29,10 @@ linters:
         - "-ST1020"
         - "-ST1021"
         - "-ST1022"
-        # ST1005: "error strings should not be capitalized / end with punctuation".
-        # Room Pass writes participant-facing prose into its errors and renders it
-        # straight into the response (`http.Error(w, e.Error(), 403)` in
-        # internal/server/server.go). "That code is invalid or joining has closed."
-        # is a sentence shown to a person at a conference, not a wrapped Go error.
-        # Re-enable once join errors carry a separate user-message field.
-        - "-ST1005"
         # ST1013: "use http.StatusX instead of the numeric literal". The handlers
-        # write numeric statuses consistently (~50 call sites); staticcheck only
-        # flags a handful of them, so enabling this gates on an arbitrary subset
-        # while the file stays mixed. Convert them in one sweep, then drop this line.
+        # write numeric statuses consistently; staticcheck only flags a handful
+        # of them, so enabling this gates on an arbitrary subset while the code
+        # stays mixed. Convert them in one sweep, then drop this line.
         - "-ST1013"
 
   exclusions:
@@ -52,12 +44,6 @@ linters:
       - path: _test\.go
         linters: [errcheck]
         text: "Error return value of `.*\\.Close` is not checked"
-
-      # room-pass/test/e2e/demo-client is a throwaway OIDC client that only exists
-      # inside the e2e cluster. It is exercised end-to-end by test/e2e, never
-      # shipped, and holds no state worth a lint gate.
-      - path: test/e2e/demo-client/
-        linters: [errcheck]
 
       # voter is mid-migration: section 7 of the platform implementation
       # plan replaces its impersonation paths with participant ID tokens, and
