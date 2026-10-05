@@ -389,10 +389,10 @@ Three defects the talk surfaced, written up in
 [docs/post-demo-2026-09-17.md](docs/post-demo-2026-09-17.md). Two of them were
 never reported by anyone in the room, which is the fourth finding.
 
-All five are done. What is NOT done is deploying them: the running image is
-still `sha-b8beaca`, which carries every defect below. See
-[docs/databases-cutover.md](docs/databases-cutover.md) -- the same cutover, now
-with five more reasons to do it.
+All five are done and deployed: they went out on 2026-09-21 as `sha-26c52b3`,
+in cutover step 3 of [docs/databases-cutover.md](docs/databases-cutover.md).
+The audience numbers are in
+[docs/demo-2026-09-17-report.md](docs/demo-2026-09-17-report.md).
 
 - [x] **A ballot pins the round's `uid` and `generation`, not its
       `resourceVersion`.** The tally controller patches `quizsessions/status` on
@@ -400,28 +400,28 @@ with five more reasons to do it.
       `generation`, so the old check refused a ballot from every phone whose page
       predated the last tally. Measured on the idle cluster four days later: the
       rounds are rewritten every sixty seconds with nothing happening.
-      Done in `bd37c2c`.
+      Done in `17bbd90`.
 - [x] **A save conflict recovers by itself when the edits do not overlap.** ~60
       people edit one `CoffeeConfig`; 26 saves landed in six minutes, three pairs
       of them in the same second. The loser got the API server's sentence about
       the *latest version* verbatim, which is what the room reported. A genuine
       field-level overlap still stops and shows the conflict -- that beat is the
       demo -- but a bare collision should not.
-      Done in `313e82d`.
+      Done in `ad0ad0c`.
 - [x] **Dark mode.** PrimeVue 4 defaults to `darkModeSelector: 'system'` and the
       token block flips, but ~10 hardcoded light surfaces in `style.css` and ~22
       `text-black/*` / `bg-white` utilities do not. The answer-option rows read at
       1.18:1 and the error panel at 1.06:1. Tokens, plus a CI check so the next
       component cannot reintroduce it.
-      Done in `a9a99db`.
+      Done in `3fd770b`.
 - [x] **Log every refusal.** The backend logs each order and each login and not
       one refused vote or save, so both defects above had to be reconstructed from
       `creationTimestamp`s four days later.
-      Done in `584032e`.
+      Done in `aa4ef26`.
 - [x] **Only patch the tally when it changed.** The sixty-second heartbeat write
       is harmless once ballots stop pinning `resourceVersion`, but it still wakes
       every watcher in the room for a timestamp. Cost, not correctness.
-      Done in `0227c16`.
+      Done in `b06c471`.
 
 ## 6. Retained platform work
 
