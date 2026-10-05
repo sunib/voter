@@ -70,12 +70,48 @@ jobs:
       contents: write
       pull-requests: write
     outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-      version: ${{ steps.release.outputs.version }}
+      release_created: ${{ steps.release.outputs.release_created || steps.cut.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name || steps.cut.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version || steps.cut.outputs.version }}
     steps:
       - name: Run release-please
         id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # The release pull request is merged here, not by a person. It used to
+      # wait for one, and 1.2.0 sat unmerged for nine days while the cluster ran
+      # 1.1.0 against an API group that no longer existed. Its only content is
+      # the changelog and the version number, both derived from commits that
+      # just went green, so a human click adds delay and nothing else. The gate
+      # that matters is still above: this job never runs past a red build, and a
+      # major never deploys because Flux follows the 1.x range.
+      #
+      # A merge made with GITHUB_TOKEN triggers no workflow, so nothing would
+      # ever come back to tag it. Hence the second release-please run right
+      # after: it finds the merged pull request and cuts the release now.
+      - name: Merge the release pull request
+        id: merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          PR="$(gh pr list --repo "$REPO" --state open --base main \
+            --label 'autorelease: pending' --json number --jq '.[0].number // empty')"
+          if [ -z "$PR" ]; then
+            echo "No release pull request open; nothing to merge."
+            exit 0
+          fi
+          gh pr merge "$PR" --repo "$REPO" --squash
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+
+      - name: Cut the release
+        id: cut
+        if: steps.merge.outputs.merged == 'true'
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
