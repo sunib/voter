@@ -13,7 +13,7 @@ const gateway = execFileSync(
 ).trim();
 export default defineConfig({
   testDir: ".",
-  testMatch: /(live-stream|voting|operator)\.spec\.js/,
+  testMatch: /\.spec\.js$/,
   workers: 1,
   fullyParallel: false,
   timeout: 45000,
