@@ -223,7 +223,9 @@ func (r *quizReconciler) reconcile(ctx context.Context, round string) error {
 	if err != nil {
 		return err
 	}
-	status := tallyRound(round, spec.Questions, cachedObjects(r.ballots)).status(cached.GetGeneration(), r.now())
+	now := r.now()
+	status := tallyRound(cached, spec.Questions, cachedObjects(r.ballots)).status(cached.GetGeneration(), now)
+	status.OpenedAt, status.ClosedAt = roundTimes(spec.State, cached, now)
 	// A status write is not free to anyone watching. It moves the object's
 	// resourceVersion, which pushes an event down every open stream -- two
 	// hundred phones, for a round nobody is voting in. lastTallyTime moves on
@@ -277,6 +279,15 @@ func sameTally(cached *unstructured.Unstructured, next quizStatus) bool {
 			return nil, false
 		}
 		delete(out, "lastTallyTime")
+		// A null in the proposed status is a field the merge patch REMOVES, so
+		// the stored side has no key at all: closedAt on an open round, openedAt
+		// on one never seen live. Compared as written they differ for ever, and a
+		// closed round is rewritten on every resync.
+		for key, value := range out {
+			if value == nil {
+				delete(out, key)
+			}
+		}
 		return out, true
 	}
 	current, currentOK := normalized(stored)

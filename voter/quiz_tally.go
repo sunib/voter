@@ -11,6 +11,8 @@ package main
 // buys; quiz_tally_test.go pins it.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -54,24 +56,63 @@ func ballotSubmittedAt(ballot *unstructured.Unstructured) time.Time {
 	return at
 }
 
+// questionsDigest names a round's questions, so a ballot can say which ones it
+// answered.
+//
+// Not metadata.generation. state lives in the round's spec, so opening and
+// closing a round each move the generation: a ballot that pinned it would stop
+// matching the moment the round closed, which is exactly when it is counted.
+// The vote handler gets away with comparing generations because it does so at
+// vote time; anything checked later -- this tally, an admission policy reading
+// the round -- needs a name for the questions alone.
+//
+// The digest is computed here, from the decoded questions, and published in the
+// round's status. A ballot copies that value rather than computing its own, so
+// no second implementation has to reproduce Go's JSON encoding byte for byte.
+func questionsDigest(questions []quizQuestion) string {
+	encoded, _ := json.Marshal(questions)
+	sum := sha256.Sum256(encoded)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// ballotPinned reports whether a ballot was cast against this very round and
+// these very questions -- as far as it says.
+//
+// The two pins are spec.roundUID and spec.questionsDigest. The vote handler
+// writes both. A ballot without them is counted as before: the "Casting your
+// own answers" interlude pastes ballots by hand, and a pasted ballot has no
+// reason to know a UID. Each pin that IS present has to match, so a ballot for
+// a deleted round never counts for its same-named successor, and one cast
+// against since-edited questions is filed but not counted.
+func ballotPinned(ballot *unstructured.Unstructured, roundUID, digest string) bool {
+	uid, hasUID, _ := unstructured.NestedString(ballot.Object, "spec", "roundUID")
+	pinned, hasDigest, _ := unstructured.NestedString(ballot.Object, "spec", "questionsDigest")
+	return (!hasUID || uid == roundUID) && (!hasDigest || pinned == digest)
+}
+
 // quizTally is one round's result: how many ballots carry its name, how many of
 // those counted, and the per-question numbers.
 //
 // filed and counted differ when a ballot fails validateQuizAnswers -- a
 // hand-written one naming a question id that has since been edited, which is
-// exactly what "Casting your own answers" risks. Showing both makes a dropped
-// vote visible instead of silent.
+// exactly what "Casting your own answers" risks -- or when its pins name another
+// round or other questions. Showing both makes a dropped vote visible instead of
+// silent.
 type quizTally struct {
 	Filed     int
 	Counted   int
 	Questions []quizResult
+	// The digest the pins were checked against, published in status for the
+	// next ballot to copy.
+	QuestionsDigest string
 }
 
 // tallyRound counts every ballot cast in round, whoever cast it.
 //
 // ballots is the whole namespace; the filter is here rather than in a label
 // selector so there is one selection rule and both readers obey it.
-func tallyRound(round string, questions []quizQuestion, ballots []*unstructured.Unstructured) quizTally {
+func tallyRound(roundObj *unstructured.Unstructured, questions []quizQuestion, ballots []*unstructured.Unstructured) quizTally {
+	round, roundUID, digest := roundObj.GetName(), string(roundObj.GetUID()), questionsDigest(questions)
 	results := make([]quizResult, len(questions))
 	for i, q := range questions {
 		results[i] = quizResult{Question: q, Choices: map[string]int{}, Text: []string{}}
@@ -91,8 +132,11 @@ func tallyRound(round string, questions []quizQuestion, ballots []*unstructured.
 		}
 		return strings.Compare(a.GetName(), b.GetName())
 	})
-	tally := quizTally{Filed: len(cast), Questions: results}
+	tally := quizTally{Filed: len(cast), Questions: results, QuestionsDigest: digest}
 	for _, ballot := range cast {
+		if !ballotPinned(ballot, roundUID, digest) {
+			continue
+		}
 		var data struct {
 			Answers []quizAnswer `json:"answers"`
 		}
@@ -137,6 +181,53 @@ type quizStatus struct {
 	Filed         int                  `json:"filed"`
 	Counted       int                  `json:"counted"`
 	Questions     []quizStatusQuestion `json:"questions"`
+	// What a ballot copies into spec.questionsDigest. See questionsDigest.
+	QuestionsDigest string `json:"questionsDigest"`
+	// When Voter SAW the round open and close: see roundTimes. Pointers without
+	// omitempty, so that nil is written as null and a merge patch removes the
+	// field -- which is how a reopened round loses its closedAt.
+	OpenedAt *string `json:"openedAt"`
+	ClosedAt *string `json:"closedAt"`
+}
+
+// roundTimes carries a round's openedAt and closedAt forward from its stored
+// status, moving them on what the round's state is now.
+//
+// openedAt is set the first time the round is seen live and then kept, through
+// a close and a reopen, because reopening keeps the votes already cast.
+// closedAt is set when the round is seen closed and cleared when it is seen
+// live again.
+//
+// Both are when VOTER OBSERVED the change, not when it was made. Voter learns a
+// round's state by watching it, so a change made while Voter is down -- an image
+// bump rolls it mid-round -- is stamped on the way back up. That is why they are
+// status for people to read and are not a counting rule: a rule of "created
+// after openedAt" would drop every vote cast before such a restart. Refusing a
+// ballot outside the live window belongs at the moment it is created, which is
+// the vote handler today and an admission policy next
+// (docs/quiz-admission.md).
+func roundTimes(state string, stored *unstructured.Unstructured, at time.Time) (opened, closed *string) {
+	carried := func(field string) *string {
+		value, found, _ := unstructured.NestedString(stored.Object, "status", field)
+		if !found || value == "" {
+			return nil
+		}
+		return &value
+	}
+	now := at.UTC().Format(time.RFC3339)
+	opened, closed = carried("openedAt"), carried("closedAt")
+	switch state {
+	case "live":
+		if opened == nil {
+			opened = &now
+		}
+		closed = nil
+	case "closed":
+		if closed == nil {
+			closed = &now
+		}
+	}
+	return opened, closed
 }
 
 func (t quizTally) status(generation int64, at time.Time) quizStatus {
@@ -161,5 +252,6 @@ func (t quizTally) status(generation int64, at time.Time) quizStatus {
 		Filed:              t.Filed,
 		Counted:            t.Counted,
 		Questions:          questions,
+		QuestionsDigest:    t.QuestionsDigest,
 	}
 }

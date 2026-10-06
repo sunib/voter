@@ -59,12 +59,29 @@ spec:
                     name:
                       type: string
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                roundUID:
+                  type: string
+                  maxLength: 64
+                  description: >-
+                    The metadata.uid of the round this ballot was cast in. Optional:
+                    a ballot written by hand need not know it. When present it must
+                    match, or the ballot is filed but not counted -- so a ballot never
+                    counts for a round recreated under the same name.
+                questionsDigest:
+                  type: string
+                  pattern: ^sha256:[0-9a-f]{64}$
+                  description: >-
+                    The round's status.questionsDigest when this ballot was cast,
+                    naming the questions it answered. Optional, like roundUID; when
+                    present it must match the round's current questions.
                 submittedAt:
                   type: string
                   format: date-time
                 answers:
                   type: array
-                  maxItems: 100
+                  # A round has at most 25 questions (quizsessions.yaml), and a
+                  # ballot answers each once at most.
+                  maxItems: 25
                   x-kubernetes-list-type: map
                   x-kubernetes-list-map-keys:
                     - questionId

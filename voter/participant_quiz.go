@@ -30,7 +30,8 @@ var quizSubmissions = schema.GroupVersionResource{Group: "examples.configbutler.
 // is written up, with what keeps it closed and how to recover, as entry 1 of
 // docs/deliberate-simplifications.md. Staleness is unaffected: the vote handler
 // pins the round's uid and generation, which catches a recreated round as surely
-// as an edited one.
+// as an edited one, and the ballot carries the round's uid (spec.roundUID) so the
+// tally no longer counts it for a successor -- see ballotPinned.
 const (
 	roundLabel     = "voter.configbutler.ai/round"
 	submitterLabel = "voter.configbutler.ai/submitter"
@@ -275,7 +276,18 @@ func registerParticipantQuizHandlers(mux *http.ServeMux, deps handlerDeps) {
 		obj := &unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": "examples.configbutler.ai/v1alpha1", "kind": "QuizSubmission",
 			"metadata": map[string]any{"name": name, "namespace": deps.defaultNS, "labels": map[string]any{roundLabel: round.GetName(), submitterLabel: s.DisplayName}},
-			"spec":     map[string]any{"sessionRef": map[string]any{"group": quizSessions.Group, "kind": "QuizSession", "name": round.GetName()}, "submittedAt": time.Now().UTC().Format(time.RFC3339), "answers": answerObjects},
+			// roundUID and questionsDigest restate, on the ballot itself, the two
+			// checks made just above, so the tally can repeat them after the round
+			// has moved on -- see ballotPinned. The digest is computed from the
+			// round in hand rather than read from its status, which the reconciler
+			// may not have written yet for a round that has only just opened.
+			"spec": map[string]any{
+				"sessionRef":      map[string]any{"group": quizSessions.Group, "kind": "QuizSession", "name": round.GetName()},
+				"roundUID":        string(round.GetUID()),
+				"questionsDigest": questionsDigest(spec.Questions),
+				"submittedAt":     time.Now().UTC().Format(time.RFC3339),
+				"answers":         answerObjects,
+			},
 		}}
 		_, err = clients.dynamic.Resource(quizSubmissions).Namespace(deps.defaultNS).Create(ctx, obj, metav1.CreateOptions{})
 		if apierrors.IsAlreadyExists(err) {
@@ -376,7 +388,7 @@ func registerParticipantQuizHandlers(mux *http.ServeMux, deps handlerDeps) {
 		}
 		// The same counter the reconciler writes into status, so the Refresh
 		// button and the projector cannot disagree.
-		tally := tallyRound(round.GetName(), spec.Questions, ballots)
+		tally := tallyRound(round, spec.Questions, ballots)
 		// total stays counted, not filed: it is what this endpoint has always
 		// meant, and the two numbers are told apart on the round's status.
 		writeJSON(w, 200, map[string]any{"round": round, "total": tally.Counted, "filed": tally.Filed, "questions": tally.Questions})

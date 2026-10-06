@@ -140,7 +140,28 @@ spec:
                   type: integer
                   description: >-
                     Of those, how many passed validation. Lower than filed when a
-                    hand-written ballot names a question that does not exist.
+                    hand-written ballot names a question that does not exist, or a
+                    ballot's roundUID or questionsDigest does not match this round.
+                questionsDigest:
+                  type: string
+                  description: >-
+                    A sha256 of spec.questions, which a ballot copies into its own
+                    spec.questionsDigest. Not metadata.generation: state is in the
+                    spec, so opening and closing move the generation, and the
+                    digest has to survive both.
+                openedAt:
+                  type: string
+                  format: date-time
+                  description: >-
+                    When Voter first saw this round live. Kept through a close and a
+                    reopen. Observed, not exact: a change made while Voter is down is
+                    stamped when it comes back, so this is for reading, not counting.
+                closedAt:
+                  type: string
+                  format: date-time
+                  description: >-
+                    When Voter saw this round closed. Removed when it is seen live
+                    again. Observed, like openedAt.
                 questions:
                   type: array
                   # Atomic, not a map: one writer replaces the whole tally, and a

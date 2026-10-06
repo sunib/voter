@@ -38,6 +38,13 @@ get is already taken.
 
 Keying on `metadata.uid` prevented exactly that, and nothing else.
 
+Half of that is closed again without giving up the name. A ballot cast through the
+application also carries the round's UID in `spec.roundUID`, and the tally files
+but does not count a ballot whose UID is someone else's. So the old round's votes
+no longer move the new round's bars. The other half stays: their names are still
+taken, so those people still cannot vote again until the stale ballots are
+deleted. A ballot pasted by hand, without `spec.roundUID`, is counted as before.
+
 **What keeps it closed.** The convention stated in the first line of the round
 manifest: **a new `metadata.name` for every session, one per talk.** A round name
 carries its date for this reason. The failure needs someone to delete a round and
