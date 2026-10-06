@@ -14,6 +14,8 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
+import { loginURL } from '../api/session'
+
 const route = useRoute()
 const failed = ref(false)
 // Arriving here from the sign-out button, rather than from a guard. The
@@ -22,25 +24,13 @@ const failed = ref(false)
 // sign-out would look broken. Say what happened and let them choose.
 const signedOut = computed(() => route.query.signedout === '1')
 
-function loginUrl(): string {
-  const params = new URLSearchParams()
-  const next = typeof route.query.next === 'string' ? route.query.next : ''
-  // Only same-site paths: a full URL here would turn login into an open
-  // redirect. The backend validates this again.
-  if (next.startsWith('/') && !next.startsWith('//')) {
-    params.set('return', next)
-  }
+function go() {
+  // loginURL keeps only a same-site path, so this cannot become an open
+  // redirect; krm-foyer validates it again.
+  const next = typeof route.query.next === 'string' ? route.query.next : '/'
   const connector =
     typeof route.query.connector === 'string' ? route.query.connector : ''
-  if (connector !== '') {
-    params.set('connector', connector)
-  }
-  const query = params.toString()
-  return query === '' ? '/auth/login' : `/auth/login?${query}`
-}
-
-function go() {
-  window.location.assign(loginUrl())
+  window.location.assign(loginURL(next, connector))
 }
 
 onMounted(() => {
@@ -66,8 +56,8 @@ onMounted(() => {
     <template v-if="signedOut">
       <h1>Signed out</h1>
       <p>
-        The application's session cookie is gone. Your Dex login and your Room
-        Pass enrolment are not — this demo cannot revoke either — so signing in
+        The application's session cookie is gone. Your Dex login is not, and
+        neither is a Room Pass enrolment — this demo cannot revoke either — so signing in
         again will normally return you to the same participant without a code.
       </p>
       <p>

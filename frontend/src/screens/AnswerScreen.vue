@@ -12,7 +12,7 @@ import SubmitBar from '../components/submission/SubmitBar.vue'
 import type { QuizSession } from '../api/types'
 import { useDraftSubmissionStore } from '../stores/draftSubmission'
 import { createQuizSubmission, getQuizSession } from '../api/quiz'
-import { currentSession, getSession } from '../api/session'
+import { canVote, currentSession, getSession } from '../api/session'
 import { appConfig } from '../api/appConfig'
 
 async function isSignedOut(): Promise<boolean> {
@@ -33,7 +33,8 @@ const draft = useDraftSubmissionStore()
 const busy = ref(false)
 const voted = ref(false)
 
-/** Whether this session may cast a ballot, answered by the backend.
+/** Whether this session may cast a ballot: a login through the deployment's
+ *  participant connector (session.ts, canVote).
  *
  *  A ref set while the round loads, NOT a computed over currentSession():
  *  currentSession() reads a plain module variable, so a computed over it takes
@@ -42,7 +43,7 @@ const voted = ref(false)
  *  this screen came to show "you cannot vote" to participants who could.
  *
  *  It defaults to true so a slow session never flashes a refusal at someone who
- *  is allowed; the backend is the control, and this is only the courtesy. */
+ *  is allowed; admission is the control, and this is only the courtesy. */
 const mayVote = ref(true)
 const submitError = ref<string | null>(null)
 const loadError = ref<string | null>(null)
@@ -93,8 +94,8 @@ watch(
       round.value = view.round
       voted.value = view.voted
       // Read here, where the router guard has already refreshed the session.
-      mayVote.value = currentSession()?.canVote ?? true
-      draft.load(`${currentSession()?.username}:${round.value?.metadata.uid}`)
+      mayVote.value = canVote(currentSession())
+      draft.load(`${currentSession()?.subject}:${round.value?.metadata.uid}`)
     } catch (e: any) {
       const status = e?.status
       if ((status === 401 || status === 403) && (await isSignedOut())) {

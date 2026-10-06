@@ -21,6 +21,7 @@ import { leafChanges } from '../api/fieldChanges'
 import { formatConflictValue } from '../adminFormatters'
 import { useLiveDatabase } from '../api/liveDatabase'
 import { appConfig } from '../api/appConfig'
+import { loginURL } from '../api/session'
 import { commitURL, shortSha, useCommitStatus } from '../api/commitStatus'
 
 const props = defineProps<{ name: string }>()
@@ -233,7 +234,7 @@ onBeforeUnmount(() => {
       <a
         v-if="state.status === 'terminal'"
         class="button"
-        href="/auth/login?return=%2Fdatabases"
+        :href="loginURL('/databases')"
         >Sign in again</a
       >
       <button

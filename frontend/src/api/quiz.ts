@@ -1,24 +1,13 @@
 import type { QuizSession, QuizSessionSpec, QuizSubmission } from './types'
-import { currentCsrfToken } from './session'
+import { requestJson } from './http'
 
-async function request<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`/public/rounds${path}`, {
-    method: body === undefined ? 'GET' : 'POST',
-    credentials: 'include',
-    headers: {
-      'content-type': 'application/json',
-      'x-csrf-token': currentCsrfToken(),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
-  const data = await res.json()
-  if (!res.ok)
-    throw Object.assign(
-      new Error(data.error ?? data.message ?? `Request failed (${res.status})`),
-      { status: res.status, code: data.code },
-    )
-  return data as T
-}
+const request = <T>(path: string, body?: unknown) =>
+  requestJson<T>(
+    `/public/rounds${path}`,
+    body === undefined
+      ? undefined
+      : { method: 'POST', body: JSON.stringify(body) },
+  )
 export const listRounds = () => request<{ items: QuizSession[] }>('')
 export interface RoundView {
   round: QuizSession

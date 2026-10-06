@@ -13,28 +13,33 @@ import AuthorizationTable from '../components/AuthorizationTable.vue'
 import { useAuthorization } from '../api/useAuthorization'
 import {
   currentSession,
+  canVote,
   getSession,
   logout,
   type Session,
 } from '../api/session'
+import { getWhoAmI, type WhoAmI } from '../api/whoami'
 
 const router = useRouter()
 // Polled, not fetched once: an operator can widen the audience's grant while
 // this page is open, and the row that changes should change here too.
 const { authz, error: authzError, loading: authzLoading } = useAuthorization()
 const session = ref<Session | null>(currentSession())
+const whoami = ref<WhoAmI | null>(null)
 const signingOut = ref(false)
 const signOutError = ref('')
 
 const displayName = computed(() => session.value?.displayName?.trim() ?? '')
 const initial = computed(() => displayName.value.slice(0, 1) || '?')
-const kubeUsername = computed(() => session.value?.username?.trim() ?? '')
+const kubeUsername = computed(
+  () => whoami.value?.userInfo.username?.trim() ?? '',
+)
 
-function formatExpiry(epochSeconds: number): string {
-  if (!epochSeconds) {
+function formatExpiry(timestamp: string): string {
+  const when = new Date(timestamp)
+  if (timestamp === '' || Number.isNaN(when.getTime())) {
     return 'unknown'
   }
-  const when = new Date(epochSeconds * 1000)
   const minutes = Math.round((when.getTime() - Date.now()) / 60000)
   const left =
     minutes <= 0
@@ -55,8 +60,8 @@ function abbreviate(token: string): string {
     : `${token.slice(0, 6)}… (${token.length} chars)`
 }
 
-// Every field /auth/session hands this browser, in the order the endpoint
-// returns them. Built as data rather than markup so adding a field to the
+// Every field krm-foyer's /auth/session hands this browser, in the order the
+// endpoint returns them. Built as data rather than markup so adding a field to the
 // response is one line here, not a new row of template.
 const technicalFacts = computed(() => {
   const s = session.value
@@ -65,24 +70,34 @@ const technicalFacts = computed(() => {
   }
   return [
     { label: 'authenticated', value: String(s.authenticated) },
-    { label: 'username', value: s.username || '(the review failed)' },
-    { label: 'displayName', value: s.displayName },
+    { label: 'issuer', value: s.issuer || '(none)' },
+    { label: 'subject', value: s.subject || '(none)' },
     { label: 'email', value: s.email || '(none)' },
+    { label: 'displayName', value: s.displayName },
     {
       label: 'groups',
       value: s.groups.length ? s.groups.join(', ') : '(none)',
     },
-    { label: 'csrfToken', value: abbreviate(s.csrfToken) },
+    { label: 'connector', value: s.connector || '(none)' },
     { label: 'expiresAt', value: formatExpiry(s.expiresAt) },
+    { label: 'csrfToken', value: abbreviate(s.csrfToken) },
+    { label: 'csrfHeader', value: s.csrfHeader || '(none)' },
   ]
 })
 
 async function signOut() {
-  const token = session.value?.csrfToken ?? ''
+  const fromRoomPass = canVote(session.value)
   signingOut.value = true
   signOutError.value = ''
   try {
-    await logout(token)
+    await logout()
+    // Room Pass keeps its own session, and its sign-out is a form only its
+    // /join page can post. A participant is sent there: it shows who they are
+    // enrolled as, and the button that ends that too.
+    if (fromRoomPass) {
+      window.location.assign('/join')
+      return
+    }
     // Not a router push to "/": the guard would send it to /login, which takes
     // itself straight back to /auth/login, and Dex would hand the same
     // identity back before anyone read anything. The signed-out screen is the
@@ -98,6 +113,9 @@ async function signOut() {
 
 onMounted(async () => {
   session.value = await getSession()
+  // Its own request, and allowed to fail on its own: the page is still worth
+  // showing without the Kubernetes name, which then reads as missing.
+  whoami.value = await getWhoAmI().catch(() => null)
 })
 </script>
 
@@ -142,9 +160,9 @@ onMounted(async () => {
       </div>
       <p class="hero-copy">
         Every field <code class="inline-code">/auth/session</code> returned,
-        under its own key names. Kubernetes authorizes
-        <code class="inline-code">username</code>, not your display name; for a
-        room participant that is Dex's opaque subject — deliberately so, since
+        under its own key names. Kubernetes authorizes neither of the names
+        here: it authorizes the username in the answer below, which for a room
+        participant is built from Dex's opaque subject — deliberately so, since
         nobody can collide with it by typing your name into the join form.
       </p>
       <dl class="tech-facts">
@@ -159,7 +177,7 @@ onMounted(async () => {
       </dl>
       <p class="tech-facts__links">
         <a href="/auth/whoami" target="_blank" rel="noopener">
-          Your login object as YAML
+          Who Kubernetes takes you to be
           <i class="pi pi-external-link" aria-hidden="true" />
         </a>
         <a href="/auth/session" target="_blank" rel="noopener">
@@ -168,7 +186,7 @@ onMounted(async () => {
         </a>
       </p>
       <p class="hero-copy">
-        The YAML is a live SelfSubjectReview: the API server answering, with
+        That is a live SelfSubjectReview: the API server answering, with
         your token, about your token. There is no stored login object to read —
         an identity in Kubernetes is derived per request, never persisted — so
         that answer is the closest thing to one that exists.
@@ -190,12 +208,10 @@ onMounted(async () => {
         :loading="authzLoading"
         :error="authzError"
       />
-      <p class="tech-facts__links">
-        <a href="/auth/rules?as=yaml" target="_blank" rel="noopener">
-          The same answer as YAML
-          <i class="pi pi-external-link" aria-hidden="true" />
-        </a>
-      </p>
+      <details v-if="authz" class="raw-answer">
+        <summary>The same answer, as the API server returned it</summary>
+        <pre>{{ JSON.stringify(authz.review, null, 2) }}</pre>
+      </details>
       <p class="hero-copy">
         This refreshes by itself. If someone with the rights to change it grants
         you something while you are looking, the row appears here within a few
@@ -215,7 +231,8 @@ onMounted(async () => {
         This clears the application's session cookie and nothing else. Your Dex
         login and your Room Pass enrolment stay where they are, so signing in
         again normally brings you straight back as the same participant, with no
-        code to type.
+        code to type. Room Pass then shows you its own page, with its own button
+        to end the enrolment in this browser too.
       </p>
       <p class="sign-out__copy">
         <strong>Normally.</strong> If the room has been stopped, enrolment has

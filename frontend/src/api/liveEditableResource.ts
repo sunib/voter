@@ -1,7 +1,8 @@
 import { computed, onScopeDispose, ref, shallowRef } from 'vue'
 import {
   LiveResourceStore,
-  connectManagedResourceStream,
+  applyStreamEvent,
+  connectResourceStream,
   regionPolicy,
   readOnlyPolicy,
   resourceStreamURL,
@@ -10,8 +11,8 @@ import {
   type Conflict,
   type ConnectionState,
   type KRMObject,
-  type ManagedStreamHandle,
   type Path,
+  type ResourceStreamHandle,
   type SaveRequest,
 } from '@configbutler/krm-stream'
 import type { ApiError } from './coffee'
@@ -109,9 +110,10 @@ export function useLiveEditableResource<T>(
   const recoveryDraft = shallowRef<T | null>(null)
   const needsRead = ref(false)
   let disposed = false
-  let handle: ManagedStreamHandle | undefined
+  let handle: ResourceStreamHandle | undefined
   let recoveryTimer: ReturnType<typeof setTimeout> | undefined
-  const url = resourceStreamURL('/public/stream', scope)
+  // krm-foyer's stream, watched as this person or through its shared watch.
+  const url = resourceStreamURL('/stream/v1', scope)
   const available = () => !!uid.value && store.ids().includes(uid.value)
   const synced = computed(() => state.value.status === 'live')
   const canSave = computed(
@@ -154,25 +156,40 @@ export function useLiveEditableResource<T>(
     recoveryDraft.value = changes.value.length ? next : null
   }
   const stop = store.subscribe(refresh)
+  function showState(next: Readonly<ConnectionState>) {
+    state.value = next
+    if (
+      next.status === 'live' &&
+      /^(UNAUTHENTICATED|FORBIDDEN|UPSTREAM_UNAVAILABLE|INTERNAL):/.test(
+        error.value,
+      )
+    )
+      error.value = ''
+  }
   function connect() {
-    handle = connectManagedResourceStream(url, store, {
-      onStateChange(next) {
-        state.value = next
-        if (
-          next.status === 'live' &&
-          /^(UNAUTHENTICATED|FORBIDDEN|UPSTREAM_UNAVAILABLE|INTERNAL):/.test(
-            error.value,
-          )
-        )
-          error.value = ''
+    // Synchronous on purpose: the library publishes `live` after this returns,
+    // so the snapshot is in the store by then (krm-stream docs/migrating.md).
+    const connection = connectResourceStream(
+      url,
+      (event) => {
+        flashed.value = applyStreamEvent(store, event).flashed
       },
-      onChange(change) {
-        flashed.value = change.flashed
+      {
+        onError(code, message, terminal) {
+          if (terminal) error.value = `${code}: ${message}`
+        },
       },
-      onError(code, message, terminal) {
-        if (terminal) error.value = `${code}: ${message}`
-      },
-    })
+    )
+    handle = connection
+    showState(connection.state)
+    const unsubscribe = connection.subscribe(showState)
+    // A throw in the callbacks above ends the stream; say so on the page rather
+    // than leave an unhandled rejection and a screen that looks connected.
+    void connection.closed
+      .catch((cause: unknown) => {
+        if (!disposed) error.value = (cause as Error).message
+      })
+      .finally(unsubscribe)
   }
   connect()
   async function reconnect() {
