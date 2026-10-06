@@ -10,8 +10,8 @@
 # Everything lives in the `voter` namespace, beside the app, as on
 # k8s.koudijs.dev. Hosts are *.voter.test, published on 19443 -- not 18443,
 # which Room Pass's own fixture holds, and the two often run side by side:
-#   app.voter.test    the Voter application
-#   join.voter.test   Room Pass's join page
+#   app.voter.test    the Voter application, and Room Pass's /join, /bind and
+#                     /logout on the same host, as on demo.koudijs.dev
 #   login.voter.test  the issuer: Room Pass in front of Dex
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -21,7 +21,7 @@ cluster=voter-e2e
 network="k3d-${cluster}"
 # Dedicated cluster and kubeconfig; never switch the user's current context.
 if ! k3d cluster list -o json | python3 -c 'import json,sys;sys.exit(not any(c["name"]=="voter-e2e" for c in json.load(sys.stdin)))'; then
-  openssl req -x509 -newkey rsa:2048 -nodes -keyout .local/tls.key -out .local/tls.crt -days 7 -subj /CN=voter-test -addext 'subjectAltName=DNS:app.voter.test,DNS:join.voter.test,DNS:login.voter.test' >/dev/null 2>&1
+  openssl req -x509 -newkey rsa:2048 -nodes -keyout .local/tls.key -out .local/tls.crt -days 7 -subj /CN=voter-test -addext 'subjectAltName=DNS:app.voter.test,DNS:login.voter.test' >/dev/null 2>&1
   # A Docker volume works with a sibling Docker daemon (host paths need not match).
   docker volume create voter-e2e-config >/dev/null
   docker run --rm -i -v voter-e2e-config:/config alpine:3.21 sh -c 'cat > /config/ca.crt' < .local/tls.crt
@@ -147,7 +147,6 @@ probe() {
   jar=$(mktemp); body=$(mktemp)
   status=$(curl -sk -L -c "$jar" -b "$jar" -o "$body" -w '%{http_code}' \
     --resolve "app.voter.test:19443:$gateway" \
-    --resolve "join.voter.test:19443:$gateway" \
     --resolve "login.voter.test:19443:$gateway" \
     https://app.voter.test:19443/auth/login || true)
   local ok=1
