@@ -91,9 +91,10 @@ metadata:
   name: voter-audience
   namespace: voter
 rules:
+  # Read only, as on the cluster: editing is the operator's live grant below.
   - apiGroups: [examples.configbutler.ai]
     resources: [coffeeconfigs]
-    verbs: [get, list, watch, patch, update]
+    verbs: [get, list, watch]
   - apiGroups: [examples.configbutler.ai]
     resources: [quizsessions]
     verbs: [get, list, watch]
@@ -104,6 +105,19 @@ rules:
   - apiGroups: [platform.configbutler.ai]
     resources: [databases]
     verbs: [get, list, watch, create, patch, update]
+---
+# The grant the operator hands out live from /room, as in the cluster's
+# participant-rbac.yaml: the Role is here, the RoleBinding is created and
+# deleted by the operator page (or by a spec, standing in for the operator).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: voter-audience-coffee-admin
+  namespace: voter
+rules:
+  - apiGroups: [examples.configbutler.ai]
+    resources: [coffeeconfigs]
+    verbs: [patch, update]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -198,3 +212,19 @@ spec:
           podSelector:
             matchLabels:
               app.kubernetes.io/name: traefik
+---
+# The fixture's operator (dex.yaml's mockCallback connector, under the github
+# id) is cluster-admin, as the cluster's GitHub operator is (krm-foyer
+# migration, decision 2).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: voter-fixture-operator
+subjects:
+  - kind: User
+    name: github:kilgore@kilgore.trout
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io

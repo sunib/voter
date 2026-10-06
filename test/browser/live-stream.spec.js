@@ -11,7 +11,7 @@ import { resolve } from "node:path";
 // one page can re-read its own write.
 //
 // This is deliberately end-to-end through the real parts: Chromium, Traefik,
-// Dex, Room Pass enrolment, the Voter session cookie, the krm-stream gateway,
+// Dex, Room Pass enrolment, krm-foyer's session and its /k8s and /stream/v1,
 // and a real CoffeeConfig in a real API server. The only thing the test asserts
 // directly against Kubernetes is the setup and the restore.
 
@@ -31,6 +31,11 @@ const coffeeConfig = () =>
   );
 
 const APP = "https://app.voter.test:19443";
+
+/** The one CoffeeConfig, as the editor reads and patches it through krm-foyer's
+ *  /k8s. A predicate rather than a glob: the patch carries ?fieldManager=voter. */
+const isCoffeeConfig = (url) =>
+  new URL(url).pathname.endsWith("/namespaces/voter/coffeeconfigs/demo-coffee");
 
 /** The editor's Shop name input. Each admin field is an <input> wrapped in a
  *  <label>, so the visible label addresses it — no test id needed, and the
@@ -81,8 +86,8 @@ async function signIn(browser, label, prepare = async () => {}) {
     }
   });
 
-  // Straight at the application: Voter starts the OIDC flow, Dex hands off to
-  // Room Pass, and the room form is what the browser is shown.
+  // Straight at the application: the page sends the browser to krm-foyer's
+  // login, Dex hands off to Room Pass, and the room form is what it is shown.
   await page.goto(`${APP}/admin`);
   await expect(page.getByLabel("Room code")).toBeVisible();
   await page.getByLabel("Room code").fill(room().status.joinCode.code);
@@ -101,6 +106,23 @@ async function signIn(browser, label, prepare = async () => {}) {
 
   return { context, page, displayName };
 }
+
+// Editing the menu is the operator's live grant, as on the cluster: this file
+// stands in for the operator and binds the room to the coffee-admin Role for
+// its tests, then takes it back.
+const grant = JSON.stringify({
+  apiVersion: "rbac.authorization.k8s.io/v1",
+  kind: "RoleBinding",
+  metadata: { name: "voter-audience-coffee-admin", namespace: "voter" },
+  subjects: [{ kind: "Group", apiGroup: "rbac.authorization.k8s.io", name: "demo:voter-audience" }],
+  roleRef: { apiGroup: "rbac.authorization.k8s.io", kind: "Role", name: "voter-audience-coffee-admin" },
+});
+test.beforeAll(() => {
+  execFileSync("kubectl", ["--kubeconfig", kubeconfig, "apply", "-f", "-"], { input: grant, encoding: "utf8" });
+});
+test.afterAll(() => {
+  kube("-n", "voter", "delete", "rolebinding", "voter-audience-coffee-admin", "--ignore-not-found");
+});
 
 test.afterEach(async () => {
   // Restore the menu so the suite can run twice, and remove only the
@@ -251,7 +273,7 @@ test("a save that keeps losing says so and keeps unsaved input visible", async (
   const editor = await signIn(browser, "rejected-save");
   let patches = 0;
   try {
-    await editor.page.route("**/public/coffeeconfig", async (route) => {
+    await editor.page.route(isCoffeeConfig, async (route) => {
       if (route.request().method() !== "PATCH") return route.continue();
       patches++;
       await route.fulfill({
@@ -319,7 +341,7 @@ test("a real Kubernetes 409 on a non-overlapping edit re-sends itself", async ({
   const editor = await signIn(browser, "real-conflict");
   let patches = 0;
   try {
-    await editor.page.route("**/public/coffeeconfig", async route => {
+    await editor.page.route(isCoffeeConfig, async route => {
       if (route.request().method() !== "PATCH") return route.continue();
       patches++;
       if (patches === 1) {
@@ -331,14 +353,15 @@ test("a real Kubernetes 409 on a non-overlapping edit re-sends itself", async ({
       await route.continue();
     });
     await bannerText(editor.page).fill("Reviewed local banner");
-    const rejected = editor.page.waitForResponse(response => response.url().endsWith("/public/coffeeconfig") && response.request().method() === "PATCH");
+    const rejected = editor.page.waitForResponse(response => isCoffeeConfig(response.url()) && response.request().method() === "PATCH");
     const saved = editor.page.waitForResponse(response =>
-      response.url().endsWith("/public/coffeeconfig") && response.request().method() === "PATCH" && response.status() === 200);
+      isCoffeeConfig(response.url()) && response.request().method() === "PATCH" && response.status() === 200);
     await editor.page.getByRole("button", { name: /^Save \d+ Change/ }).click();
     expect((await rejected).status()).toBe(409);
-    const receipt = await (await saved).json();
-    expect(receipt.saved).toBe(true);
-    expect(receipt).not.toHaveProperty("config");
+    // The API server's own answer to the patch: the object as stored.
+    const stored = await (await saved).json();
+    expect(stored.kind).toBe("CoffeeConfig");
+    expect(stored.spec.bannerText).toBe("Reviewed local banner");
     // Nobody had to press anything a second time, and nobody was shown a refusal.
     expect(patches).toBe(2);
     await expect(editor.page.getByText(/Saved to Kubernetes/)).toBeVisible();
@@ -359,7 +382,7 @@ test("overlapping edits require an explicit conflict choice", async ({ browser }
     await expect(editor.page.getByRole("button", { name: /^Save \d+ Change/ })).toBeDisabled();
     await editor.page.getByRole("button", { name: "Keep Mine", exact: true }).click();
     await expect(shopName(editor.page)).toHaveValue("My chosen name");
-    const saved = editor.page.waitForResponse(response => response.url().endsWith("/public/coffeeconfig") && response.request().method() === "PATCH");
+    const saved = editor.page.waitForResponse(response => isCoffeeConfig(response.url()) && response.request().method() === "PATCH");
     await editor.page.getByRole("button", { name: /^Save \d+ Change/ }).click();
     expect((await saved).status()).toBe(200);
     expect(coffeeConfig().spec.shopName).toBe("My chosen name");
@@ -371,23 +394,20 @@ test("shared watches isolate RBAC withdrawal and deny access to a warm cache", a
   const retained = await signIn(browser, "retained-access");
   const withdrawn = await signIn(browser, "withdrawn-access");
   const binding = JSON.parse(kube("-n", "voter", "get", "rolebinding", "voter-audience", "-o", "json"));
-  const pod = JSON.parse(kube("-n", "voter", "get", "pods", "-l", "app=voter", "-o", "json")).items[0].metadata.name;
-  const metrics = () => kube("get", "--raw", `/api/v1/namespaces/voter/pods/${pod}:9090/proxy/metrics`);
+  // krm-foyer's metrics, on a Service of their own and never on the origin.
+  const metrics = () => kube("get", "--raw", "/api/v1/namespaces/voter/services/krm-foyer-metrics:9090/proxy/metrics");
   try {
     expect(await retained.page.evaluate(async () => (await fetch("/metrics")).status)).toBe(404);
-    // Both viewers attached to the shared watch. These are balanced gauges from
-    // the library's own observations, so they read the same whether this test
-    // runs alone or after every other one in the file.
-    //
-    // What they deliberately do NOT claim is how many physical API-server
-    // watches are open. Voter cannot honestly say: it would be asking itself.
-    // The rehearsal asks the API server (apiserver_longrunning_requests), and
-    // krm-stream's own tests assert the invariant. This test's job is that
+    // Both viewers attached to krm-foyer's shared watch on the CoffeeConfig:
+    // two subscriptions, one watch at the API server held by its shared-watch
+    // identity. Balanced gauges, so they read the same whether this test runs
+    // alone or after every other one in the file. This test's job is that
     // withdrawal isolates one viewer and leaves the other's cache warm.
-    await expect.poll(metrics).toContain("voter_stream_subscribers 2\n");
-    await expect.poll(metrics).toContain("voter_stream_shared_subscriptions 2\n");
+    await expect.poll(metrics).toContain("krm_foyer_shared_subscriptions_open 2\n");
+    await expect.poll(metrics).toMatch(/krm_foyer_upstream_watches_open\{identity="shared"\} [1-9]/);
     await shopName(withdrawn.page).fill("Keep this unsaved draft");
-    const identity = await retained.page.evaluate(async () => (await fetch("/auth/session")).json());
+    // The name RBAC matches on is the API server's, from krm-foyer's whoami.
+    const identity = (await retained.page.evaluate(async () => (await fetch("/auth/whoami")).json())).userInfo;
     expect(identity.username).toBeTruthy();
     const started = Date.now();
     kube("-n", "voter", "patch", "rolebinding", "voter-audience", "--type=merge", "-p", JSON.stringify({
@@ -396,12 +416,11 @@ test("shared watches isolate RBAC withdrawal and deny access to a warm cache", a
     await expect(withdrawn.page.getByRole("status").getByText(/^FORBIDDEN: Kubernetes refused/)).toBeVisible({ timeout: 60000 });
     expect(Date.now() - started).toBeLessThan(60000);
     await expect(shopName(withdrawn.page)).toHaveValue("Keep this unsaved draft");
-    await expect.poll(metrics).toContain("voter_stream_subscribers 1\n");
     // Exactly one attachment released, not both: the surviving viewer stayed on
     // the shared watch throughout, which is what "warm cache" means here. The
     // live update at the end of this test is the proof that it kept working.
-    await expect.poll(metrics).toContain("voter_stream_shared_subscriptions 1\n");
-    const frames = await withdrawn.page.evaluate(async () => (await fetch("/public/stream?group=examples.configbutler.ai&version=v1alpha1&resource=coffeeconfigs&namespace=voter&name=demo-coffee")).text());
+    await expect.poll(metrics).toContain("krm_foyer_shared_subscriptions_open 1\n");
+    const frames = await withdrawn.page.evaluate(async () => (await fetch("/stream/v1?group=examples.configbutler.ai&version=v1alpha1&resource=coffeeconfigs&namespace=voter&name=demo-coffee")).text());
     expect(frames).toContain('"terminal":true');
     expect(frames).not.toContain('"object"');
     kube("-n", "voter", "patch", "coffeeconfig", "demo-coffee", "--type=merge", "-p", JSON.stringify({ spec: { shopName: "Still live after withdrawal" } }));

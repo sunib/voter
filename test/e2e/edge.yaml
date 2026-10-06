@@ -79,6 +79,19 @@ metadata:
 spec:
   entryPoints: [websecure]
   routes:
+    # Dex's own callback, for the connectors that are not Room Pass's -- the
+    # fixture operator's mockCallback (dex.yaml). On the cluster Dex owns the
+    # issuer host and Room Pass two paths; here Room Pass owns the host, and
+    # this one exact path goes to Dex. Room Pass's own callback is
+    # /callback/room-pass, which stays Room Pass's.
+    - match: Host(`login.voter.test`) && Path(`/callback`)
+      kind: Rule
+      priority: 300
+      middlewares:
+        - name: strip-identity-headers
+      services:
+        - name: dex
+          port: 5556
     - match: Host(`login.voter.test`)
       kind: Rule
       priority: 100
