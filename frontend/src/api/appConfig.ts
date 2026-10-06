@@ -27,6 +27,9 @@ export interface AppConfig {
   commitCloseDelaySeconds: number
   /** The Role the operator binds the audience to, which names the binding too. */
   audienceCoffeeAdminRole: string
+  /** The Role the operator binds a group to so it may vote. Each binding is
+   *  named after it and the group (authz.ts, ballotBindingName). */
+  audienceBallotRole: string
 }
 
 let loaded: AppConfig | null = null

@@ -406,4 +406,16 @@ export const ROOM_REQUIREMENTS: Requirement[] = [
     verb: 'delete',
     purpose: 'take that grant away again',
   },
+  {
+    apiGroup: RBAC,
+    resource: 'rolebindings',
+    verb: 'list',
+    purpose: 'see which groups may vote, and who holds the menu alone',
+  },
+  {
+    apiGroup: ROOM_PASS,
+    resource: 'participants',
+    verb: 'list',
+    purpose: 'pick someone from the room, and count each answer',
+  },
 ]

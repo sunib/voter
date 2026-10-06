@@ -33,6 +33,8 @@ test('a participant is refused the operator page and never sees a join code', as
     await page.goto(`${APP}/`);
     await page.getByLabel('Room code').fill(JSON.parse(kube('get', 'room', 'demo', '-o', 'json')).status.joinCode.code);
     await page.getByLabel('Display name').fill(displayName);
+    // The Room asks one question at the door; any answer will do here.
+    await page.getByRole('radio', { name: 'Vue' }).check();
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.waitForURL(`${APP}/`);
 

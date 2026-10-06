@@ -94,6 +94,15 @@ spec:
   # The production audience group, so the fixture's RBAC reads like the demo's.
   audienceGroup: demo:voter-audience
   allowedReturnURLs: ['https://app.voter.test:19443/']
+  # As the demo cluster's Room: one question at the door, whose answer becomes a
+  # group the operator page can open voting to.
+  question:
+    prompt: Which frontend framework do you like best?
+    answers:
+      - label: Vue
+        group: demo:frontend-vue
+      - label: Svelte
+        group: demo:frontend-svelte
 YAML
 # Helm installs Traefik CRDs asynchronously during k3s bootstrap. Retry the
 # wait itself, not just a lookup: a CRD caught in the instant after it is

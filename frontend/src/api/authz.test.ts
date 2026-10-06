@@ -171,12 +171,13 @@ describe('the declared page requirements', () => {
   })
 
   it('asks for the grant verbs the room switch actually uses', () => {
-    // get to render the switch, create and delete to move it. Dropping one
-    // would leave an operator staring at a control that half works.
+    // get to render the switch, create and delete to move it, list for who may
+    // vote and who holds the menu alone. Dropping one would leave an operator
+    // staring at a control that half works.
     const rolebindings = ROOM_REQUIREMENTS.filter(
       (r) => r.resource === 'rolebindings',
     ).map((r) => r.verb)
-    expect(rolebindings.sort()).toEqual(['create', 'delete', 'get'])
+    expect(rolebindings.sort()).toEqual(['create', 'delete', 'get', 'list'])
   })
 })
 

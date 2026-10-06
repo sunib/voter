@@ -14,6 +14,9 @@ import { useDraftSubmissionStore } from '../stores/draftSubmission'
 import { createQuizSubmission, getQuizSession } from '../api/quiz'
 import { canVote, currentSession, getSession } from '../api/session'
 import { appConfig } from '../api/appConfig'
+import { allows } from '../api/authz'
+import { useAuthorization } from '../api/useAuthorization'
+import { BALLOT_GROUPS_ANNOTATION } from '../api/roomGrants'
 
 async function isSignedOut(): Promise<boolean> {
   try {
@@ -48,6 +51,25 @@ const mayVote = ref(true)
 const submitError = ref<string | null>(null)
 const loadError = ref<string | null>(null)
 
+/** Whether RBAC lets this identity cast a ballot at all. Who may vote is a
+ *  switch on the operator's page: a RoleBinding from the ballot Role to the
+ *  whole room or to one answer's group of the Room's question. The page asks
+ *  the API server (a SelfSubjectRulesReview) once, and again whenever the
+ *  round's ballot-groups marker moves on the stream (watch below), so the
+ *  refusal turns into the ballot, or back, without polling.
+ *
+ *  Undecided counts as allowed, as mayVote does: admission and RBAC are the
+ *  control, this is the courtesy of saying so before anyone types. */
+const { authz, refresh: refreshAuthz } = useAuthorization({ poll: false })
+const mayCast = computed(
+  () =>
+    authz.value === null ||
+    allows(authz.value, 'examples.configbutler.ai', 'quizsubmissions', 'create'),
+)
+/** The groups the token carries beside the whole room's, which is what a
+ *  switch can open the round to. As Kubernetes names them: that is the point. */
+const myGroups = computed(() => currentSession()?.groups ?? [])
+
 // The round can close while somebody is still looking at it. Without this they
 // find out by pressing Submit and being refused, which is a bad way to learn
 // that the room has moved on.
@@ -68,6 +90,15 @@ const streamedRound = computed(() => {
     | QuizSession
     | undefined
 })
+
+// The operator page rewrites this marker on the round whenever who may vote
+// changes. Its value is only a doorbell; the answer is the API server's.
+watch(
+  () => streamedRound.value?.metadata?.annotations?.[BALLOT_GROUPS_ANNOTATION],
+  (marker, previous) => {
+    if (marker !== previous) void refreshAuthz()
+  },
+)
 
 // Only the STATE follows the stream. The questions deliberately do not: swapping
 // them under someone mid-answer is the thing the round rules forbid, and
@@ -141,6 +172,12 @@ async function submit() {
       await router.replace({ name: 'login', query: { next: route.fullPath } })
       return
     }
+    // The switch may have closed while they were answering. If RBAC now says
+    // no, the refusal card says it better than the API server's sentence.
+    if (status === 403) {
+      await refreshAuthz()
+      if (!mayCast.value) return
+    }
     submitError.value = e?.message ?? 'Submit failed'
   } finally {
     busy.value = false
@@ -194,6 +231,39 @@ async function submit() {
                 rounds and read the results — but a ballot has to belong to
                 someone who came through the door. Scan the room's QR code to
                 join as a participant.
+              </p>
+            </div>
+          </div>
+        </template>
+      </Card>
+
+      <Card
+        v-else-if="!voted && state === 'live' && !mayCast"
+        class="rounded-[var(--radius)]"
+        data-testid="ballot-refused"
+      >
+        <template #content>
+          <div class="p-5">
+            <div class="space-y-3" role="alert">
+              <h1 class="text-xl font-extrabold">
+                This round isn’t open to you. Yet.
+              </h1>
+              <p class="text-sm text-[rgb(var(--muted))]">
+                Kubernetes says you may not create a QuizSubmission: no
+                RoleBinding gives your groups the right to vote. Only some
+                groups may vote right now, and the presenter can open it up.
+              </p>
+              <p v-if="myGroups.length" class="text-sm">
+                Your groups:
+                <code
+                  v-for="g in myGroups"
+                  :key="g"
+                  class="mr-1 rounded bg-[rgb(var(--ink))]/5 px-1"
+                  >{{ g }}</code
+                >
+              </p>
+              <p class="text-xs text-[rgb(var(--muted))]">
+                Keep this page open. It opens on its own the moment you’re let in.
               </p>
             </div>
           </div>
@@ -256,12 +326,12 @@ async function submit() {
       while you were answering, so it can no longer take your vote. Your answers
       are still here, and the results are already available.
     </p>
-    <p v-if="!voted" class="mt-4 text-sm text-[rgb(var(--muted))]">
+    <p v-if="!voted && mayCast" class="mt-4 text-sm text-[rgb(var(--muted))]">
       Submitting creates your QuizSubmission for this round. You can change your
       answers before submitting, but submitted answers cannot be edited.
     </p>
     <SubmitBar
-      v-if="!voted"
+      v-if="!voted && mayCast"
       :busy="busy"
       :disabled="!round || state !== 'live'"
       :error="submitError ?? undefined"
