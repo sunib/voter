@@ -1,5 +1,33 @@
 # Changelog
 
+## [2.0.0](https://github.com/sunib/voter/compare/v1.3.1...v2.0.0) (2026-10-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* Voter no longer serves /auth/* or reads OIDC_*, APP_ORIGIN, APP_COOKIE_* or the session cookie settings, and /public/ must be routed through krm-foyer's identity check.
+* /public/rounds, /public/rounds/{name} and /public/rounds/{name}/results are gone, and a ballot from anyone but a Room Pass participant must declare itself.
+* /public/coffeeconfig, /public/databases, /public/audience/coffee-admin and /public/rounds/{name}/state are gone.
+* Voter no longer serves /public/stream or /metrics, and its frontend needs krm-foyer on the same host. Its /public/* endpoints still expect Voter's own session until steps 3 to 5, so voting, the storefront and saving do not work yet, and the browser suite is red until step 6.
+
+### Features
+
+* run Voter's domain backend behind krm-foyer's identity check ([572b990](https://github.com/sunib/voter/commit/572b99077a7a85e48c4a0520c9b6eec04f7669d9))
+* serve the deployment's settings at /config.json, not in the session ([dccd70d](https://github.com/sunib/voter/commit/dccd70df6e06483744b71b6e93ca691ef93a6ad8))
+* speak krm-foyer's login, session and stream contract ([79c3b0b](https://github.com/sunib/voter/commit/79c3b0bcb4a1cca1688dde6e9979c960d288306d))
+* votes are the participant's own QuizSubmission, held by admission ([744e259](https://github.com/sunib/voter/commit/744e2590f3ae24b469d7e980f462986fb7302957))
+* write CoffeeConfigs, Databases, rounds and the grant through /k8s ([ffe5e26](https://github.com/sunib/voter/commit/ffe5e266693bb534d739dd3c6ecf9020fbc99d75))
+
+
+### Bug Fixes
+
+* wait for a new round's questions digest before casting a ballot ([1c5dc7b](https://github.com/sunib/voter/commit/1c5dc7b6d0e91cb8aeade29364fc29ce73979077))
+
+
+### Documentation
+
+* record step 2 and what the migration found along the way ([c316c1e](https://github.com/sunib/voter/commit/c316c1ee9deeb98d90667de20956728167e3de7e))
+
 ## [1.3.1](https://github.com/sunib/voter/compare/v1.3.0...v1.3.1) (2026-10-06)
 
 
