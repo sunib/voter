@@ -56,8 +56,9 @@ POST   /apis/examples.configbutler.ai/v1alpha1/namespaces/voter/quizsubmissions
 GET    /apis/examples.configbutler.ai/v1alpha1/namespaces/voter/quizsessions?watch=true
 ```
 
-`watch` is the verb that matters most. It turns the API into a stream of changes, and
-everything that reacts to the cluster is built on it.
+`watch` is the one to notice. Instead of asking again and again, a client asks once
+and the API server pushes every change as it happens. That is why a vote shows up on
+the projector within a second, without anyone polling.
 
 ### The types are yours: CustomResourceDefinitions
 
