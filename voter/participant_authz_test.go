@@ -10,9 +10,7 @@ import (
 	authorizationv1 "k8s.io/api/authorization/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
@@ -110,17 +108,8 @@ func TestFlattenResourceRulesIsStablyOrdered(t *testing.T) {
 
 const authzNamespace = "voter"
 
-func roomObject(name, group string) *unstructured.Unstructured {
-	return &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "room-pass.koudijs.dev/v1alpha1",
-		"kind":       "Room",
-		"metadata":   map[string]any{"name": name, "namespace": authzNamespace},
-		"spec":       map[string]any{"audienceGroup": group},
-	}}
-}
-
-// authzFixture wires the two new handler sets against a fake apiserver that
-// answers rules reviews with a canned review and tracks RoleBindings for real.
+// authzFixture wires /auth/rules against a fake apiserver that answers rules
+// reviews with a canned review.
 func authzFixture(t *testing.T, review *authorizationv1.SelfSubjectRulesReview, objs ...runtime.Object) (*http.ServeMux, config, *k8sfake.Clientset) {
 	t.Helper()
 	old := sessionCookieCodec
@@ -147,8 +136,7 @@ func authzFixture(t *testing.T, review *authorizationv1.SelfSubjectRulesReview, 
 	}
 
 	scheme := runtime.NewScheme()
-	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme,
-		map[schema.GroupVersionResource]string{roomsGVR(): "RoomList"}, objs...)
+	dyn := dynamicfake.NewSimpleDynamicClient(scheme, objs...)
 
 	deps := handlerDeps{
 		cfg:       cfg,
@@ -159,7 +147,6 @@ func authzFixture(t *testing.T, review *authorizationv1.SelfSubjectRulesReview, 
 	}
 	mux := http.NewServeMux()
 	registerParticipantAuthzHandlers(mux, deps)
-	registerAudienceGrantHandlers(mux, deps)
 	return mux, cfg, typed
 }
 
@@ -239,141 +226,5 @@ func TestAuthRulesRefusesAnUnauthenticatedCaller(t *testing.T) {
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/auth/rules", nil))
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
-	}
-}
-
-// --- the grant switch -------------------------------------------------------
-
-func TestAudienceGrantStartsOffAndTurnsOn(t *testing.T) {
-	mux, cfg, typed := authzFixture(t, nil, roomObject("demo", "demo:voter-audience"))
-
-	off := doJSON[struct {
-		Granted bool `json:"granted"`
-	}](t, mux, signedInRequest(t, cfg, http.MethodGet, "/public/audience/coffee-admin", ""), http.StatusOK)
-	if off.Granted {
-		t.Fatal("the grant must start off; demo 1 depends on the refusal being real")
-	}
-
-	on := doJSON[struct {
-		Granted bool   `json:"granted"`
-		Group   string `json:"group"`
-	}](t, mux, signedInRequest(t, cfg, http.MethodPut, "/public/audience/coffee-admin", `{"granted":true}`), http.StatusOK)
-	if !on.Granted {
-		t.Fatal("PUT granted=true did not report the grant on")
-	}
-
-	// The subject comes from the Room, not from this process's configuration.
-	// A binding naming the wrong group is a valid object that grants nobody
-	// anything, so this is the assertion that catches a silent no-op.
-	binding, err := typed.RbacV1().RoleBindings(authzNamespace).Get(t.Context(), cfg.AudienceCoffeeAdminRole, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("binding was not created: %v", err)
-	}
-	if len(binding.Subjects) != 1 || binding.Subjects[0].Name != "demo:voter-audience" {
-		t.Fatalf("subjects = %+v, want the Room's audienceGroup", binding.Subjects)
-	}
-	if binding.Subjects[0].Kind != rbacv1.GroupKind {
-		t.Errorf("subject kind = %q, want Group", binding.Subjects[0].Kind)
-	}
-	if binding.RoleRef.Name != cfg.AudienceCoffeeAdminRole || binding.RoleRef.Kind != "Role" {
-		t.Errorf("roleRef = %+v", binding.RoleRef)
-	}
-}
-
-// The switch is pulled on stage. Flipping it twice in either direction must not
-// produce an error the room can see.
-func TestAudienceGrantIsIdempotentBothWays(t *testing.T) {
-	mux, cfg, _ := authzFixture(t, nil, roomObject("demo", "demo:voter-audience"))
-
-	for i := 0; i < 2; i++ {
-		doJSON[map[string]any](t, mux, signedInRequest(t, cfg, http.MethodPut, "/public/audience/coffee-admin", `{"granted":true}`), http.StatusOK)
-	}
-	for i := 0; i < 2; i++ {
-		body := doJSON[struct {
-			Granted bool `json:"granted"`
-		}](t, mux, signedInRequest(t, cfg, http.MethodPut, "/public/audience/coffee-admin", `{"granted":false}`), http.StatusOK)
-		if body.Granted {
-			t.Fatalf("revoke %d reported the grant still on", i)
-		}
-	}
-}
-
-func TestAudienceGrantRevokeRemovesTheBinding(t *testing.T) {
-	mux, cfg, typed := authzFixture(t, nil, roomObject("demo", "demo:voter-audience"))
-
-	doJSON[map[string]any](t, mux, signedInRequest(t, cfg, http.MethodPut, "/public/audience/coffee-admin", `{"granted":true}`), http.StatusOK)
-	doJSON[map[string]any](t, mux, signedInRequest(t, cfg, http.MethodPut, "/public/audience/coffee-admin", `{"granted":false}`), http.StatusOK)
-
-	if _, err := typed.RbacV1().RoleBindings(authzNamespace).Get(t.Context(), cfg.AudienceCoffeeAdminRole, metav1.GetOptions{}); err == nil {
-		t.Fatal("binding survived the revoke")
-	}
-}
-
-func TestAudienceGrantRejectsABodyWithoutTheField(t *testing.T) {
-	mux, cfg, _ := authzFixture(t, nil, roomObject("demo", "demo:voter-audience"))
-	for _, body := range []string{`{}`, `{"granted":"yes"}`, `{"on":true}`, ``} {
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, signedInRequest(t, cfg, http.MethodPut, "/public/audience/coffee-admin", body))
-		if rec.Code != http.StatusBadRequest {
-			t.Errorf("body %q: status = %d, want 400", body, rec.Code)
-		}
-	}
-}
-
-// Without a Room there is no audienceGroup to bind, and creating a binding with
-// an empty subject would look like success while granting nobody anything.
-func TestAudienceGrantFailsWhenTheRoomDeclaresNoAudienceGroup(t *testing.T) {
-	mux, cfg, typed := authzFixture(t, nil, roomObject("demo", ""))
-
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, signedInRequest(t, cfg, http.MethodPut, "/public/audience/coffee-admin", `{"granted":true}`))
-	if rec.Code == http.StatusOK {
-		t.Fatalf("a Room with no audienceGroup must not produce a binding (status %d)", rec.Code)
-	}
-	if _, err := typed.RbacV1().RoleBindings(authzNamespace).Get(t.Context(), cfg.AudienceCoffeeAdminRole, metav1.GetOptions{}); err == nil {
-		t.Fatal("a binding with no subject was created")
-	}
-}
-
-func TestAudienceGrantRefusesAnUnauthenticatedCaller(t *testing.T) {
-	mux, _, _ := authzFixture(t, nil, roomObject("demo", "demo:voter-audience"))
-	for _, method := range []string{http.MethodGet, http.MethodPut} {
-		rec := httptest.NewRecorder()
-		mux.ServeHTTP(rec, httptest.NewRequest(method, "/public/audience/coffee-admin", strings.NewReader(`{"granted":true}`)))
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("%s: status = %d, want 401", method, rec.Code)
-		}
-	}
-}
-
-// A state-changing call without the CSRF header must be refused even with a
-// valid session cookie -- the switch is a mutation like any other.
-func TestAudienceGrantRequiresCSRF(t *testing.T) {
-	mux, cfg, _ := authzFixture(t, nil, roomObject("demo", "demo:voter-audience"))
-	req := signedInRequest(t, cfg, http.MethodPut, "/public/audience/coffee-admin", `{"granted":true}`)
-	req.Header.Del("X-CSRF-Token")
-
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403", rec.Code)
-	}
-}
-
-// A binding to a missing Role is accepted by Kubernetes, looks healthy, and
-// grants nothing. The switch must refuse it rather than report success.
-func TestAudienceGrantRefusesToBindAMissingRole(t *testing.T) {
-	mux, cfg, typed := authzFixture(t, nil, roomObject("demo", "demo:voter-audience"))
-	if err := typed.RbacV1().Roles(authzNamespace).Delete(t.Context(), cfg.AudienceCoffeeAdminRole, metav1.DeleteOptions{}); err != nil {
-		t.Fatalf("could not remove the Role for this case: %v", err)
-	}
-
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, signedInRequest(t, cfg, http.MethodPut, "/public/audience/coffee-admin", `{"granted":true}`))
-	if rec.Code == http.StatusOK {
-		t.Fatalf("binding to a missing Role reported success (status %d)", rec.Code)
-	}
-	if _, err := typed.RbacV1().RoleBindings(authzNamespace).Get(t.Context(), cfg.AudienceCoffeeAdminRole, metav1.GetOptions{}); err == nil {
-		t.Fatal("a binding to a nonexistent Role was created")
 	}
 }

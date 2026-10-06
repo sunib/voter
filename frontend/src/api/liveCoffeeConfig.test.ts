@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { useTestAppConfig } from './testAppConfig'
 import { effectScope, type EffectScope } from 'vue'
 import type { StreamEvent } from '@configbutler/krm-stream'
 import { leafChanges } from './fieldChanges'
@@ -25,7 +26,11 @@ async function fixture(editable = true) {
   let controller: ReadableStreamDefaultController<Uint8Array>
   let seq = 0
   const requests: RequestInit[] = []
-  const host = vi.fn(async (_init: RequestInit) => json({ saved: true }))
+  // A save is a PATCH of the object, then a CommitRequest; this answers both
+  // well enough (the CommitRequest reads its name from metadata).
+  const host = vi.fn(async (_init: RequestInit) =>
+    json({ metadata: { name: 'coffee-save-test' } }),
+  )
   const fetch = vi.fn(async (url: string, init: RequestInit = {}) => {
     if (url.startsWith('/stream/v1'))
       return new Response(
@@ -40,6 +45,7 @@ async function fixture(editable = true) {
     requests.push(init)
     return host(init)
   })
+  await useTestAppConfig()
   vi.stubGlobal('fetch', fetch)
   scope = effectScope()
   const live = scope.run(() => useLiveCoffeeConfig('voter', 'demo', editable))!
@@ -183,13 +189,14 @@ describe('CoffeeConfig library integration', () => {
           finish = resolve
         }),
     )
+    // The CommitRequest after it is refused: the save still happened.
+    host.mockResolvedValueOnce(json({ kind: 'Status', message: 'down' }, 503))
     const save = live.save('Reason')
     await live.save('Double click')
     expect(requests).toHaveLength(1)
     expect(JSON.parse(String(requests[0]!.body))).toEqual({
-      uid: 'coffee',
-      resourceVersion: '1',
-      patch: { spec: { shopName: 'Submitted' } },
+      spec: { shopName: 'Submitted' },
+      metadata: { uid: 'coffee', resourceVersion: '1' },
     })
     live.setValue(['spec', 'bannerText'], 'Typed during save')
     await event({
@@ -197,19 +204,15 @@ describe('CoffeeConfig library integration', () => {
       object: object('2', 'Submitted'),
       redacted: [],
     })
-    finish(
-      json({
-        saved: true,
-        commitRequested: false,
-        commitError: 'Commit service unavailable',
-      }),
-    )
+    finish(json(object('2', 'Submitted')))
     await save
     expect(live.draft.value?.spec.bannerText).toBe('Typed during save')
     expect(live.changes.value.map((change) => change.path)).toEqual([
       ['spec', 'bannerText'],
     ])
-    expect(live.commitNotice.value).toBe('Commit service unavailable')
+    expect(live.commitNotice.value).toBe(
+      'Your change was saved to Kubernetes, but asking ConfigButler to commit it failed.',
+    )
   })
 
   // The whole room shares one CoffeeConfig, so a 409 is the ordinary outcome of
@@ -227,17 +230,19 @@ describe('CoffeeConfig library integration', () => {
     expect(live.error.value).toBe('')
     expect(live.notice.value).toContain('Saved to Kubernetes')
     expect(live.draft.value?.spec.shopName).toBe('Mine')
+    // The last write is the CommitRequest, asked for once, after the save
+    // that landed.
     expect(requests.map((request) => request.method ?? 'GET')).toEqual([
       'PATCH',
       'GET',
       'PATCH',
+      'POST',
     ])
     // The retry carries the same edits against the version that won, never a
     // newer version stapled onto the original patch.
     expect(JSON.parse(String(requests[2]!.body))).toEqual({
-      uid: 'coffee',
-      resourceVersion: '2',
-      patch: { spec: { shopName: 'Mine' } },
+      spec: { shopName: 'Mine' },
+      metadata: { uid: 'coffee', resourceVersion: '2' },
     })
   })
 

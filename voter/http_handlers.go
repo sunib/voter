@@ -13,6 +13,7 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 )
 
 type handlerDeps struct {
@@ -81,7 +82,7 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 		// a stale answer for a minute after one is harmless.
 		w.Header().Set("Cache-Control", "max-age=60")
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]string{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"namespace":        deps.defaultNS,
 			"coffeeConfigName": deps.cfg.CoffeeConfigName,
 			"roomName":         deps.cfg.RoomName,
@@ -92,6 +93,14 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			// that counts is admission's; this is so a page explaining a
 			// refusal agrees with it, without a second copy in the browser.
 			"participantConnector": deps.cfg.ParticipantConnectorID,
+			// Where a save asks ConfigButler for its commit, which the browser
+			// does now, as the person who saved. An empty target asks nothing.
+			"gitTargetName":           strings.TrimSpace(deps.cfg.ConfigButlerGitTargetName),
+			"databaseGitTargetName":   strings.TrimSpace(deps.cfg.ConfigButlerDatabaseGitTargetName),
+			"commitRequestNamespace":  strings.TrimSpace(deps.cfg.ConfigButlerCommitRequestNamespace),
+			"commitCloseDelaySeconds": deps.cfg.ConfigButlerCloseDelaySeconds,
+			// The Role the operator binds the audience to, and the binding's name.
+			"audienceCoffeeAdminRole": deps.cfg.AudienceCoffeeAdminRole,
 		})
 	})
 

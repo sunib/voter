@@ -1,5 +1,6 @@
 import type { QuizSession, QuizSessionSpec, QuizSubmission } from './types'
 import { requestJson } from './http'
+import { QUIZSESSIONS, mergePatch } from './kube'
 
 const request = <T>(path: string, body?: unknown) =>
   requestJson<T>(
@@ -125,13 +126,11 @@ export function resultsFromRest(
     })),
   }
 }
-/** Open or close a round. There is no client-side permission check on purpose:
- *  the backend patches with the caller's own token, so a participant gets the
- *  API server's own 403 and the page shows it. */
+/** Open or close a round: a merge patch of spec.state through /k8s. There is no
+ *  client-side permission check on purpose: the patch carries the caller's own
+ *  token, so a participant gets the API server's own 403 and the page shows it. */
 export const setRoundState = (name: string, state: 'live' | 'closed') =>
-  request<Record<string, unknown>>(`/${encodeURIComponent(name)}/state`, {
-    state,
-  })
+  mergePatch<QuizSession>(QUIZSESSIONS, name, { spec: { state } })
 
 export const getRoundResults = (name: string) =>
   request<RoundResults>(`/${encodeURIComponent(name)}/results`)

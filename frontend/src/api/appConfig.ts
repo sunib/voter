@@ -16,6 +16,17 @@ export interface AppConfig {
   commitURLTemplate: string
   /** The Dex connector whose logins are the audience, and so may vote. */
   participantConnector: string
+  /** The ConfigButler GitTarget a CoffeeConfig save asks to commit; empty for
+   *  none. */
+  gitTargetName: string
+  /** The same for a Database save; empty until a target watches Databases. */
+  databaseGitTargetName: string
+  /** Where CommitRequests are created; empty means `namespace`. */
+  commitRequestNamespace: string
+  /** How long a commit window may wait for the write it publishes. */
+  commitCloseDelaySeconds: number
+  /** The Role the operator binds the audience to, which names the binding too. */
+  audienceCoffeeAdminRole: string
 }
 
 let loaded: AppConfig | null = null

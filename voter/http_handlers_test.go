@@ -44,30 +44,40 @@ func TestBuildInfoEndpoint(t *testing.T) {
 func TestConfigEndpoint(t *testing.T) {
 	mux := http.NewServeMux()
 	registerHandlers(mux, handlerDeps{defaultNS: "voter", cfg: config{
-		CoffeeConfigName:            "demo-coffee",
-		RoomName:                    "demo",
-		AuditTrailCommitURLTemplate: "https://example.test/commit/{sha}",
-		ParticipantConnectorID:      "room-pass",
+		CoffeeConfigName:              "demo-coffee",
+		RoomName:                      "demo",
+		AuditTrailCommitURLTemplate:   "https://example.test/commit/{sha}",
+		ParticipantConnectorID:        "room-pass",
+		ConfigButlerGitTargetName:     " voter-demo ",
+		ConfigButlerCloseDelaySeconds: 2,
+		AudienceCoffeeAdminRole:       "voter-audience-coffee-admin",
 	}})
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/config.json", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got %d, want 200", rec.Code)
 	}
-	var body map[string]string
+	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("not JSON: %v", err)
 	}
-	want := map[string]string{
+	want := map[string]any{
 		"namespace":            "voter",
 		"coffeeConfigName":     "demo-coffee",
 		"roomName":             "demo",
 		"commitURLTemplate":    "https://example.test/commit/{sha}",
 		"participantConnector": "room-pass",
+		// Trimmed: an env value with stray spaces must not name a GitTarget
+		// that does not exist.
+		"gitTargetName":           "voter-demo",
+		"databaseGitTargetName":   "",
+		"commitRequestNamespace":  "",
+		"commitCloseDelaySeconds": float64(2),
+		"audienceCoffeeAdminRole": "voter-audience-coffee-admin",
 	}
 	for k, v := range want {
 		if body[k] != v {
-			t.Errorf("%s = %q, want %q", k, body[k], v)
+			t.Errorf("%s = %v, want %v", k, body[k], v)
 		}
 	}
 	rec = httptest.NewRecorder()
