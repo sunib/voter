@@ -10,25 +10,48 @@ system for a datacenter. **Its kernel is the `kube-apiserver`.**
 ### Everything is a resource
 
 Kubernetes keeps one kind of thing: **resources**. A resource is a typed, named
-document with the same shape every time: `apiVersion` and `kind` say what it is,
-`metadata` says which one, `spec` is what you want, and `status` is what is true right
-now.
+document with the same shape every time. `apiVersion` and `kind` say what it is,
+`metadata` says which one, `spec` is what someone wants, and `status` is what is true
+right now. Here is a real one: the first quiz round from the 2026-09-17 demo, as it is
+still stored in the cluster (shortened to one question):
 
 ```yaml
-apiVersion: v1                    # a built-in type
-kind: ConfigMap
-metadata:
-  name: shop-settings
+apiVersion: examples.configbutler.ai/v1alpha1   # what it is...
+kind: QuizSession
+metadata:                                       # ...which one...
+  name: demo1
   namespace: voter
-data:
-  currency: EUR
+  uid: 3019ea95-8997-46ca-875b-93b357639c05
+  generation: 4                                 # moves when spec changes
+spec:                                           # ...what the presenter wants...
+  title: How do you change Kubernetes configuration today?
+  state: closed
+  questions:
+    - id: stack
+      title: Argo CD or Flux?
+      type: singleChoice
+      choices: [Argo CD, Flux, Both, Neither yet]
+status:                                         # ...and what is true now.
+  observedGeneration: 4                         # written by a controller, not a person
+  filed: 38
+  counted: 38
+  questions:
+    - id: stack
+      count: 38
+      choices: {Argo CD: 28, Flux: 5, Both: 2, Neither yet: 3}
 ```
+
+People and Git write `spec`. A controller writes `status`. That split runs through the
+whole talk.
+
+`QuizSession` is not built into Kubernetes. Voter added it, and the section after next
+shows how.
 
 Every resource gets the same REST API, with the same verbs: `get`, `list`, `watch`,
 `create`, `update`, `patch`, `delete`.
 
 ```text
-GET    /api/v1/namespaces/voter/configmaps/shop-settings
+GET    /apis/examples.configbutler.ai/v1alpha1/namespaces/voter/quizsessions/demo1
 POST   /apis/examples.configbutler.ai/v1alpha1/namespaces/voter/quizsubmissions
 GET    /apis/examples.configbutler.ai/v1alpha1/namespaces/voter/quizsessions?watch=true
 ```
@@ -66,7 +89,8 @@ spec:
                 state: {type: string, enum: [draft, live, closed]}
 ```
 
-After that, a quiz round is as much a Kubernetes resource as a ConfigMap is:
+That is all it took for `demo1` above to exist. A quiz round is as much a Kubernetes
+resource as a Pod or a ConfigMap is:
 
 ```console
 $ kubectl -n voter get quizsessions
