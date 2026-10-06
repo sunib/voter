@@ -6,11 +6,13 @@ import {
   regionPolicy,
   readOnlyPolicy,
   resourceStreamURL,
+  withOpenAPIKeyedLists,
   get,
   type Change,
   type Conflict,
   type ConnectionState,
   type KRMObject,
+  type KubernetesStructuralSchema,
   type Path,
   type ResourceStreamHandle,
   type SaveRequest,
@@ -36,6 +38,11 @@ export interface EditableResourceOptions<T> {
   read: () => Promise<unknown>
   /** Send the captured intent. Only called when `editable`. */
   write: (intent: SaveRequest, reason: string) => Promise<SaveReceipt>
+  /** The structural slice of the CRD schema that names its keyed lists
+   *  (`x-kubernetes-list-type: map`). Without it every list is one atomic
+   *  value: two people editing different elements of the same list conflict on
+   *  the whole list, and the screen paints all of it red. */
+  keyedLists?: KubernetesStructuralSchema
   /** Narrow a streamed object to the kind this editor expects. */
   isExpectedKind: (object: unknown) => object is KRMObject & T
   /** The lines a person reads when something happens to the object underneath
@@ -87,8 +94,11 @@ export function useLiveEditableResource<T>(
 ) {
   const { scope, read, write, isExpectedKind, copy } = options
   const editable = options.editable ?? false
+  const policy = editable ? regionPolicy([['spec']]) : readOnlyPolicy
   const store = new LiveResourceStore(
-    editable ? regionPolicy([['spec']]) : readOnlyPolicy,
+    options.keyedLists
+      ? withOpenAPIKeyedLists(policy, options.keyedLists)
+      : policy,
   )
   const uid = ref<string>()
   const draft = shallowRef<T | null>(null)

@@ -101,12 +101,11 @@ A consumer can expand it the same way (the old and new values are reachable),
 but unlike `isDirty` there is no per-path primitive that answers "did this field
 just move on the server?", so the workaround is less obviously available.
 
-We have **not** fixed this in Voter yet — it is a known gap, not a shipped
-behaviour, and it is worth deciding alongside entry 1 rather than separately:
-whatever granularity `changes()` grows, `flashed` should probably match it.
-
-Pinned by `frontend/src/api/liveCoffeeConfig.test.ts`:
-`flashes a remote change inside a list at the list, not at the field`.
+**2026-10-06:** fixed for `spec.products` by entry 3 — once the editor passes the
+CRD's keyed lists to `withOpenAPIKeyedLists`, the merge recurses into each
+product and flashes `spec.products.0.priceCents`. Unkeyed lists (`vouchers`)
+still flash whole. Pinned by `frontend/src/api/liveCoffeeConfig.test.ts`:
+`flashes a remote change inside the product list at the field`.
 
 ---
 
@@ -125,6 +124,15 @@ if leaf-level enumeration is added, keyed lists are where it could be genuinely
 better than positional — reporting "the item with `sku: a` changed price" rather
 than "index 0 changed" — and that is a real feature rather than a convenience.
 
-Voter's CoffeeConfig CRD does not annotate its lists today, so we have no
-first-hand experience of the keyed path. Read this entry as "from the source",
-not "from use".
+**2026-10-06, from use:** the CRD keyed `products` by `sku`, but the editor never
+passed that schema to the store, so the merge stayed atomic: A and B each edit a
+different price, A saves, and B's whole product list conflicted and turned red.
+`liveCoffeeConfig.ts` now hands `withOpenAPIKeyedLists` a hand-copied slice of
+the CRD (a test fails if they drift). Conflicts come back per field and per
+product, and the 409 retry carries the winner's other prices in the re-sent
+list. `#diff` is still whole-array, so `leafChanges` still does the display
+narrowing for dirty fields.
+
+The lesson for maintainers: annotating the CRD does nothing on its own, and
+nothing tells you. A store that is handed no schema could say so, or a host
+could be given the schema through the stream rather than copying it by hand.

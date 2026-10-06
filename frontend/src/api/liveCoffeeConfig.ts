@@ -1,4 +1,7 @@
-import type { KRMObject } from '@configbutler/krm-stream'
+import type {
+  KRMObject,
+  KubernetesStructuralSchema,
+} from '@configbutler/krm-stream'
 import { getAdminCoffeeConfig, patchAdminCoffeeConfig } from './coffee'
 import type { CoffeeConfig } from './coffeeTypes'
 import { useLiveEditableResource } from './liveEditableResource'
@@ -17,10 +20,29 @@ function coffeeResource(object: unknown): object is KRMObject & CoffeeConfig {
   )
 }
 
+/** The keyed lists of voter/config/crd/coffeeconfigs.yaml, and nothing else.
+ *  Products are identified by `sku`, so a price edit on one product merges past
+ *  somebody else's edit on another instead of conflicting on the whole menu.
+ *  Vouchers are not keyed in the CRD and stay one atomic value. Kept in step
+ *  with the CRD by liveCoffeeConfig.test.ts. */
+export const coffeeConfigKeyedLists: KubernetesStructuralSchema = {
+  properties: {
+    spec: {
+      properties: {
+        products: {
+          'x-kubernetes-list-type': 'map',
+          'x-kubernetes-list-map-keys': ['sku'],
+        },
+      },
+    },
+  },
+}
+
 /** The coffee menu, live and editable. All of the draft, conflict, save and
  *  recovery mechanics are in liveEditableResource.ts, which the Database editor
- *  uses too -- this file is the three things that are specific to a
- *  CoffeeConfig: what one looks like, and how to read and write it. */
+ *  uses too -- this file is the things that are specific to a
+ *  CoffeeConfig: what one looks like, which of its lists have identity, and how
+ *  to read and write it. */
 export function useLiveCoffeeConfig(
   namespace: string,
   name: string,
@@ -37,6 +59,7 @@ export function useLiveCoffeeConfig(
     editable,
     read: getAdminCoffeeConfig,
     write: (intent, reason) => patchAdminCoffeeConfig(intent, { reason }),
+    keyedLists: coffeeConfigKeyedLists,
     isExpectedKind: coffeeResource,
     copy: {
       invalid: 'The stream returned an invalid CoffeeConfig.',

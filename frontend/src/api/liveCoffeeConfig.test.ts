@@ -3,7 +3,10 @@ import { useTestAppConfig } from './testAppConfig'
 import { effectScope, type EffectScope } from 'vue'
 import type { StreamEvent } from '@configbutler/krm-stream'
 import { leafChanges } from './fieldChanges'
-import { useLiveCoffeeConfig } from './liveCoffeeConfig'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { parse } from 'yaml'
+import { coffeeConfigKeyedLists, useLiveCoffeeConfig } from './liveCoffeeConfig'
 
 const object = (rv = '1', shopName = 'Base', uid = 'coffee') => ({
   apiVersion: 'examples.configbutler.ai/v1alpha1',
@@ -151,10 +154,9 @@ describe('CoffeeConfig library integration', () => {
     ])
   })
 
-  // Pinned because a screen marks FIELDS: the library flashes a remote change
-  // inside a list at the list's own path, so a per-field flash lookup finds
-  // nothing to highlight. See docs/krm-stream-feedback.md.
-  it('flashes a remote change inside a list at the list, not at the field', async () => {
+  // A screen marks FIELDS, and products are keyed by sku, so a remote price
+  // change flashes at the price itself rather than at the whole list.
+  it('flashes a remote change inside the product list at the field', async () => {
     const { live, event } = await fixture()
     const moved = object('2')
     moved.spec.products = [
@@ -162,11 +164,9 @@ describe('CoffeeConfig library integration', () => {
     ]
     await event({ type: 'modified', object: moved, redacted: [] })
 
-    // resourceVersion moves on every event; spec.products is the interesting
-    // one -- the whole list, never spec.products.0.priceCents.
     expect(live.flashed.value.map((path) => path.join('.'))).toEqual([
       'metadata.resourceVersion',
-      'spec.products',
+      'spec.products.0.priceCents',
     ])
   })
 
@@ -314,7 +314,9 @@ describe('CoffeeConfig library integration', () => {
     expect(live.needsRead.value).toBe(false)
   })
 
-  it('reviews array conflicts as a whole and keeps the explicitly chosen local array', async () => {
+  // A product added on the server ahead of the one being edited no longer
+  // conflicts: products merge by sku, so the local edit stays on its product.
+  it('keeps a local product edit across a product added on the server', async () => {
     const { live, event } = await fixture()
     live.setValue(['spec', 'products', 0, 'name'], 'Local')
     const remote = object('2')
@@ -325,16 +327,108 @@ describe('CoffeeConfig library integration', () => {
       enabled: true,
     })
     await event({ type: 'modified', object: remote, redacted: [] })
-    expect(live.conflicts.value.map((conflict) => conflict.path)).toEqual([
-      ['spec', 'products'],
-    ])
-    expect(live.canSave.value).toBe(false)
-    live.keepMine(['spec', 'products'])
     expect(live.conflicts.value).toEqual([])
     expect(
       live.draft.value?.spec.products.map((product) => product.name),
-    ).toEqual(['Local'])
+    ).toEqual(['B', 'Local'])
     expect(live.canSave.value).toBe(true)
+  })
+
+  // The reported symptom from rehearsal on 2026-10-06: A and B each edit a
+  // price, A saves, and B's whole product block turned red. Different products
+  // must merge; the same price must still conflict, and only at that price.
+  it('merges two people editing different prices', async () => {
+    const { live, event } = await fixture()
+    const menu = (rv: string, a: number, b: number) => {
+      const next = object(rv)
+      next.spec.products = [
+        { sku: 'a', name: 'A', priceCents: a, enabled: true },
+        { sku: 'b', name: 'B', priceCents: b, enabled: true },
+      ]
+      return next
+    }
+    await event({ type: 'modified', object: menu('2', 300, 350), redacted: [] })
+    live.setValue(['spec', 'products', 1, 'priceCents'], 375)
+    await event({ type: 'modified', object: menu('3', 275, 350), redacted: [] })
+
+    expect(live.conflicts.value).toEqual([])
+    expect(live.draft.value?.spec.products.map((p) => p.priceCents)).toEqual([
+      275, 375,
+    ])
+    expect(live.canSave.value).toBe(true)
+  })
+
+  it('conflicts at the one price when two people edit the same one', async () => {
+    const { live, event } = await fixture()
+    const menu = (rv: string, a: number, b: number) => {
+      const next = object(rv)
+      next.spec.products = [
+        { sku: 'a', name: 'A', priceCents: a, enabled: true },
+        { sku: 'b', name: 'B', priceCents: b, enabled: true },
+      ]
+      return next
+    }
+    await event({ type: 'modified', object: menu('2', 300, 350), redacted: [] })
+    live.setValue(['spec', 'products', 1, 'priceCents'], 375)
+    await event({ type: 'modified', object: menu('3', 300, 400), redacted: [] })
+
+    expect(live.conflicts.value.map((c) => c.path.join('.'))).toEqual([
+      'spec.products.1.priceCents',
+    ])
+    live.keepMine(['spec', 'products', 1, 'priceCents'])
+    expect(live.conflicts.value).toEqual([])
+    expect(live.draft.value?.spec.products.map((p) => p.priceCents)).toEqual([
+      300, 375,
+    ])
+  })
+
+  // The same race, lost at the API server instead of on the stream: the 409
+  // retry re-sends the whole list with the winner's price kept in it.
+  it('re-sends a stale price edit with the other price that won', async () => {
+    const { live, host, requests } = await fixture()
+    live.setValue(['spec', 'products', 0, 'priceCents'], 375)
+    const won = object('2')
+    won.spec.products = [
+      { sku: 'a', name: 'A', priceCents: 1, enabled: true },
+      { sku: 'b', name: 'B', priceCents: 250, enabled: true },
+    ]
+    host
+      .mockResolvedValueOnce(json({ error: 'stale' }, 409))
+      .mockResolvedValueOnce(json(won))
+    await live.save('')
+    expect(live.conflicts.value).toEqual([])
+    expect(JSON.parse(String(requests[2]!.body)).spec.products).toEqual([
+      { sku: 'a', name: 'A', priceCents: 375, enabled: true },
+      { sku: 'b', name: 'B', priceCents: 250, enabled: true },
+    ])
+  })
+
+  // The keyed-list schema is a hand copy of the CRD's; fail when they drift.
+  it('keys exactly the lists the CRD keys', () => {
+    const crd = parse(
+      readFileSync(
+        fileURLToPath(
+          new URL(
+            '../../../voter/config/crd/coffeeconfigs.yaml',
+            import.meta.url,
+          ),
+        ),
+        'utf8',
+      ),
+    )
+    const spec =
+      crd.spec.versions[0].schema.openAPIV3Schema.properties.spec.properties
+    const keyed = Object.fromEntries(
+      Object.entries(spec as Record<string, Record<string, unknown>>)
+        .filter(([, field]) => field['x-kubernetes-list-type'] === 'map')
+        .map(([name, field]) => [name, field['x-kubernetes-list-map-keys']]),
+    )
+    const ours = Object.fromEntries(
+      Object.entries(coffeeConfigKeyedLists.properties!.spec!.properties!).map(
+        ([name, field]) => [name, field['x-kubernetes-list-map-keys']],
+      ),
+    )
+    expect(ours).toEqual(keyed)
   })
 
   it('keeps a deletion recovery copy without transferring it to a replacement UID', async () => {
