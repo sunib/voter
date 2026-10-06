@@ -1,5 +1,10 @@
 # Architecture
 
+> **Describes Voter 1.x, as deployed.** The krm-foyer migration
+> ([docs/krm-foyer-migration.md](docs/krm-foyer-migration.md)) moves login, sessions,
+> `/k8s` and streams out of Voter; this page is rewritten at its cutover, and that
+> plan lists what changes.
+
 Voter is a coffee and voting demo consuming public infrastructure components. Room Pass
 is an independent enrollment service being prepared for extraction. krm-stream owns
 generic live-resource behavior. The krm-stream 0.4.0 integration with shared streams

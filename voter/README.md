@@ -1,7 +1,9 @@
 # Voter
 
-The Go application backend and Dex OIDC client. Its image also serves the compiled
-Vue frontend. Room Pass owns room enrollment; Kubernetes owns authorization.
+The Go application backend. Its image also serves the compiled Vue frontend. Room Pass
+owns room enrollment, krm-foyer owns login, sessions, `/k8s` and live streams on the
+same host, and Kubernetes owns authorization. Voter is partway through moving onto
+krm-foyer: see [the migration plan](../docs/krm-foyer-migration.md).
 See [architecture](../ARCHITECTURE.md) and
 [authorization and tests](../docs/authorization.md).
 
@@ -11,15 +13,13 @@ See [architecture](../ARCHITECTURE.md) and
 | --- | --- |
 | `GET /healthz` | Process health |
 | `GET /public/build-info` | Build revision metadata |
-| `GET /auth/login` | Start Dex login; optional allowlisted `connector` choice |
-| `GET /auth/callback` | Verify and complete OIDC login |
-| `GET /auth/session` | Display identity, expiry and CSRF token; never the ID token |
-| `POST /auth/logout` | CSRF-protected application logout |
+| `GET /config.json` | The deployment's settings (namespace, object names, commit link template, participant connector), without a session |
+| `GET /join-room?code=` | The QR code's target: Room Pass's join cookie, then a redirect to krm-foyer's login through Room Pass |
+| `/auth/login`, `/auth/callback`, `/auth/session`, `/auth/whoami`, `/auth/rules`, `/auth/logout` | Voter's own OIDC login, **no longer routed**: krm-foyer answers `/auth/` on the shared host. Deleted in step 5 |
 | `GET /public/coffeeconfig` | Read the configured object using the participant token |
 | `PATCH /public/coffeeconfig` | CSRF-protected patch and optional CommitRequest |
 | `GET /public/storefront`, `POST /public/orders` | Coffee menu and order decisions |
 | `GET /public/vouchers` | Process-local voucher usage |
-| `GET /public/stream` | krm-stream CoffeeConfig events |
 | `GET /public/rounds` | List voting rounds |
 | `GET,POST /public/rounds/{name}` | Read questions plus this participant's `voted` flag, or submit a validated QuizSubmission |
 | `GET /public/rounds/{name}/results` | Aggregated counts, averages and shared text answers |
@@ -27,10 +27,9 @@ See [architecture](../ARCHITECTURE.md) and
 Voting uses persisted QuizSession/QuizSubmission resources. See the
 [demo runbook](../docs/voting-demo.md) and [sample round](config/demo-round.yaml).
 
-There is no legacy login mode, ForwardAuth endpoint or impersonation client.
-Browser headers cannot select an identity. Direct application API calls use the
-session's Dex ID token. Shared watches and access reviews use a separately configured
-server credential; Voter enforces each subscriber's access before cache disclosure.
+The `/public/*` handlers still read Voter's own session cookie and use its Dex ID
+token, so behind krm-foyer they answer 401 until steps 3 to 5 replace them. Live
+streams are krm-foyer's `/stream/v1`; Voter no longer serves a stream or `/metrics`.
 
 ## Configuration
 
@@ -47,8 +46,10 @@ Other settings:
 | Variable | Default / behavior |
 | --- | --- |
 | `HOST`, `PORT` | `0.0.0.0`, `8080` |
-| `METRICS_ADDRESS` | `127.0.0.1:9090`; separate unauthenticated listener, never the application route |
-| `STREAM_KUBECONFIG` | Empty uses in-cluster credentials; an explicit file enables local shared-client credentials |
+| `STREAM_KUBECONFIG` | Empty uses in-cluster credentials; an explicit file is Voter's own credential outside a cluster (named for the stream gateway it used to serve) |
+| `PARTICIPANT_CONNECTOR_ID` | `room-pass`; the logins that may vote, published in `/config.json` |
+| `ROOM_NAME` | `demo`; the Room whose join code the operator page shows |
+| `AUDIT_TRAIL_COMMIT_URL_TEMPLATE` | Empty; turns a commit sha into a link, with `{sha}` substituted |
 | `OIDC_CONNECTOR_ID` | Empty lets Dex choose; use `room-pass` to preselect the room form |
 | `OIDC_CONNECTOR_CHOICES` | Comma-separated allowlist for explicit login choices, e.g. `github,linkedin` |
 | `PARTICIPANT_COOKIE_NAME` | `__Host-voter-session`; Secure and HttpOnly |
@@ -61,17 +62,10 @@ Other settings:
 | `STATIC_DIR` | Empty locally; image sets `/srv/www` |
 
 TLS trust is taken from the selected cluster configuration; TLS verification is required.
-Participant REST clients load no service-account credentials. The process-wide stream
-backend uses in-cluster credentials (or an explicit local kubeconfig) and narrow CoffeeConfig read/SAR
-grants. Each subscription resolves username/groups/UID/extras with the participant's
-SelfSubjectReview, then checks list/watch before disclosure and every 30 seconds.
-Writes keep the participant token; there is no impersonation or write fallback.
-The application listener returns 404 for `/metrics`. Aggregate metrics are served
-on `METRICS_ADDRESS` instead. Fixture/platform manifests bind port 9090 on the pod
-network; the public Service and ingress route only port 8080. Port 9090 is
-unauthenticated inside that network, and no scraper/ServiceMonitor is configured.
-Fixture tests read it through the authenticated Kubernetes pod proxy.
-See [shared-stream verification](../docs/shared-streams.md).
+Participant REST clients load no service-account credentials. Voter's own credential
+(`service_account.go`) is used by the tally reconciler alone, to read rounds and
+ballots and write a round's status. Writes keep the participant token; there is no
+impersonation or write fallback.
 
 ## Development and verification
 
@@ -82,16 +76,15 @@ task voter:build
 task image-voter
 ```
 
-With the settings above supplied, select an explicit kubeconfig for the shared
-reader/access-review identity before running outside a pod:
+With the settings above supplied, select an explicit kubeconfig for Voter's own
+identity before running outside a pod:
 
 ```bash
 cd voter
 STREAM_KUBECONFIG=/absolute/path/to/voter-stream.kubeconfig go run .
 ```
 
-Use a dedicated credential with the named CoffeeConfig list/watch and SAR grants
-shown in the fixture. The file's server and CA trust also configure participant
+Use a dedicated credential with the reconciler's grants shown in the fixture. The file's server and CA trust also configure participant
 clients, but its token, client certificate, exec plugin and impersonation settings
 are never copied into those clients. Omit `KUBERNETES_API_SERVER` or set it to the
 same server as the file. There is no fallback to `$KUBECONFIG` or `~/.kube/config`.
