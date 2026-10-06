@@ -143,8 +143,14 @@ func registerParticipantStreamHandlers(mux *http.ServeMux, deps handlerDeps) {
 		if s.TokenExpiry > 0 && time.Unix(s.TokenExpiry, 0).Before(deadline) {
 			deadline = time.Unix(s.TokenExpiry, 0)
 		}
-		ctx, cancel := context.WithDeadline(r.Context(), deadline)
+		// Cancelled at the deadline, not given one. krm-stream 0.4.0 clamps each
+		// write's deadline to the context's, so a heartbeat or terminal frame
+		// started just before expiry timed out mid-write and broke the
+		// connection: the client saw a truncated response, not the end of one.
+		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
+		expire := time.AfterFunc(time.Until(deadline), cancel)
+		defer expire.Stop()
 
 		// The order below is the point of doing this by hand: every cheap check
 		// that can refuse the request runs before the one Kubernetes call that
