@@ -3,12 +3,15 @@
 // question. Each switch is a RoleBinding from the ballot Role to that group,
 // made and unmade with the operator's own token, like the coffee switch.
 //
-// A participant's vote page asks the API server whether it may create a
-// QuizSubmission, so flipping a switch here turns their refusal into a ballot
-// without anyone reloading. Nothing in Voter decides who votes.
+// After every change the page writes which groups may vote onto each round
+// (roomGrants.ts, announceBallotGroups). Every phone streams the rounds, so a
+// participant's vote page sees the marker move, asks the API server once
+// whether it may now create a QuizSubmission, and its refusal turns into a
+// ballot -- or back -- without polling. Nothing in Voter decides who votes.
 import { computed, onBeforeUnmount, ref } from 'vue'
 
 import {
+  announceBallotGroups,
   ballotGroups,
   listRoleBindings,
   setBallotGrant,
@@ -56,7 +59,13 @@ async function refresh() {
       listRoleBindings(),
       listObjects<Participant>(PARTICIPANTS),
     ])
-    if (busy.value === '') open.value = ballotGroups(bindings)
+    if (busy.value === '') {
+      const groups = ballotGroups(bindings)
+      open.value = groups
+      // Ring every phone's doorbell when the truth moved, however it moved:
+      // a switch here, or a binding made from a terminal.
+      await announceBallotGroups(groups)
+    }
     const tally = new Map<string, number>()
     let active = 0
     for (const p of participants) {
@@ -106,7 +115,8 @@ async function toggle(group: string, next: boolean) {
       e instanceof Error ? e.message : 'Could not change who may vote.'
   } finally {
     busy.value = ''
-    void refresh()
+    // Not left to the next poll: the room is waiting for this.
+    await refresh()
   }
 }
 

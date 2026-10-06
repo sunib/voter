@@ -16,6 +16,7 @@ import { canVote, currentSession, getSession } from '../api/session'
 import { appConfig } from '../api/appConfig'
 import { allows } from '../api/authz'
 import { useAuthorization } from '../api/useAuthorization'
+import { BALLOT_GROUPS_ANNOTATION } from '../api/roomGrants'
 
 async function isSignedOut(): Promise<boolean> {
   try {
@@ -53,12 +54,13 @@ const loadError = ref<string | null>(null)
 /** Whether RBAC lets this identity cast a ballot at all. Who may vote is a
  *  switch on the operator's page: a RoleBinding from the ballot Role to the
  *  whole room or to one answer's group of the Room's question. The page asks
- *  the API server (a SelfSubjectRulesReview, polled), so when the operator
- *  flips the switch the refusal turns into the ballot on its own.
+ *  the API server (a SelfSubjectRulesReview) once, and again whenever the
+ *  round's ballot-groups marker moves on the stream (watch below), so the
+ *  refusal turns into the ballot, or back, without polling.
  *
  *  Undecided counts as allowed, as mayVote does: admission and RBAC are the
  *  control, this is the courtesy of saying so before anyone types. */
-const { authz, refresh: refreshAuthz } = useAuthorization()
+const { authz, refresh: refreshAuthz } = useAuthorization({ poll: false })
 const mayCast = computed(
   () =>
     authz.value === null ||
@@ -88,6 +90,15 @@ const streamedRound = computed(() => {
     | QuizSession
     | undefined
 })
+
+// The operator page rewrites this marker on the round whenever who may vote
+// changes. Its value is only a doorbell; the answer is the API server's.
+watch(
+  () => streamedRound.value?.metadata?.annotations?.[BALLOT_GROUPS_ANNOTATION],
+  (marker, previous) => {
+    if (marker !== previous) void refreshAuthz()
+  },
+)
 
 // Only the STATE follows the stream. The questions deliberately do not: swapping
 // them under someone mid-answer is the thing the round rules forbid, and
