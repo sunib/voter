@@ -38,6 +38,13 @@ type config struct {
 	// deletes.
 	AudienceCoffeeAdminRole string `envconfig:"AUDIENCE_COFFEE_ADMIN_ROLE" default:"voter-audience-coffee-admin"`
 
+	// AudienceBallotRole names the Role that lets a group cast ballots. Like the
+	// coffee grant, the Role lives in Git and its RoleBindings do not: the
+	// operator page binds it to the whole room or to one answer's group of the
+	// Room's question, live, and names each binding after the Role and the
+	// group.
+	AudienceBallotRole string `envconfig:"AUDIENCE_BALLOT_ROLE" default:"voter-audience-ballot"`
+
 	// ConfigButlerGitTargetName names the ConfigButler GitTarget whose open
 	// commit window should be finalized after a successful CoffeeConfig patch.
 	// Set to "" to disable the save-message side effect entirely.

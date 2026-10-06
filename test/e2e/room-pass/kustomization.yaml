@@ -11,13 +11,13 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: voter
 resources:
-  - https://github.com/sunib/room-pass//deploy/base?ref=v2.1.0
-  - https://github.com/sunib/room-pass//config/crd?ref=v2.1.0
+  - https://github.com/sunib/room-pass//deploy/base?ref=v2.2.0
+  - https://github.com/sunib/room-pass//config/crd?ref=v2.2.0
 images:
   - name: room-pass
     newName: ghcr.io/sunib/room-pass
-    newTag: 2.1.0
-    digest: sha256:346b4422278dc7b2f6f2f20d52bee59874916e3021fb477321c0aacca19e58de
+    newTag: 2.2.0
+    digest: sha256:6571a6318ddace93ff6ae14e7863e73f4f1e24b116c8610f0ae9ad7ea617ecc1
 patches:
   # deploy/base carries Room Pass's own fixture origins (*.room-pass.test).
   # These are this fixture's, shaped like the demo cluster: the join page is on

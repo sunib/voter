@@ -87,6 +87,8 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			"commitCloseDelaySeconds": deps.cfg.ConfigButlerCloseDelaySeconds,
 			// The Role the operator binds the audience to, and the binding's name.
 			"audienceCoffeeAdminRole": deps.cfg.AudienceCoffeeAdminRole,
+			// The Role the operator binds a group to, so it may vote.
+			"audienceBallotRole": deps.cfg.AudienceBallotRole,
 		})
 	})
 

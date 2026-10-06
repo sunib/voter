@@ -24,6 +24,8 @@ import {
 } from '../api/authz'
 import { useAuthorization } from '../api/useAuthorization'
 import PermissionRequirements from '../components/PermissionRequirements.vue'
+import BallotSwitches from '../components/room/BallotSwitches.vue'
+import PickSomeone from '../components/room/PickSomeone.vue'
 import { setRoundState } from '../api/quiz'
 import { currentSession, loginURL } from '../api/session'
 import { appConfig } from '../api/appConfig'
@@ -49,7 +51,13 @@ const rounds = useLiveResources({
 })
 
 type RoomObject = KRMObject & {
-  spec?: { title?: string; enrollment?: string; endsAt?: string }
+  spec?: {
+    title?: string
+    enrollment?: string
+    endsAt?: string
+    audienceGroup?: string
+    question?: { prompt?: string; answers?: { label: string; group: string }[] }
+  }
   status?: {
     joinCode?: { code?: string; expiresAt?: string }
     participantCount?: number
@@ -389,7 +397,16 @@ function signInAsOperator() {
         deletes. gitops-reverser mirrors it to the audit trail, so the grant
         arrives in Git as a commit in your name.
       </p>
+      <PickSomeone />
     </section>
+
+    <!-- Who may cast a ballot. Read with the same operator rights as the
+         switch above, and hidden from anyone refused them. -->
+    <BallotSwitches
+      v-if="!roomUnavailable"
+      :audience-group="theRoom?.spec?.audienceGroup"
+      :answers="theRoom?.spec?.question?.answers"
+    />
 
     <section v-if="!roomUnavailable" class="panel">
       <div class="section-heading">

@@ -52,6 +52,11 @@ export const ROOMS: ResourceRef = {
   version: 'v1alpha1',
   resource: 'rooms',
 }
+export const PARTICIPANTS: ResourceRef = {
+  group: 'room-pass.koudijs.dev',
+  version: 'v1alpha1',
+  resource: 'participants',
+}
 export const ROLES: ResourceRef = {
   group: 'rbac.authorization.k8s.io',
   version: 'v1',
