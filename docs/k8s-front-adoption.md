@@ -1,5 +1,10 @@
 # krm-foyer adoption in Voter
 
+> **Superseded for the transport (2026-10-06)** by
+> [krm-foyer-migration.md](krm-foyer-migration.md): the reuse evidence and the
+> prerequisites below now exist. The domain questions (quiz acceptance, read privacy,
+> CoffeeConfig restrictions) are carried into that plan's decisions and steps.
+
 Status: recommendation for planning; no implementation or deployment change authorized
 by this document. The [product design](https://github.com/ConfigButler/krm-foyer/blob/main/docs/design.md)
 and [BFF decision guide](https://github.com/ConfigButler/krm-foyer/blob/main/docs/bff-choice.md)

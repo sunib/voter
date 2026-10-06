@@ -423,6 +423,19 @@ The audience numbers are in
       every watcher in the room for a timestamp. Cost, not correctness.
       Done in `b06c471`.
 
+## 5c. Move login, sessions and streams to krm-foyer
+
+The step-by-step plan, its three decisions and the cutover are in
+[docs/krm-foyer-migration.md](docs/krm-foyer-migration.md). It supersedes "Voter keeps
+… its application session" in the outcome above: after it, Voter keeps its domain
+handlers behind krm-foyer's identity check, the quiz reconciler, the QR join endpoint
+and its files.
+
+- [x] Decided 2026-10-06: votes through `/k8s` with admission and the reconciler; the
+      operator keeps cluster-admin in the browser for now; krm-foyer reuses the `voter`
+      Dex client.
+- [ ] Steps 0–7 of the migration plan, starting once krm-foyer releases `/auth/check`.
+
 ## 6. Retained platform work
 
 These are unresolved items from the previous plan, not newly verified cluster facts.
