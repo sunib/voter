@@ -108,15 +108,17 @@ ballot) and `CoffeeConfig` (a menu). Its "database schema" is three CRDs.
 
 ### One door: the kube-apiserver
 
-Every call goes through the kube-apiserver: from `kubectl`, from a browser, from
-controllers, from Flux, and from Kubernetes's own components. **Nobody queries etcd
-directly.** etcd is the storage behind the API server, the way a disk sits behind a
-kernel.
+Every call goes through the kube-apiserver: from `kubectl`, from a browser (by way
+of krm-foyer, below), from controllers, from Flux, and from Kubernetes's own
+components. **Nobody queries etcd directly.** etcd is the storage behind the API
+server, the way a disk sits behind a kernel.
 
 ```mermaid
 flowchart LR
-    K(["kubectl"]) --> API
-    B(["a phone in the audience"]) --> API
+    P(["phone in the audience<br/><i>browser</i>"]) --> FOY
+    L(["presenter's laptop<br/><i>browser</i>"]) --> FOY
+    K(["presenter's laptop<br/><i>kubectl</i>"]) --> API
+    FOY["<b>krm-foyer</b><br/>login · sealed session cookie<br/>forwards with the user's own token"] --> API
     C(["controllers"]) --> API
     F(["Flux / GitOps"]) --> API
     API["<b>kube-apiserver</b><br/>authenticates · authorizes<br/>validates · stores · notifies"] --> E[("etcd")]
@@ -125,6 +127,39 @@ flowchart LR
 Because there is only one door, every rule placed at it applies to every client, and
 every write is in the same audit log. That is what makes the API server usable as a
 backend.
+
+### The browser's way in: krm-foyer
+
+`kubectl` on the presenter's laptop talks to the API server directly. A browser
+shouldn't: a page script that holds a Kubernetes token can leak it, and the login is
+an OIDC redirect dance that a static page cannot finish on its own.
+[krm-foyer](https://github.com/ConfigButler/krm-foyer) is the small piece in between.
+**Kubernetes is the backend; krm-foyer is the "for frontend".**
+
+- **Login.** It runs the OIDC login against Dex, and keeps the session in a
+  `Secure`, `HttpOnly` cookie sealed with keys only krm-foyer has. Page scripts never
+  see a token.
+- **Forwarding.** A request to `/k8s/...` goes to the API server with **the user's own
+  token**. There is no impersonation and no fallback to krm-foyer's service account, so
+  every answer (a 201, a 403, a 409) is Kubernetes' own.
+- **Watching.** `/stream` carries live changes to the browser. Many browsers can share
+  one watch, and the API server is asked about every user who reads it.
+
+```text
+phone      POST https://demo.koudijs.dev/k8s/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/quizsubmissions
+           Cookie: <the sealed session>
+
+krm-foyer  POST https://<kube-apiserver>/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/quizsubmissions
+           Authorization: Bearer <Ada's own ID token>
+```
+
+krm-foyer decides nothing about votes. Who, once, when and what are all answered by the
+API server, in the stages below.
+
+> Status, 2026-10-06: krm-foyer is a working prototype. It runs on this cluster at
+> `foyer.k8s.koudijs.dev` with its hello example. Voter still does this job in its own
+> backend today, the same way (the user's own token, no service account), and is moving
+> to krm-foyer ([krm-foyer-migration.md](krm-foyer-migration.md)).
 
 ### Today: only the API server
 
@@ -159,7 +194,8 @@ with what Voter puts at each stage:
 
 ```mermaid
 flowchart LR
-    REQ(["HTTP request<br/>POST quizsubmissions"])
+    BR(["browser<br/>phone or laptop"])
+    FOY["<b>krm-foyer</b><br/>cookie in,<br/>user's token out"]
     subgraph API["kube-apiserver"]
         direction LR
         AN["<b>1. Authentication</b><br/>who are you?<br/><i>OIDC + CEL claim mapping</i>"]
@@ -170,12 +206,15 @@ flowchart LR
         AN --> AZ --> MU --> SV --> VA
     end
     ETCD[("etcd")]
-    OP["<b>6. Operator</b><br/>watches, tallies into status"]
-    GIT["<b>7. GitOps</b><br/>the ballot becomes a commit"]
-    REQ --> AN
+    subgraph W["watching the API: every change is pushed"]
+        direction LR
+        OP["<b>6. Operator</b><br/>tallies into status"]
+        GIT["<b>7. GitOps</b><br/>the ballot becomes a commit"]
+    end
+    BR -- "POST /k8s/…/quizsubmissions" --> FOY
+    FOY --> AN
     VA --> ETCD
-    ETCD -. watch .-> OP
-    ETCD -. watch .-> GIT
+    API -. watch .-> W
 ```
 
 Each stage knows more than the one before it:
@@ -214,8 +253,9 @@ spec:
       singleChoice: Flux
 ```
 
-It is sent with the participant's **own** token. There is no service account in the
-path and no backend that "knows better".
+The browser posts it to krm-foyer with its session cookie, and krm-foyer forwards it
+with the participant's **own** token. There is no service account in the path and no
+backend that "knows better".
 
 ---
 
