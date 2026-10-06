@@ -11,7 +11,7 @@ import {
   type ApiError,
 } from '../api/coffee'
 import { useLiveCoffeeConfig } from '../api/liveCoffeeConfig'
-import { currentSession } from '../api/session'
+import { appConfig } from '../api/appConfig'
 import { useCartStore } from '../stores/cart'
 
 const cart = useCartStore()
@@ -145,20 +145,18 @@ async function placeOrder() {
 // is the authority on pricing and voucher state. The stream then keeps it
 // current -- when the object changes, the storefront is recomputed from the new
 // spec with the same pure function the backend uses.
-const session = currentSession()
-const live = session
-  ? useLiveCoffeeConfig(session.namespace, session.coffeeConfigName)
-  : null
+const live = useLiveCoffeeConfig(
+  appConfig().namespace,
+  appConfig().coffeeConfigName,
+)
 
-if (live) {
-  watch(live.draft, (config) => {
-    if (!config) return
-    cart.setActiveConfig(config)
-    cart.setStorefront(
-      buildStorefrontFromConfig(config, voucherCode.value || undefined),
-    )
-  })
-}
+watch(live.draft, (config) => {
+  if (!config) return
+  cart.setActiveConfig(config)
+  cart.setStorefront(
+    buildStorefrontFromConfig(config, voucherCode.value || undefined),
+  )
+})
 
 onMounted(() => {
   cart.ensureLoaded()
@@ -176,7 +174,7 @@ watch(
 
 <template>
   <AppShell title="Coffee bar">
-    <section v-if="live && !live.synced.value" class="panel" role="status">
+    <section v-if="!live.synced.value" class="panel" role="status">
       <p>
         {{
           live.error.value ||

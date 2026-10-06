@@ -11,7 +11,7 @@ import { computed, onMounted, ref } from 'vue'
 import AppShell from '../components/layout/AppShell.vue'
 import { useLiveResources } from '../api/liveResources'
 import { listRounds } from '../api/quiz'
-import { currentSession } from '../api/session'
+import { appConfig } from '../api/appConfig'
 import type { QuizSession } from '../api/types'
 
 const rounds = ref<QuizSession[]>([])
@@ -25,7 +25,7 @@ const live = useLiveResources({
   group: 'examples.configbutler.ai',
   version: 'v1alpha1',
   resource: 'quizsessions',
-  namespace: currentSession()?.namespace ?? '',
+  namespace: appConfig().namespace,
 })
 
 // Drafts are the presenter's scratch space: a round only exists for the room

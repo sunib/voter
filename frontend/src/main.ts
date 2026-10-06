@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import './style.css'
 import App from './App.vue'
 import { router } from './router'
+import { loadAppConfig } from './api/appConfig'
 
 import PrimeVue from 'primevue/config'
 import 'primeicons/primeicons.css'
@@ -22,4 +23,17 @@ app.use(PrimeVue, {
   },
 })
 
-app.mount('#app')
+// Every screen reads the deployment's settings synchronously, so they are in
+// hand before anything renders. Without them no screen can address its objects;
+// say so rather than mount pages that would each fail in their own way.
+loadAppConfig().then(
+  () => app.mount('#app'),
+  (cause: unknown) => {
+    console.error(cause)
+    const root = document.getElementById('app')
+    if (root) {
+      root.textContent =
+        'This page could not load its configuration. Reload to try again.'
+    }
+  },
+)

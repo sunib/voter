@@ -74,6 +74,30 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 		})
 	})
 
+	// GET /config.json -- where this deployment keeps its objects, rendered from
+	// the environment. Settings, not identity: the same answer for everyone and
+	// for no one, so it is served beside the frontend's files, outside /public/
+	// and without a session. They used to ride along in /auth/session, which
+	// krm-foyer answers now and which knows nothing about this application.
+	mux.HandleFunc("/config.json", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// Short-lived rather than no-store: it changes only with a rollout, and
+		// a stale answer for a minute after one is harmless.
+		w.Header().Set("Cache-Control", "max-age=60")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"namespace":        deps.defaultNS,
+			"coffeeConfigName": deps.cfg.CoffeeConfigName,
+			"roomName":         deps.cfg.RoomName,
+			// So a save can link the commit it became. Empty when unset, which
+			// the page renders as a plain sha rather than a dead link.
+			"commitURLTemplate": deps.cfg.AuditTrailCommitURLTemplate,
+		})
+	})
+
 	// Registered last and matching everything left over: the built frontend,
 	// with an SPA fallback. See static.go.
 	mux.Handle("/", rootHandler(deps.cfg.StaticDir))

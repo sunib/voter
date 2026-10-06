@@ -23,17 +23,6 @@ export interface Session {
   groups: string[]
   csrfToken: string
   expiresAt: number
-  /** Where this application's objects live. The SPA needs it to address the
-   *  live stream, and getting it from the server means the browser never has
-   *  to guess (or be told by a URL). */
-  namespace: string
-  coffeeConfigName: string
-  /** The Room whose join code the operator page renders. */
-  roomName: string
-  /** Turns a commit sha into a link, with "{sha}" substituted. Empty when the
-   *  deployment has not been told where its audit trail is readable, in which
-   *  case a sha is shown as plain text -- a dead link would be worse. */
-  commitURLTemplate: string
 }
 
 // The CSRF token the backend issued for this session.
@@ -46,7 +35,7 @@ export interface Session {
 let csrfToken = ''
 let lastSession: Session | null = null
 
-/** The most recent session, for callers that need the namespace or object name
+/** The most recent session, for callers that need the name or CSRF token
  *  without re-fetching. Null when signed out. */
 export function currentSession(): Session | null {
   return lastSession

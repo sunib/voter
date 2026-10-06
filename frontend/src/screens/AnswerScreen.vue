@@ -13,6 +13,7 @@ import type { QuizSession } from '../api/types'
 import { useDraftSubmissionStore } from '../stores/draftSubmission'
 import { createQuizSubmission, getQuizSession } from '../api/quiz'
 import { currentSession, getSession } from '../api/session'
+import { appConfig } from '../api/appConfig'
 
 async function isSignedOut(): Promise<boolean> {
   try {
@@ -57,7 +58,7 @@ const live = useLiveResources({
   group: 'examples.configbutler.ai',
   version: 'v1alpha1',
   resource: 'quizsessions',
-  namespace: currentSession()?.namespace ?? '',
+  namespace: appConfig().namespace,
 })
 
 const streamedRound = computed(() => {

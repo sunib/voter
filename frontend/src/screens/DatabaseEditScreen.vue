@@ -20,16 +20,16 @@ import { INTENT_ANNOTATION, intentSentence } from '../api/databaseTypes'
 import { leafChanges } from '../api/fieldChanges'
 import { formatConflictValue } from '../adminFormatters'
 import { useLiveDatabase } from '../api/liveDatabase'
-import { currentSession } from '../api/session'
+import { appConfig } from '../api/appConfig'
 import { commitURL, shortSha, useCommitStatus } from '../api/commitStatus'
 
 const props = defineProps<{ name: string }>()
 
 type FieldState = 'clean' | 'dirty' | 'conflict'
-const session = currentSession()!
+const config = appConfig()
 const { authz, error: authzError, loading: authzLoading } = useAuthorization()
 
-const live = useLiveDatabase(session.namespace, props.name)
+const live = useLiveDatabase(config.namespace, props.name)
 const {
   draft,
   server,
@@ -46,14 +46,14 @@ const {
 // Follows the receipt the save just handed back until ConfigButler reports the
 // commit pushed, so the line under the form is the state of Git rather than the
 // state of Git at the instant of the save.
-const commit = useCommitStatus(session.namespace)
+const commit = useCommitStatus(config.namespace)
 const { state: commitState, sha: commitSha, detail: commitDetail } = commit
 const failedCommitCopy =
   'Your change is saved in Kubernetes. ConfigButler stopped trying to commit it.'
 // Empty unless the deployment names where its audit trail can be read, in which
 // case the sha stays plain text rather than becoming a link to nowhere.
 const commitLink = computed(() =>
-  commitURL(session.commitURLTemplate, commitSha.value),
+  commitURL(config.commitURLTemplate, commitSha.value),
 )
 watch(commitRequest, (name) => {
   if (name) commit.follow(name)

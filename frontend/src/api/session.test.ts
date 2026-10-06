@@ -11,9 +11,6 @@ const body = {
   canVote: true,
   csrfToken: 'csrf-from-session',
   expiresAt: 0,
-  namespace: 'voter',
-  coffeeConfigName: 'demo-coffee',
-  roomName: 'demo',
 }
 
 function stubFetch(handler: (url: string) => Response) {
