@@ -34,6 +34,10 @@ https://demo.koudijs.dev/auth/login?connector=github&return=%2Froom
   press, in order, the commands behind each step, and what to do when it breaks.
 - [krm-foyer adoption](docs/k8s-front-adoption.md): Voter-specific recommendation,
   pilot prerequisites and the boundary between prototype work and deployment.
+- [krm-foyer feedback](docs/krm-foyer-feedback.md): what Voter still needs from
+  krm-foyer 0.2.0 before its own login, session and stream code can go.
+- [krm-foyer migration](docs/krm-foyer-migration.md): the plan to drop Voter's own
+  auth, session and stream code for krm-foyer, its open decisions and the cutover.
 - [Databases](docs/databases.md): the platform-team page — what it is built on,
   what has to exist in the cluster before it works, and where the intent goes.
 - [Databases cutover](docs/databases-cutover.md): the four steps that take the
