@@ -1,3 +1,5 @@
+import { deepEqual } from '@configbutler/krm-stream'
+
 import type { QuizSession, QuizSessionSpec } from './types'
 import { ballotName, buildBallot, validateAnswers, type Answer } from './ballot'
 import { createApiError, type ApiError } from './http'
@@ -30,7 +32,10 @@ export async function getQuizSession(name: string): Promise<RoundView> {
   const displayName = currentSession()?.displayName ?? ''
   let voted = false
   if (displayName !== '') {
-    voted = await getObject(QUIZSUBMISSIONS, ballotName(name, displayName)).then(
+    voted = await getObject(
+      QUIZSUBMISSIONS,
+      ballotName(name, displayName),
+    ).then(
       () => true,
       () => false,
     )
@@ -46,19 +51,64 @@ export async function getQuizSession(name: string): Promise<RoundView> {
  *  Everything else is admission's to refuse (a closed round, changed questions,
  *  someone else's name), with its own message. A second ballot is the API
  *  server's 409 AlreadyExists, reported as AlreadyVoted. */
+/** How long a ballot waits for a brand-new round's digest, and how often it
+ *  looks. Measured on the fixture: one to several seconds after creation. */
+const DIGEST_WAIT_MS = 8000
+const DIGEST_POLL_MS = 500
+
+/** The round on screen, carrying its questions digest. A round read the
+ *  moment it was created has none yet: Voter's reconciler publishes it with the
+ *  first tally, seconds later. So it is read again until it has one, and that
+ *  digest used when it is still the same round asking the same questions -- it
+ *  then names exactly the questions being answered. Anything else keeps the copy
+ *  on screen, and admission refuses the ballot as "the round changed", which is
+ *  the truth. */
+async function withDigest(
+  round: QuizSession,
+  sleep = (ms: number) => new Promise((r) => setTimeout(r, ms)),
+): Promise<QuizSession> {
+  if (round.status?.questionsDigest) return round
+  let fresh = await getObject<QuizSession>(
+    QUIZSESSIONS,
+    round.metadata.name ?? '',
+  )
+  for (
+    let waited = 0;
+    !fresh.status?.questionsDigest && waited < DIGEST_WAIT_MS;
+    waited += DIGEST_POLL_MS
+  ) {
+    await sleep(DIGEST_POLL_MS)
+    fresh = await getObject<QuizSession>(
+      QUIZSESSIONS,
+      round.metadata.name ?? '',
+    )
+  }
+  const digest = fresh.status?.questionsDigest
+  if (!digest) {
+    throw createApiError(409, {
+      error: 'This round is still being prepared. Try again in a moment.',
+    })
+  }
+  if (
+    fresh.metadata.uid !== round.metadata.uid ||
+    !deepEqual(fresh.spec.questions ?? [], round.spec.questions ?? [])
+  ) {
+    return round
+  }
+  return { ...round, status: { ...round.status, questionsDigest: digest } }
+}
+
 export async function createQuizSubmission(
   round: QuizSession,
   answers: Answer[],
 ): Promise<{ name: string }> {
   const problem = validateAnswers(round.spec.questions ?? [], answers)
   if (problem !== '') throw createApiError(400, { error: problem })
-  if (!round.status?.questionsDigest) {
-    // The reconciler publishes the digest within a moment of a round opening.
-    throw createApiError(409, {
-      error: 'This round is still being prepared. Try again in a moment.',
-    })
-  }
-  const ballot = buildBallot(round, currentSession()?.displayName ?? '', answers)
+  const ballot = buildBallot(
+    await withDigest(round),
+    currentSession()?.displayName ?? '',
+    answers,
+  )
   try {
     await createObject(QUIZSUBMISSIONS, ballot)
   } catch (cause) {
