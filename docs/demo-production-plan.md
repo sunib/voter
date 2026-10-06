@@ -1,6 +1,9 @@
 # Coffee to production: the ending of the 2026-10-07 demo
 
-Plan written 2026-10-06 evening. Nothing below is built yet.
+Plan written 2026-10-06 evening. **Live since 21:50 the same night**: Voter
+2.1.0 (shop-only, 3034fdd), `configs/` seeded on `k8s-trail` main (09f8d11),
+`external/k8s` b8be47e, and the `k8s-trail` webhook to the production
+Receiver. Still owed: the rehearsal (steps 5-7 under "Order of work tonight").
 
 ## The beat
 
@@ -45,7 +48,7 @@ Decisions taken:
 | Login | krm-foyer on Dex client `voter`, same connectors as demo. The room can open production on their phones |
 | "No edit" | Enforced by RBAC (no `patch`/`update` in `demo-production`), plus the UI hides the editor links |
 
-## Part 1: Voter, a shop-only mode (`feat:` → 2.2.0)
+## Part 1: Voter, a shop-only mode (`feat:` → 2.1.0, with group voting)
 
 Production runs the same image with one switch. A separate app would mean a
 second build and a second release line the night before a talk.
@@ -77,14 +80,16 @@ do.
 2. **Read-only deploy key for Flux.** `ssh-keygen -t ed25519`, add the public
    half with `gh repo deploy-key add --repo ConfigButler/k8s-trail` (no
    `--allow-write`). The private half goes into a SOPS Secret (Part 3).
-3. **Webhook.** Add the cluster's Flux Receiver URL to `k8s-trail` (push
-   events), with the same token as the `flux-system` webhook.
+3. **Webhook.** After Part 3 is live, add
+   `https://flux-webhook.k8s.koudijs.dev` + the `k8s-trail` Receiver's
+   `status.webhookPath` to `k8s-trail` (push events), with the token from
+   Secret `k8s-trail-receiver-token`.
 4. Leave **"Automatically delete head branches"** off (it is off today). A
    deleted `coffee-change` leaves the next edits with nowhere to go.
 
 ## Part 3: `external/k8s`
 
-**Only after Voter 2.2.0 runs** (the image automation bumps `app.yaml`), as one
+**Only after Voter 2.1.0 runs** (the image automation bumps `app.yaml`), as one
 commit to `main` after `git pull --rebase`. All paths are under
 `k8s.koudijs.dev/2-gitops/`.
 
@@ -118,12 +123,12 @@ it gets that Kustomization's SOPS decryption.
 | File | Contents |
 |---|---|
 | `namespace.yaml` | Namespace `demo-production` |
-| `secrets.yaml` (SOPS) | `voter-oidc-client` (same value as in `voter`), `krm-foyer-session-keys` (freshly generated), `k8s-trail-read` (the Flux deploy key: `identity`, `known_hosts`) |
+| `secrets.yaml` (SOPS) | `voter-oidc-client` (same value as in `voter`), `krm-foyer-session-keys` (freshly generated), `k8s-trail-read` (the Flux deploy key: `identity`, `known_hosts`), `k8s-trail-receiver-token` |
 | `rbac.yaml` | SA `voter` + Role `coffeeconfigs: [get]` (the storefront read). Role `coffee-reader` `coffeeconfigs: [get, list, watch]` bound to Group `demo:voter-audience`. **No `patch`/`update` for anyone but Flux** |
 | `krm-foyer.yaml` | OCIRepository + HelmRelease, a copy of `voter-demo/krm-foyer.yaml` with `publicURL: https://demo-production.koudijs.dev`, the same `oidc` block (client `voter`), `sharedWatches.resources: [coffeeconfigs.examples.configbutler.ai]` |
 | `app.yaml` | Deployment `voter`, a copy of the demo's with the image line and its `$imagepolicy` marker, and env `SHOP_ONLY=true`, `COFFEE_CONFIG_NAME=demo-coffee`, `CONFIGBUTLER_GIT_TARGET_NAME=""` (disables "save now"), without the ballot, database and coffee-admin variables. Service and NetworkPolicy as the demo's. **No CoffeeConfig seed here**: it comes from `configs/` |
 | `ingress.yaml` | Certificate `demo-production-koudijs-dev` (letsencrypt-prod, DNS-01). Middlewares `foyer-identity` (→ `krm-foyer.demo-production.svc`) and `no-cookie`. IngressRoute: `/auth/ /k8s/ /stream/ /_foyer/` → krm-foyer, `/public/` → voter with `foyer-identity`, the rest → voter. No Room Pass or `/join-room` routes: joining happens on `demo.koudijs.dev` |
-| `configs.yaml` | GitRepository `k8s-trail` (`ssh://git@github.com/ConfigButler/k8s-trail`, `main`, `interval: 1m`, `secretRef: k8s-trail-read`, `ignore: "/*\n!/configs/"`). SA `configs-applier` + Role `coffeeconfigs: ["*"]` + RoleBinding. Kustomization `configs`: `path: ./configs`, `targetNamespace: demo-production`, `prune: true`, `serviceAccountName: configs-applier`, `interval: 1m` |
+| `configs.yaml` | GitRepository `k8s-trail` (`ssh://git@github.com/ConfigButler/k8s-trail`, `main`, `interval: 1m`, `secretRef: k8s-trail-read`, `ignore: "/*\n!/configs/"`). SA `configs-applier` + Role (all verbs on `coffeeconfigs`) + RoleBinding. Kustomization `configs`: `path: ./configs`, `targetNamespace: demo-production`, `prune: true`, `serviceAccountName: configs-applier`, `interval: 1m`. Receiver `k8s-trail` for the webhook |
 
 The `configs-applier` ServiceAccount is the safety line. The room writes to
 `configs/` (through the reverser, and through the merge). Whatever lands there,
@@ -138,15 +143,20 @@ applies in `demo-production` pass it.
   to client `voter`'s `redirectURIs`. Reusing the client means the API server
   already accepts these tokens (audience `voter` in
   `1-talos/files/authentication-config.yaml`), so **no Talos change or reboot**.
-- `flux-receiver/receiver.yaml`: add GitRepository `demo-production/k8s-trail`
-  to `resources`, so the merge reaches the cluster on the webhook rather than
-  after a 1-minute poll.
+- The webhook gets its own Receiver in `demo-production` (in `configs.yaml`),
+  not a line in `flux-receiver/`. Every vote pushes to `k8s-trail`, and those
+  pushes should not wake the cluster's own GitRepository.
+- The same commit drops `create` on `quizsubmissions` from `voter-audience`
+  (the ballot gate from `demo-2026-10-07-plan.md`), which also waits for 2.1.0.
+- demo2 prunes with `Always`, so once it stops watching `coffeeconfigs` it
+  deletes `clusters/k8s.koudijs.dev/demo2/coffee-config.yaml` from main once.
 
 ## Order of work tonight
 
-1. Voter `feat:` PR (Part 1) → merge → release PR → 2.2.0 → the image
+1. Voter `feat:` on main (Part 1) → release PR → 2.1.0 → the image
    automation deploys it to `voter`.
-2. `k8s-trail` by hand (Part 2): seed `configs/`, deploy key, webhook.
+2. `k8s-trail` by hand (Part 2): seed `configs/` and the deploy key (done);
+   the webhook after step 3.
 3. `external/k8s` (Part 3), one commit, then
    `flux reconcile ks voter-demo --with-source`. Dex reconciles in its own
    Kustomization.
