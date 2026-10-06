@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/sunib/voter/compare/v1.3.0...v1.3.1) (2026-10-06)
+
+
+### Documentation
+
+* Kubernetes as your backend, one vote through the API server ([#23](https://github.com/sunib/voter/issues/23)) ([953e5b7](https://github.com/sunib/voter/commit/953e5b7e1ca59a78b25869dca6e14fda483bb890))
+
 ## [1.3.0](https://github.com/sunib/voter/compare/v1.2.0...v1.3.0) (2026-10-06)
 
 
