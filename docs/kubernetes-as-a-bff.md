@@ -206,15 +206,9 @@ flowchart LR
         AN --> AZ --> MU --> SV --> VA
     end
     ETCD[("etcd")]
-    subgraph W["watching the API: every change is pushed"]
-        direction LR
-        OP["<b>6. Operator</b><br/>tallies into status"]
-        GIT["<b>7. GitOps</b><br/>the ballot becomes a commit"]
-    end
     BR -- "POST /k8s/…/quizsubmissions" --> FOY
     FOY --> AN
     VA --> ETCD
-    API -. watch .-> W
 ```
 
 Each stage knows more than the one before it:
@@ -481,9 +475,57 @@ CEL cannot express or a call outside the cluster.
 
 ---
 
-## 6. The operator: stored, watched, counted
+## 6. The operator: for what needs a program
 
-Once stored, the ballot is just an event on a watch. A controller in Voter recomputes the
+Everything so far was configuration: claim mappings, RBAC rules, a schema, CEL. Some
+work doesn't fit in an expression. Counting 38 ballots into a result is one example.
+For that, Kubernetes has **operators**: ordinary programs that watch the API and keep
+something true. Each one runs a **control loop**.
+
+### The control loop, as a thermostat
+
+You set a thermostat to 21 °C. It doesn't know how the room got to 18 °C, and it
+doesn't need to. It looks at the room, compares it with the dial, and acts on the
+difference. Then it looks again.
+
+```mermaid
+flowchart LR
+    D["<b>Desired</b><br/>the dial says 21 °C"]
+    O["<b>Observe</b><br/>the thermometer says 18 °C"]
+    C{"<b>Compare</b><br/>the same?"}
+    A["<b>Act</b><br/>turn the heating on"]
+    N(["<b>Do nothing</b><br/>until something changes"])
+    D --> C
+    O --> C
+    C -- "no" --> A
+    A -. "the room warms up" .-> O
+    C -- "yes" --> N
+```
+
+An operator is that loop, with the API server as both the dial and the thermometer:
+
+| | Thermostat | An operator | Voter's tally operator |
+| --- | --- | --- | --- |
+| **Desired** | the dial: 21 °C | a resource's `spec` | "the round's `status` shows the count of its ballots" |
+| **Observe** | the thermometer | `watch` on the resources it cares about | every QuizSession and QuizSubmission |
+| **Compare** | 18 °C is not 21 °C | what is true against what was asked | the fresh count against the stored `status` |
+| **Act** | heating on | create, update, call something outside | write the count to `status` |
+| **Wakes up on** | a temperature change | a watch event | a ballot or round changes, at most once a second |
+| **And anyway** | every few minutes | a periodic resync | every 60 seconds |
+
+Two properties make this robust, and both come from the thermostat:
+
+- **It looks at the state, not at the events.** A thermostat doesn't count how often you
+  turned the dial. Voter's operator doesn't add one per ballot either: it recounts all
+  of them every time. A missed event, a restart, or a deleted ballot is corrected by the
+  next pass.
+- **Acting twice does no harm.** Turning the heating on when it is already on changes
+  nothing. Writing a count that is already stored is skipped, so two hundred phones
+  watching the round are not woken for nothing.
+
+### What Voter's operator does
+
+Once stored, the ballot is just an event on a watch. Voter's operator recounts the
 round and writes the result to the round's **status subresource**. That is the only
 thing its ServiceAccount may write, so it can publish a tally but cannot edit a round.
 It does not matter who wrote the ballot (the app, `kubectl`, Flux): every writer moves
