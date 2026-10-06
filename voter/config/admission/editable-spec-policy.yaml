@@ -1,5 +1,7 @@
 # What a person may change on the objects Voter's editors write: the spec, and
-# on a Database the one annotation that records why.
+# on a Database the annotation that records why, and the one `kubectl apply`
+# writes -- the talk has someone apply their own request from a terminal
+# (participant-rbac.yaml grants `update` for exactly that).
 #
 # Voter's save handlers used to hold this line (decodeSaveIntent refused any
 # patch outside spec, and krm-stream's ValidateMergePatch any protected field).
@@ -35,9 +37,12 @@ spec:
       expression: >-
         !request.userInfo.username.startsWith('system:')
   variables:
-    # The one annotation a person may write, and only on a Database.
+    # The annotations a person may write, and only on a Database.
     - name: intent
       expression: "'platform.configbutler.ai/intent'"
+    - name: ownAnnotations
+      expression: >-
+        ['platform.configbutler.ai/intent', 'kubectl.kubernetes.io/last-applied-configuration']
     - name: mayAnnotate
       expression: "request.resource.resource == 'databases'"
     - name: newAnnotations
@@ -55,13 +60,13 @@ spec:
       reason: Forbidden
     - expression: >-
         variables.newAnnotations.all(k,
-            (variables.mayAnnotate && k == variables.intent)
+            (variables.mayAnnotate && k in variables.ownAnnotations)
             || (k in variables.oldAnnotations && variables.oldAnnotations[k] == variables.newAnnotations[k]))
         && variables.oldAnnotations.all(k,
-            (variables.mayAnnotate && k == variables.intent) || k in variables.newAnnotations)
+            (variables.mayAnnotate && k in variables.ownAnnotations) || k in variables.newAnnotations)
       messageExpression: >-
         variables.mayAnnotate
-          ? 'Only spec and the ' + variables.intent + ' annotation can be changed here.'
+          ? 'Only spec, the ' + variables.intent + ' annotation and kubectl apply\'s own can be changed here.'
           : 'Only spec can be changed here: the annotations on ' + object.metadata.name +
             ' are managed by GitOps.'
       reason: Forbidden

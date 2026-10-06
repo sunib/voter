@@ -54,46 +54,23 @@ func main() {
 		log.Printf("static: serving the frontend from %s", cfg.StaticDir)
 	}
 
-	// The OIDC client is built before anything serves, so a misconfigured
-	// deployment fails at boot with a clear message instead of failing every
-	// login later.
-	hashKey, blockKey, keyErr := loadAppCookieKeys(cfg)
-	if keyErr != nil {
-		log.Fatalf("oidc: application cookie keys unusable: %v", keyErr)
-	}
-	sc, scErr := newSessionSecureCookie(hashKey, blockKey)
-	if scErr != nil {
-		log.Fatalf("oidc: secure cookie unavailable: %v", scErr)
-	}
-	sessionCookieCodec = sc
-
 	serviceAccount, err := newServiceAccountClient(&cfg)
 	if err != nil {
 		log.Fatalf("kubernetes: %v", err)
 	}
 
-	bootCtx, bootCancel := context.WithTimeout(context.Background(), 60*time.Second)
-	oidcClient, err := newOIDCProvider(bootCtx, cfg)
-	bootCancel()
-	if err != nil {
-		log.Fatalf("oidc: %v", err)
-	}
-	log.Printf("oidc: issuer=%s client=%s redirect=%s origin=%s connector=%q",
-		cfg.OIDCIssuerURL, cfg.OIDCClientID, cfg.OIDCRedirectURL, cfg.AppOrigin, cfg.OIDCConnectorID)
-
 	deps := handlerDeps{
-		cfg:       cfg,
-		defaultNS: applicationNamespace(cfg),
-		vouchers:  newVoucherLedger(),
-		orders:    newOrderLog(),
+		cfg:            cfg,
+		serviceAccount: serviceAccount,
+		defaultNS:      applicationNamespace(cfg),
+		vouchers:       newVoucherLedger(),
+		orders:         newOrderLog(),
 	}
 
 	mux := http.NewServeMux()
-	registerOIDCHandlers(mux, oidcClient, cfg, deps.defaultNS)
 	registerJoinRoomHandler(mux)
 	registerParticipantStorefrontHandlers(mux, deps)
 	registerParticipantOrderFeedHandlers(mux, deps)
-	registerParticipantAuthzHandlers(mux, deps)
 	// Last: it owns "/" and therefore everything unclaimed above.
 	registerHandlers(mux, deps)
 
@@ -102,13 +79,10 @@ func main() {
 	// ballot written with kubectl moves the projected number exactly as one
 	// typed on a phone does. docs/live-results-design.md.
 	//
-	// Started here rather than lazily: the screens fall back to the REST results
-	// endpoint, so a process that never starts this degrades to a Refresh button
-	// instead of to a blank page, and a process that starts it must start it
-	// before the first phone connects.
-	// It runs for the life of the process, like the metrics server above: this
-	// binary has no graceful shutdown to hang a cancel off, and a half-stopped
-	// tally would be worse than a stopped one.
+	// Started before serving: the results screen has no other source, so the
+	// tally must be running before the first phone connects. It runs for the
+	// life of the process: this binary has no graceful shutdown to hang a cancel
+	// off, and a half-stopped tally would be worse than a stopped one.
 	go newQuizReconciler(serviceAccount, deps.defaultNS).Run(context.Background())
 
 	addr := net.JoinHostPort(cfg.Host, cfg.Port)

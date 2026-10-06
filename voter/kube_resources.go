@@ -11,11 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-const (
-	kubeCAPath    = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-	kubeAPIServer = "https://kubernetes.default.svc"
-)
-
 func coffeeConfigGVR() schema.GroupVersionResource {
 	return schema.GroupVersionResource{
 		Group:    "examples.configbutler.ai",

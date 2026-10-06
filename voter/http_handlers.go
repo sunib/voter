@@ -1,32 +1,28 @@
 package main
 
-// The endpoints that are not part of login and not part of the application
-// API: health, build info, and the static frontend.
+// The endpoints that are not part of the application API: health, build info,
+// the deployment's settings, and the static frontend.
 //
-// Everything else that used to live here -- /public/login, /public/session,
-// /public/logout, /public/session-info and the Traefik forward-auth decision
-// endpoint -- belonged to the legacy authentication model, where the browser
-// asserted its own identity and this service impersonated it with its
-// ServiceAccount. Login now goes through Dex and Room Pass (oidc_handlers.go),
-// and participant Kubernetes calls carry the participant's own token.
+// Login, sessions, /k8s and streams are krm-foyer's, on the same host. What
+// Voter still serves under /public/ runs behind krm-foyer's identity check
+// (foyer_identity.go).
 
 import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"k8s.io/client-go/dynamic"
 )
 
 type handlerDeps struct {
 	cfg       config
 	defaultNS string
 
-	// newClients builds the request-scoped Kubernetes clients from a
-	// participant's ID token. It is a field rather than a direct call so tests
-	// can substitute a fake API server; production always uses
-	// newParticipantClients. A nil value means the real one -- a test that
-	// forgets to set it must not silently reach a cluster, and
-	// participantClientsFor makes that a failure instead.
-	newClients func(cfg config, idToken string) (participantClients, error)
+	// serviceAccount is Voter's own client (service_account.go): the storefront
+	// reads the CoffeeConfig with it, and the tally reconciler writes status.
+	// Never a person's: Voter holds no one's token any more.
+	serviceAccount dynamic.Interface
 
 	// vouchers counts redemptions per voucher code for this process. See
 	// coffee_vouchers.go for why this is in memory and what that costs.
@@ -35,16 +31,6 @@ type handlerDeps struct {
 	// orders is the in-memory feed of what the room actually ordered. Not a
 	// custom resource, and deliberately so -- coffee_orders.go says why.
 	orders *orderLog
-}
-
-// participantClientsFor is the single place handlers obtain Kubernetes clients,
-// so the "credentials come from the request and nothing else" rule has exactly
-// one enforcement point.
-func (d handlerDeps) participantClientsFor(idToken string) (participantClients, error) {
-	if d.newClients != nil {
-		return d.newClients(d.cfg, idToken)
-	}
-	return newParticipantClients(d.cfg, idToken)
 }
 
 func registerHandlers(mux *http.ServeMux, deps handlerDeps) {

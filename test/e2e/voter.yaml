@@ -9,39 +9,29 @@ kind: Role
 metadata:
   name: voter
   namespace: voter
-# Must mirror the platform repo's voter Role. krm-stream shares ONE watch per
-# scope and fans it out, so the watch is opened as this ServiceAccount and only
-# THEN is each subscriber authorized as itself. A scope the application will
-# serve but this Role does not cover fails for everyone -- including an
-# identity whose own RBAC allows it, because there is no watch to join.
-#
-# That ordering is also why a refused participant still gets a clean FORBIDDEN:
-# the subscriber review runs BEFORE the shared watch, so their refusal never
-# depends on what is below.
+# Must mirror the platform repo's voter Role. Voter acts as itself for two
+# things only: the storefront reads the one CoffeeConfig, and the tally
+# reconciler reads rounds and ballots and writes a round's status. Everything a
+# person does goes through krm-foyer's /k8s with their own token, and live
+# streams are krm-foyer's, with shared watches of its own.
 rules:
   - apiGroups: [examples.configbutler.ai]
     resources: [coffeeconfigs]
     resourceNames: [demo-coffee]
-    verbs: [list, watch]
+    verbs: [get]
   - apiGroups: [examples.configbutler.ai]
     resources: [quizsessions]
     verbs: [get, list, watch]
   # The tally controller. It watches the API, so a ballot pasted with kubectl
-  # moves the projected number exactly as one typed on a phone does -- the
-  # application is not on that path at all.
+  # moves the projected number exactly as one typed on a phone does.
   - apiGroups: [examples.configbutler.ai]
     resources: [quizsubmissions]
     verbs: [list, watch]
-  # ...and writes the result back, to the STATUS only. The subresource split is
-  # worth having for its own sake: the controller publishes the numbers without
-  # being able to edit the questions that produced them.
+  # ...and writes the result back, to the STATUS only: the controller
+  # publishes the numbers without being able to edit the questions.
   - apiGroups: [examples.configbutler.ai]
     resources: [quizsessions/status]
     verbs: [get, patch]
-  - apiGroups: [room-pass.koudijs.dev]
-    resources: [rooms]
-    resourceNames: [demo]
-    verbs: [list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -56,28 +46,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: voter
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: voter-stream-access-review
-rules:
-  - apiGroups: [authorization.k8s.io]
-    resources: [subjectaccessreviews]
-    verbs: [create]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: voter-stream-access-review
-subjects:
-  - kind: ServiceAccount
-    name: voter
-    namespace: voter
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: voter-stream-access-review
 ---
 # Voter in the local fixture.
 #
@@ -132,6 +100,10 @@ rules:
   - apiGroups: [examples.configbutler.ai]
     resources: [quizsubmissions]
     verbs: [get, list, create]
+  # As the cluster's participant-rbac.yaml: the Databases pages are everyone's.
+  - apiGroups: [platform.configbutler.ai]
+    resources: [databases]
+    verbs: [get, list, watch, create, patch, update]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -191,18 +163,6 @@ spec:
             - name: http
               containerPort: 8080
           env:
-            - name: OIDC_ISSUER_URL
-              value: https://login.voter.test:19443
-            - name: OIDC_CLIENT_ID
-              value: voter-fixture
-            - name: OIDC_CLIENT_SECRET
-              value: voter-fixture-secret
-            - name: OIDC_REDIRECT_URL
-              value: https://app.voter.test:19443/auth/callback
-            - name: OIDC_CONNECTOR_ID
-              value: room-pass
-            - name: APP_ORIGIN
-              value: https://app.voter.test:19443
             - name: KUBERNETES_NAMESPACE
               value: voter
             - name: COFFEE_CONFIG_NAME
@@ -212,23 +172,29 @@ spec:
             # test read a partial success as a failure.
             - name: CONFIGBUTLER_GIT_TARGET_NAME
               value: ''
-            # Fixed so a restart does not sign the test's browsers out
-            # mid-assertion. Fixture-only values; nothing here is a secret.
-            - name: APP_COOKIE_HASH_KEY
-              value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-            - name: APP_COOKIE_BLOCK_KEY
-              value: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
-            # The fixture's TLS is self-signed, and the issuer is reached over
-            # the published host port. Trust that one CA explicitly rather than
-            # disabling verification -- there is no switch for that, by design.
-            - name: SSL_CERT_FILE
-              value: /etc/issuer-ca/ca.crt
-          volumeMounts:
-            - name: issuer-ca
-              mountPath: /etc/issuer-ca
-              readOnly: true
-      volumes:
-        - name: issuer-ca
-          configMap:
-            name: issuer-ca
 # The application's host is routed in edge.yaml, beside Room Pass's paths on it.
+---
+# Only Traefik may reach Voter. That is what makes Krm-Foyer-Identity
+# trustworthy: the one route to /public/ always asks krm-foyer's check, which
+# replaces any copy a browser sent, and nothing else can send Voter a header
+# the check did not write (foyer_identity.go).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: voter
+  namespace: voter
+spec:
+  podSelector:
+    matchLabels:
+      app: voter
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - port: 8080
+      from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik

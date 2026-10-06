@@ -18,9 +18,8 @@ import (
 // krm-stream gateway. krm-foyer serves /stream/v1 now, with shared watches of
 // its own, so this is a plain client.
 
-// serviceAccountRESTConfig configures one cluster for Voter's own client and
-// for participant clients. Only TLS trust crosses into the participant
-// configuration; credentials remain separate.
+// serviceAccountRESTConfig configures Voter's own client: in a pod, the
+// ServiceAccount; outside one, an explicit kubeconfig and nothing else.
 func serviceAccountRESTConfig(appConfig *config) (*rest.Config, error) {
 	var cfg *rest.Config
 	var err error
@@ -42,7 +41,6 @@ func serviceAccountRESTConfig(appConfig *config) (*rest.Config, error) {
 		cfg.Host = host
 	}
 	appConfig.KubernetesAPIServer = cfg.Host
-	appConfig.participantTLS = &rest.TLSClientConfig{CAFile: cfg.CAFile, CAData: append([]byte(nil), cfg.CAData...), ServerName: cfg.ServerName}
 	return cfg, nil
 }
 

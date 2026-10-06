@@ -22,7 +22,9 @@ func localServiceAccountConfig(t *testing.T, cluster *clientcmdapi.Cluster, auth
 	return config{StreamKubeconfig: path}
 }
 
-func TestExplicitLocalCredentialsKeepParticipantClientsSeparate(t *testing.T) {
+// An explicit kubeconfig is Voter's own identity outside a cluster: its token
+// and its cluster trust are what the client uses.
+func TestExplicitLocalCredentialsAreVotersOwn(t *testing.T) {
 	server := httptest.NewTLSServer(http.NotFoundHandler())
 	defer server.Close()
 	cert, err := x509.ParseCertificate(server.TLS.Certificates[0].Certificate[0])
@@ -30,27 +32,13 @@ func TestExplicitLocalCredentialsKeepParticipantClientsSeparate(t *testing.T) {
 		t.Fatal(err)
 	}
 	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
-	cfg := localServiceAccountConfig(t, &clientcmdapi.Cluster{Server: server.URL, CertificateAuthorityData: ca, TLSServerName: "fixture"}, &clientcmdapi.AuthInfo{Token: "shared-token", ClientCertificateData: []byte("shared-cert"), ClientKeyData: []byte("shared-key"), Impersonate: "shared-user"})
-	shared, err := serviceAccountRESTConfig(&cfg)
+	cfg := localServiceAccountConfig(t, &clientcmdapi.Cluster{Server: server.URL, CertificateAuthorityData: ca, TLSServerName: "fixture"}, &clientcmdapi.AuthInfo{Token: "voter-token"})
+	rc, err := serviceAccountRESTConfig(&cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	participant, err := participantRESTConfig(cfg, "participant-token")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if shared.BearerToken != "shared-token" || participant.BearerToken != "participant-token" {
-		t.Fatal("credential selection changed")
-	}
-	if participant.Host != server.URL || participant.ServerName != "fixture" || string(participant.CAData) != string(ca) {
-		t.Fatal("participant and shared cluster trust differ")
-	}
-	if participant.BearerTokenFile != "" || len(participant.CertData) > 0 || len(participant.KeyData) > 0 || participant.Impersonate.UserName != "" || participant.ExecProvider != nil || participant.AuthProvider != nil || participant.WrapTransport != nil {
-		t.Fatal("shared credentials leaked into participant client")
-	}
-	shared.CAData[0] = 'X'
-	if participant.CAData[0] == 'X' {
-		t.Fatal("participant trust aliases mutable shared configuration")
+	if rc.BearerToken != "voter-token" || rc.Host != server.URL || rc.ServerName != "fixture" || string(rc.CAData) != string(ca) {
+		t.Fatalf("the kubeconfig's credential and trust were not used: %+v", rc)
 	}
 }
 

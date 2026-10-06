@@ -2,36 +2,22 @@ package main
 
 import (
 	"github.com/kelseyhightower/envconfig"
-	"k8s.io/client-go/rest"
 )
 
 // Configuration for the application.
 //
-// There is ONE authentication model: the backend is a confidential OIDC client
-// of Dex, and each participant's own ID token is the credential used against
-// the Kubernetes API. The settings that used to select a second model -- a
-// browser-asserted identity plus ServiceAccount impersonation, with its own
-// join codes, admin password and forward-auth ServiceAccount -- are gone along
-// with the code behind them.
+// Voter has no login of its own: krm-foyer, on the same host, signs people in
+// and vouches for them (foyer_identity.go). So there is nothing here about
+// issuers, clients, cookies or origins -- only names of things, and where Voter's
+// own Kubernetes credential comes from.
 type config struct {
 	// Voter's own credential outside a cluster, for local development; never
 	// discover the user's default kubeconfig. The name is from when it was the
 	// stream gateway's.
 	StreamKubeconfig string `envconfig:"STREAM_KUBECONFIG"`
-	// Public cluster TLS trust copied at startup, without Voter's own credentials.
-	participantTLS *rest.TLSClientConfig
 
 	Host string `envconfig:"HOST" default:"0.0.0.0"`
 	Port string `envconfig:"PORT" default:"8080"`
-
-	// ParticipantCookieName holds the encrypted application session. __Host- so
-	// it is host-only and cannot be set by a sibling subdomain.
-	ParticipantCookieName string `envconfig:"PARTICIPANT_COOKIE_NAME" default:"__Host-voter-session"`
-	// SessionCookieMaxAgeSecs caps the application session. The session ends at
-	// the EARLIER of this and the ID token's own expiry -- an intact cookie must
-	// never extend the authority of an expired token. The authproxy connector
-	// issues no refresh token, so this is a ceiling, not a sliding window.
-	SessionCookieMaxAgeSecs int `envconfig:"SESSION_COOKIE_MAX_AGE_SECONDS" default:"43200"`
 
 	CoffeeConfigName string `envconfig:"COFFEE_CONFIG_NAME" default:"testnet-coffee"`
 
@@ -94,51 +80,14 @@ type config struct {
 	// audit batch (audit-webhook-batch-max-wait=1s) with margin.
 	ConfigButlerCloseDelaySeconds int32 `envconfig:"CONFIGBUTLER_CLOSE_DELAY_SECONDS" default:"2"`
 
-	// --- OIDC ---------------------------------------------------------------
-	OIDCIssuerURL    string `envconfig:"OIDC_ISSUER_URL"`
-	OIDCClientID     string `envconfig:"OIDC_CLIENT_ID"`
-	OIDCClientSecret string `envconfig:"OIDC_CLIENT_SECRET"`
-	// OIDCRedirectURL must match a redirect URI registered on the Dex client
-	// exactly. It is configuration, never derived from a request header.
-	OIDCRedirectURL string `envconfig:"OIDC_REDIRECT_URL"`
-
-	// OIDCConnectorID preselects a Dex connector, skipping the "how do you want
-	// to sign in" screen Dex shows when an authorization request names none and
-	// more than one is configured. For this demo it is "room-pass": the audience
-	// should land on the join form, not on a choice they cannot evaluate.
-	// Empty means "let Dex ask".
-	OIDCConnectorID string `envconfig:"OIDC_CONNECTOR_ID"`
-	// OIDCConnectorChoices are the connectors a caller may request explicitly
-	// via /auth/login?connector=<id>, so an operator can still sign in with
-	// GitHub on a deployment that defaults to the room connector. An allowlist
-	// rather than free text: the value goes into a redirect to the issuer.
-	OIDCConnectorChoices []string `envconfig:"OIDC_CONNECTOR_CHOICES"`
-	// ParticipantConnectorID is the Dex connector id a ballot must come through.
-	// Dex reports it in federated_claims.connector_id, sets it itself, and no
-	// caller can forge it -- the apiserver keys the "demo:" username prefix off
-	// the same value.
-	//
-	// Configuration rather than a constant because it names a deployment's own
-	// Dex, and a wrong value is silent in the worst way: every participant is
-	// refused with "join through Room Pass" while looking perfectly signed in.
-	// The default matches both this cluster and the e2e fixture, so neither has
-	// to set it; it exists so renaming the connector is an env var and not a
-	// rebuild.
+	// ParticipantConnectorID is the Dex connector whose logins are the
+	// audience, published in /config.json so the vote screen can explain who
+	// may vote. Admission holds the rule itself (config/admission/), on the
+	// `demo:` username the API server derives from the same connector.
 	ParticipantConnectorID string `envconfig:"PARTICIPANT_CONNECTOR_ID" default:"room-pass"`
 
-	// AppOrigin is this application's own origin, used for CSRF origin checks.
-	// Never derived from X-Forwarded-* headers.
-	AppOrigin string `envconfig:"APP_ORIGIN"`
-
-	// Application cookie keys, supplied by the deployment from a pre-created
-	// Secret. Base64 of exactly 32 random bytes each, independent of the Room
-	// Pass keys and of the Dex client secret. Replacing them signs everyone
-	// out; that is an intentional operation, not seamless rotation.
-	AppCookieHashKey  string `envconfig:"APP_COOKIE_HASH_KEY"`
-	AppCookieBlockKey string `envconfig:"APP_COOKIE_BLOCK_KEY"`
-
-	// KubernetesAPIServer fixes the destination for participant-token calls.
-	// Empty means the in-cluster address.
+	// KubernetesAPIServer overrides the API server Voter's own client talks to.
+	// Empty means the in-cluster address, or the explicit kubeconfig's.
 	KubernetesAPIServer string `envconfig:"KUBERNETES_API_SERVER"`
 
 	// KubernetesNamespace overrides the pod namespace for application resources.

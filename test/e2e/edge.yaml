@@ -40,6 +40,37 @@ spec:
       X-Remote-User-Email: ""
       X-Remote-Group: ""
 ---
+# Voter's /public/ is a domain backend behind krm-foyer's identity check
+# (krm-foyer docs/ingress.md, the Traefik recipe). Traefik asks
+# /auth/check?identity=true with the browser's headers and its own
+# X-Forwarded-Method; a 204 comes back with Krm-Foyer-Identity, which Traefik
+# copies onto the request after removing any copy the browser sent. Anything
+# else -- a 401 for someone signed out, a 403 for a write without CSRF proof --
+# goes back to the browser as it is. Plain HTTP: krm-foyer serves no TLS here,
+# and only Traefik's pods may reach it (krm-foyer-values.yaml).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: foyer-identity
+  namespace: voter
+spec:
+  forwardAuth:
+    address: http://krm-foyer.voter.svc/auth/check?identity=true
+    authResponseHeaders: [Krm-Foyer-Identity]
+    trustForwardHeader: false
+---
+# Voter has no use for anyone's cookies: krm-foyer's session cookie is only
+# krm-foyer's business, and Room Pass's only Room Pass's.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: no-cookie
+  namespace: voter
+spec:
+  headers:
+    customRequestHeaders:
+      Cookie: ""
+---
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute
 metadata:
@@ -85,12 +116,24 @@ spec:
       services:
         - name: krm-foyer
           port: http
-    # Everything else is Voter: the SPA, /config.json, /join-room (the QR
-    # code's target, which carries a room code in its query; k3s's Traefik
-    # keeps no access log) and /public/*.
+    # Voter's domain backend, behind the identity check.
+    - match: Host(`app.voter.test`) && PathPrefix(`/public/`)
+      kind: Rule
+      priority: 250
+      middlewares:
+        - name: foyer-identity
+        - name: no-cookie
+      services:
+        - name: voter
+          port: 8080
+    # Everything else is Voter, ungated: the SPA, /config.json and /join-room
+    # (the QR code's target, which carries a room code in its query; k3s's
+    # Traefik keeps no access log).
     - match: Host(`app.voter.test`)
       kind: Rule
       priority: 100
+      middlewares:
+        - name: no-cookie
       services:
         - name: voter
           port: 8080

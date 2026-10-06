@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,7 +11,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -64,38 +64,33 @@ func testnetVoucher(maximumUsage int) map[string]any {
 	}
 }
 
-// fakeCoffeeClients returns a client factory backed by an in-memory API server
-// holding objs. Errors are injected with reactors, the way gitops-reverser's
-// tests do it, so an RBAC denial can be exercised without a cluster.
-func fakeCoffeeClients(objs ...runtime.Object) (func(config, string) (participantClients, error), *dynamicfake.FakeDynamicClient) {
-	scheme := runtime.NewScheme()
+// fakeCoffeeClients returns an in-memory API server holding objs, standing in
+// for Voter's own ServiceAccount client. Errors are injected with reactors, so
+// a denial can be exercised without a cluster.
+func fakeCoffeeClients(objs ...runtime.Object) *dynamicfake.FakeDynamicClient {
 	listKinds := map[schema.GroupVersionResource]string{
 		coffeeConfigGVR(): "CoffeeConfigList",
 	}
-	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds, objs...)
-	return func(config, string) (participantClients, error) {
-		return participantClients{dynamic: dyn}, nil
-	}, dyn
+	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, objs...)
 }
 
-// storefrontFixture wires a mux with a session codec and a fake API server.
+// testConfig is the configuration the handlers read: names, not credentials.
+func testConfig() config {
+	return config{CoffeeConfigName: "demo-coffee", ParticipantConnectorID: "room-pass"}
+}
+
+// storefrontFixture wires a mux with a fake API server as Voter's own client.
 func storefrontFixture(t *testing.T, objs ...runtime.Object) (*http.ServeMux, config, *voucherLedger, *dynamicfake.FakeDynamicClient) {
 	t.Helper()
-	old := sessionCookieCodec
-	sessionCookieCodec = testCodec(t)
-	t.Cleanup(func() { sessionCookieCodec = old })
-
 	cfg := testConfig()
-	cfg.CoffeeConfigName = "demo-coffee"
-
-	newClients, dyn := fakeCoffeeClients(objs...)
+	dyn := fakeCoffeeClients(objs...)
 	ledger := newVoucherLedger()
 	deps := handlerDeps{
-		cfg:        cfg,
-		defaultNS:  storefrontNamespace,
-		newClients: newClients,
-		vouchers:   ledger,
-		orders:     newOrderLog(),
+		cfg:            cfg,
+		defaultNS:      storefrontNamespace,
+		serviceAccount: dyn,
+		vouchers:       ledger,
+		orders:         newOrderLog(),
 	}
 	mux := http.NewServeMux()
 	registerParticipantStorefrontHandlers(mux, deps)
@@ -107,38 +102,29 @@ func storefrontFixture(t *testing.T, objs ...runtime.Object) (*http.ServeMux, co
 	return mux, cfg, ledger, dyn
 }
 
-// signedInRequest builds a request carrying a valid session cookie and matching
-// CSRF proof, the way the SPA does.
-func signedInRequest(t *testing.T, cfg config, method, target, body string) *http.Request {
+// identityFor is krm-foyer's Krm-Foyer-Identity header for one person: the
+// unpadded base64url of the JSON its /auth/check returns.
+func identityFor(t *testing.T, username, displayName, connector string) string {
 	t.Helper()
-	now := time.Now()
-	rec := httptest.NewRecorder()
-	if err := setParticipantSession(rec, cfg, sessionCookieCodec, participantSession{
-		IDToken: "participant-token",
-		Subject: "demo-subject",
-		// Set because the order feed shows it and shows nothing else about a
-		// participant; a fixture without one could not tell the two apart.
-		DisplayName: "Demo Attendee",
-		TokenExpiry: now.Add(time.Hour).Unix(),
-	}, now); err != nil {
-		t.Fatalf("session: %v", err)
+	raw, err := json.Marshal(map[string]any{
+		"userInfo":    map[string]any{"username": username, "groups": []string{"demo:voter-audience", "system:authenticated"}},
+		"displayName": displayName,
+		"connector":   connector,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	var reader *strings.Reader
-	if body == "" {
-		reader = strings.NewReader("")
-	} else {
-		reader = strings.NewReader(body)
-	}
-	req := httptest.NewRequest(method, target, reader)
-	for _, c := range rec.Result().Cookies() {
-		req.AddCookie(c)
-	}
-	s, ok := getParticipantSession(req, cfg, sessionCookieCodec, now)
-	if !ok {
-		t.Fatal("fixture session invalid")
-	}
-	req.Header.Set("X-CSRF-Token", s.CSRF)
-	req.Header.Set("Origin", cfg.AppOrigin)
+	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+// signedInRequest builds a request as the edge forwards it for a signed-in
+// participant: with krm-foyer's identity header, and no cookie.
+func signedInRequest(t *testing.T, _ config, method, target, body string) *http.Request {
+	t.Helper()
+	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	// Set because the order feed shows it and shows nothing else about a
+	// participant; a fixture without one could not tell the two apart.
+	req.Header.Set(identityHeader, identityFor(t, "demo:demo-subject", "Demo Attendee", "room-pass"))
 	return req
 }
 
@@ -393,19 +379,20 @@ func TestOrderWithAnInapplicableVoucherSpendsNothing(t *testing.T) {
 
 // --- authorization ----------------------------------------------------------
 
-// Kubernetes' verdict must reach the participant unchanged. Turning a 403 into
-// a 500 would hide the RBAC decision the whole demo exists to show.
-func TestStorefrontPreservesKubernetesDenials(t *testing.T) {
+// Voter reads the menu as itself, so a 401 or 403 is about Voter's credential
+// or Role -- a deployment fault, reported as a 502 rather than as the person's
+// own refusal. A missing menu stays a 404.
+func TestStorefrontReportsKubernetesFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		err  error
 		want int
 	}{
 		{
-			"forbidden stays forbidden",
+			"Voter's own Role refused is a deployment fault",
 			apierrors.NewForbidden(schema.GroupResource{Group: "examples.configbutler.ai", Resource: "coffeeconfigs"},
-				"demo-coffee", errors.New("not in the audience group")),
-			http.StatusForbidden,
+				"demo-coffee", errors.New("the voter Role does not grant get")),
+			http.StatusBadGateway,
 		},
 		{
 			"not found stays not found",
@@ -413,9 +400,9 @@ func TestStorefrontPreservesKubernetesDenials(t *testing.T) {
 			http.StatusNotFound,
 		},
 		{
-			"an expired token is reported as unauthorized",
+			"Voter's own token refused is a deployment fault",
 			apierrors.NewUnauthorized("token expired"),
-			http.StatusUnauthorized,
+			http.StatusBadGateway,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -441,15 +428,24 @@ func TestStorefrontPreservesKubernetesDenials(t *testing.T) {
 	}
 }
 
-func TestStorefrontAndOrdersRequireASession(t *testing.T) {
+// Without krm-foyer's header there is nobody to serve. Behind a correct edge
+// that cannot happen (the check answers 401 itself), so this is the backstop
+// for a route that forgot to ask it -- and no header a browser controls may
+// stand in for one.
+func TestStorefrontAndOrdersRequireAnIdentity(t *testing.T) {
 	mux, cfg, _, _ := storefrontFixture(t, demoCoffeeConfig())
 
-	for _, tc := range []struct{ method, path, body string }{
-		{"GET", "/public/storefront", ""},
-		{"POST", "/public/orders", orderBody("", "coffee-espresso")},
+	for _, tc := range []struct{ method, path, body, identity string }{
+		{"GET", "/public/storefront", "", ""},
+		{"POST", "/public/orders", orderBody("", "coffee-espresso"), ""},
+		{"GET", "/public/storefront", "", "not base64url!"},
+		{"GET", "/public/storefront", "", base64.RawURLEncoding.EncodeToString([]byte(`{"displayName":"no username"}`))},
 	} {
 		req := signedInRequest(t, cfg, tc.method, tc.path, tc.body)
-		req.Header.Del("Cookie")
+		req.Header.Del(identityHeader)
+		if tc.identity != "" {
+			req.Header.Set(identityHeader, tc.identity)
+		}
 		// Headers an attacker controls must not substitute for a session.
 		req.Header.Set("Authorization", "Bearer attacker-token")
 		req.Header.Set("Impersonate-User", "system:admin")
@@ -460,55 +456,6 @@ func TestStorefrontAndOrdersRequireASession(t *testing.T) {
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s %s: status = %d, want 401", tc.method, tc.path, rec.Code)
 		}
-	}
-}
-
-func TestOrderRequiresCSRFProof(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		origin string
-		csrf   string
-		want   int
-	}{
-		{"valid proof", "", "valid", http.StatusOK},
-		{"absent origin with a valid token", "", "valid", http.StatusOK},
-		{"no csrf token", "", "", http.StatusForbidden},
-		{"wrong csrf token", "", "wrong", http.StatusForbidden},
-		{"foreign origin even with a valid token", "https://evil.example", "valid", http.StatusForbidden},
-		{"null origin is rejected", "null", "valid", http.StatusForbidden},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			mux, cfg, _, _ := storefrontFixture(t, demoCoffeeConfig())
-			req := signedInRequest(t, cfg, "POST", "/public/orders", orderBody("", "coffee-espresso"))
-			if tc.origin == "" {
-				req.Header.Del("Origin")
-			} else {
-				req.Header.Set("Origin", tc.origin)
-			}
-			if tc.csrf != "valid" {
-				req.Header.Set("X-CSRF-Token", tc.csrf)
-			}
-
-			rec := httptest.NewRecorder()
-			mux.ServeHTTP(rec, req)
-			if rec.Code != tc.want {
-				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tc.want, rec.Body.String())
-			}
-		})
-	}
-}
-
-// A GET is not a mutation, so it must not demand CSRF proof -- otherwise the
-// storefront cannot load before the SPA has fetched /auth/session.
-func TestStorefrontDoesNotRequireCSRF(t *testing.T) {
-	mux, cfg, _, _ := storefrontFixture(t, demoCoffeeConfig())
-	req := signedInRequest(t, cfg, "GET", "/public/storefront", "")
-	req.Header.Del("X-CSRF-Token")
-
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", rec.Code)
 	}
 }
 
@@ -552,115 +499,6 @@ func TestOrderRejectsUnreadableBodies(t *testing.T) {
 	}
 }
 
-// --- credential isolation ---------------------------------------------------
-
-// The fake dynamic client above bypasses the transport, so it cannot prove what
-// actually goes on the wire. This one uses the real client against a controlled
-// stand-in: the participant's OWN token must be the credential, and headers an
-// attacker supplied must not survive into the upstream request.
-func TestStorefrontAndOrdersSendTheParticipantsOwnToken(t *testing.T) {
-	for _, tc := range []struct {
-		name, method, path, body, wantMethod, wantPath string
-	}{
-		{
-			"storefront", "GET", "/public/storefront", "",
-			"GET", "/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/coffeeconfigs/demo-coffee",
-		},
-		{
-			"orders", "POST", "/public/orders", orderBody("", "coffee-espresso"),
-			"GET", "/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/coffeeconfigs/demo-coffee",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			old := sessionCookieCodec
-			sessionCookieCodec = testCodec(t)
-			t.Cleanup(func() { sessionCookieCodec = old })
-
-			calls := 0
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls++
-				if got := r.Header.Get("Authorization"); got != "Bearer participant-token" {
-					t.Errorf("Authorization = %q, want the participant's own token", got)
-				}
-				for key := range r.Header {
-					lower := strings.ToLower(key)
-					if strings.HasPrefix(lower, "impersonate-") || strings.HasPrefix(lower, "x-remote-") {
-						t.Errorf("untrusted identity header forwarded upstream: %s", key)
-					}
-				}
-				if r.Method != tc.wantMethod || r.URL.Path != tc.wantPath {
-					t.Errorf("upstream operation = %s %s, want %s %s",
-						r.Method, r.URL.Path, tc.wantMethod, tc.wantPath)
-				}
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"apiVersion":"examples.configbutler.ai/v1alpha1","kind":"CoffeeConfig",` +
-					`"metadata":{"name":"demo-coffee"},"spec":{"currency":"EUR","products":[` +
-					`{"sku":"coffee-espresso","name":"Espresso","priceCents":275,"enabled":true}]}}`))
-			}))
-			defer upstream.Close()
-
-			cfg := testConfig()
-			cfg.CoffeeConfigName = "demo-coffee"
-			cfg.KubernetesAPIServer = upstream.URL
-
-			mux := http.NewServeMux()
-			registerParticipantStorefrontHandlers(mux, handlerDeps{
-				cfg: cfg, defaultNS: "voter", vouchers: newVoucherLedger(),
-			})
-
-			req := signedInRequest(t, cfg, tc.method, tc.path, tc.body)
-			// Everything an attacker could put on the request.
-			req.Header.Set("Authorization", "Bearer attacker-token")
-			req.Header.Set("Impersonate-User", "system:admin")
-			req.Header.Set("Impersonate-Group", "system:masters")
-			req.Header.Set("X-Remote-User", "github:someone-else")
-			req.Header.Set("X-Remote-Group", "system:masters")
-
-			rec := httptest.NewRecorder()
-			mux.ServeHTTP(rec, req)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, body %s", rec.Code, rec.Body.String())
-			}
-			if calls != 1 {
-				t.Fatalf("upstream calls = %d, want exactly 1", calls)
-			}
-		})
-	}
-}
-
-// A handler must never fall back to the server's own identity when the
-// participant's token is unusable.
-func TestStorefrontDoesNotFallBackWhenTheTokenIsUnusable(t *testing.T) {
-	old := sessionCookieCodec
-	sessionCookieCodec = testCodec(t)
-	t.Cleanup(func() { sessionCookieCodec = old })
-
-	cfg := testConfig()
-	cfg.CoffeeConfigName = "demo-coffee"
-
-	called := false
-	mux := http.NewServeMux()
-	registerParticipantStorefrontHandlers(mux, handlerDeps{
-		cfg:       cfg,
-		defaultNS: "voter",
-		vouchers:  newVoucherLedger(),
-		newClients: func(config, string) (participantClients, error) {
-			called = true
-			return participantClients{}, errors.New("no participant token")
-		},
-	})
-
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, signedInRequest(t, cfg, "GET", "/public/storefront", ""))
-
-	if !called {
-		t.Fatal("the client factory was never consulted")
-	}
-	if rec.Code == http.StatusOK {
-		t.Fatalf("status = 200: the request succeeded without usable participant credentials")
-	}
-}
-
 // --- voucher usage ----------------------------------------------------------
 
 func TestVoucherUsageReflectsPlacedOrders(t *testing.T) {
@@ -696,11 +534,11 @@ func TestVoucherUsageReflectsPlacedOrders(t *testing.T) {
 	}
 }
 
-func TestVoucherUsageRequiresASessionAndRejectsWrites(t *testing.T) {
+func TestVoucherUsageRequiresAnIdentityAndRejectsWrites(t *testing.T) {
 	mux, cfg, _, _ := storefrontFixture(t, demoCoffeeConfig(testnetVoucher(5)))
 
 	anon := signedInRequest(t, cfg, "GET", "/public/vouchers", "")
-	anon.Header.Del("Cookie")
+	anon.Header.Del(identityHeader)
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, anon)
 	if rec.Code != http.StatusUnauthorized {

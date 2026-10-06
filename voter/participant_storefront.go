@@ -1,18 +1,17 @@
 package main
 
-// The storefront and order endpoints, on participant credentials.
+// The storefront and order endpoints, behind krm-foyer's identity check.
 //
-// These are the two screens an attendee actually touches, and they were the
-// biggest thing missing after the legacy session was deleted: the SPA called
-// them and got a 404, so a successful login landed on an empty page.
-//
-// Both read the CoffeeConfig with the PARTICIPANT's own token. A participant
-// who is not in the audience group gets Kubernetes' 403 verbatim -- that
-// denial is the demo, not an error to paper over.
+// Ordering is a domain decision -- prices, availability, a voucher's allowance
+// -- and an order is deliberately not a Kubernetes object (coffee_orders.go), so
+// these stay Voter's. Both read the one CoffeeConfig with Voter's own
+// ServiceAccount: the menu is what the shop sells, the same for everyone in the
+// room. Who may EDIT it is still Kubernetes' answer, on the /k8s write.
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -48,7 +47,6 @@ const (
 )
 
 func registerParticipantStorefrontHandlers(mux *http.ServeMux, deps handlerDeps) {
-	cfg := deps.cfg
 
 	// GET /public/storefront?voucher=CODE
 	//
@@ -56,7 +54,7 @@ func registerParticipantStorefrontHandlers(mux *http.ServeMux, deps handlerDeps)
 	// is enabled and applies to something reads as "assumed-applied" even when
 	// it is already depleted. That is not an oversight -- it is the bug the
 	// demo is about. Depletion surfaces at submit time, in placeCoffeeOrder.
-	mux.HandleFunc("/public/storefront", requireParticipant(cfg, func(w http.ResponseWriter, r *http.Request, s participantSession) {
+	mux.HandleFunc("/public/storefront", requireIdentity(func(w http.ResponseWriter, r *http.Request, _ foyerIdentity) {
 		noStore(w)
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -66,9 +64,9 @@ func registerParticipantStorefrontHandlers(mux *http.ServeMux, deps handlerDeps)
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
 
-		cc, err := deps.readCoffeeConfig(ctx, s.IDToken)
+		cc, err := deps.readCoffeeConfig(ctx)
 		if err != nil {
-			writeParticipantKubeError(w, err)
+			writeKubeError(w, err)
 			return
 		}
 
@@ -81,7 +79,7 @@ func registerParticipantStorefrontHandlers(mux *http.ServeMux, deps handlerDeps)
 	// with maximumUsage from the CoffeeConfig, it is what turns "orders are
 	// failing" into "the limit is 1". It reports no configuration and no
 	// identity, so it needs a session but nothing more.
-	mux.HandleFunc("/public/vouchers", requireParticipant(cfg, func(w http.ResponseWriter, r *http.Request, _ participantSession) {
+	mux.HandleFunc("/public/vouchers", requireIdentity(func(w http.ResponseWriter, r *http.Request, _ foyerIdentity) {
 		noStore(w)
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -101,7 +99,7 @@ func registerParticipantStorefrontHandlers(mux *http.ServeMux, deps handlerDeps)
 	// Registered by method, because GET on this same path is the order feed --
 	// a different file, a different story, and deliberately not a Kubernetes
 	// object. See participant_orders.go.
-	mux.HandleFunc("POST /public/orders", requireParticipant(cfg, func(w http.ResponseWriter, r *http.Request, s participantSession) {
+	mux.HandleFunc("POST /public/orders", requireIdentity(func(w http.ResponseWriter, r *http.Request, id foyerIdentity) {
 		noStore(w)
 
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxOrderBytes+1))
@@ -122,15 +120,15 @@ func registerParticipantStorefrontHandlers(mux *http.ServeMux, deps handlerDeps)
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
 
-		cc, err := deps.readCoffeeConfig(ctx, s.IDToken)
+		cc, err := deps.readCoffeeConfig(ctx)
 		if err != nil {
-			writeParticipantKubeError(w, err)
+			writeKubeError(w, err)
 			return
 		}
 
 		response, record := placeCoffeeOrder(cc, req, deps.vouchers, orderActor{
-			Subject:     s.Subject,
-			DisplayName: s.DisplayName,
+			Subject:     id.UserInfo.Username,
+			DisplayName: id.DisplayName,
 		})
 		// Recorded whether it was placed or refused. The feed is a log of what
 		// the room did, and a refusal is something the room did.
@@ -139,15 +137,14 @@ func registerParticipantStorefrontHandlers(mux *http.ServeMux, deps handlerDeps)
 	}))
 }
 
-// readCoffeeConfig fetches the one configured CoffeeConfig with the
-// participant's own credentials. Both endpoints go through it so neither can
-// drift into reading with a different identity.
-func (d handlerDeps) readCoffeeConfig(ctx context.Context, idToken string) (coffeeConfig, error) {
-	clients, err := d.participantClientsFor(idToken)
-	if err != nil {
-		return coffeeConfig{}, err
+// readCoffeeConfig fetches the one configured CoffeeConfig with Voter's own
+// ServiceAccount, which may get exactly that object (the voter Role). Both
+// endpoints go through it.
+func (d handlerDeps) readCoffeeConfig(ctx context.Context) (coffeeConfig, error) {
+	if d.serviceAccount == nil {
+		return coffeeConfig{}, errors.New("no Kubernetes client configured")
 	}
-	obj, err := clients.dynamic.Resource(coffeeConfigGVR()).Namespace(d.defaultNS).
+	obj, err := d.serviceAccount.Resource(coffeeConfigGVR()).Namespace(d.defaultNS).
 		Get(ctx, d.cfg.CoffeeConfigName, metav1.GetOptions{})
 	if err != nil {
 		return coffeeConfig{}, err
@@ -159,8 +156,9 @@ func (d handlerDeps) readCoffeeConfig(ctx context.Context, idToken string) (coff
 // decision and the feed are allowed to see. The ID token stays out: nothing
 // below this point talks to Kubernetes.
 type orderActor struct {
-	// Subject identifies the participant in the LOG, where an operator reading
-	// pod output needs to tell two people with the same first name apart.
+	// Subject identifies the person in the LOG, by the name Kubernetes knows
+	// them as, so an operator reading pod output can tell two people with the
+	// same first name apart.
 	Subject string
 	// DisplayName is what the feed shows, and the only identity that leaves
 	// this process toward other participants' screens.

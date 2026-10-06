@@ -17,21 +17,15 @@ import (
 // whether one let go.
 func orderFeedFixture(t *testing.T, objs ...runtime.Object) (*httptest.Server, *http.ServeMux, config, *orderLog) {
 	t.Helper()
-	old := sessionCookieCodec
-	sessionCookieCodec = testCodec(t)
-	t.Cleanup(func() { sessionCookieCodec = old })
-
 	cfg := testConfig()
-	cfg.CoffeeConfigName = "demo-coffee"
-
-	newClients, _ := fakeCoffeeClients(objs...)
+	dyn := fakeCoffeeClients(objs...)
 	log := newOrderLog()
 	deps := handlerDeps{
-		cfg:        cfg,
-		defaultNS:  storefrontNamespace,
-		newClients: newClients,
-		vouchers:   newVoucherLedger(),
-		orders:     log,
+		cfg:            cfg,
+		defaultNS:      storefrontNamespace,
+		serviceAccount: dyn,
+		vouchers:       newVoucherLedger(),
+		orders:         log,
 	}
 	mux := http.NewServeMux()
 	registerParticipantStorefrontHandlers(mux, deps)
@@ -260,19 +254,14 @@ func TestOrderFeedReleasesItsSlotWhenTheClientLeaves(t *testing.T) {
 // shaped like production's -- the storefront fixture has no "/" and so cannot
 // see this.
 func TestOrderPathsRejectWrongMethodsBehindTheSPAFallback(t *testing.T) {
-	old := sessionCookieCodec
-	sessionCookieCodec = testCodec(t)
-	t.Cleanup(func() { sessionCookieCodec = old })
-
 	cfg := testConfig()
-	cfg.CoffeeConfigName = "demo-coffee"
-	newClients, _ := fakeCoffeeClients(demoCoffeeConfig())
+	dyn := fakeCoffeeClients(demoCoffeeConfig())
 	deps := handlerDeps{
-		cfg:        cfg,
-		defaultNS:  storefrontNamespace,
-		newClients: newClients,
-		vouchers:   newVoucherLedger(),
-		orders:     newOrderLog(),
+		cfg:            cfg,
+		defaultNS:      storefrontNamespace,
+		serviceAccount: dyn,
+		vouchers:       newVoucherLedger(),
+		orders:         newOrderLog(),
 	}
 
 	mux := http.NewServeMux()

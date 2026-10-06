@@ -26,7 +26,6 @@ import (
 const orderFeedHeartbeat = 20 * time.Second
 
 func registerParticipantOrderFeedHandlers(mux *http.ServeMux, deps handlerDeps) {
-	cfg := deps.cfg
 
 	// Both paths below are registered BY METHOD, because POST /public/orders
 	// belongs to the storefront and GET to the feed. That split costs one
@@ -34,7 +33,7 @@ func registerParticipantOrderFeedHandlers(mux *http.ServeMux, deps handlerDeps) 
 	// the path, and "/" -- the SPA fallback -- matches everything. Without
 	// these two, DELETE /public/orders would quietly serve the index page.
 	//
-	// They are not behind requireParticipant. A method nothing implements is
+	// They are not behind requireIdentity. A method nothing implements is
 	// not an authorization question, and answering 401 first would tell a
 	// caller to go and authenticate for a verb that will never work.
 	methodNotAllowed := func(w http.ResponseWriter, _ *http.Request) {
@@ -48,7 +47,7 @@ func registerParticipantOrderFeedHandlers(mux *http.ServeMux, deps handlerDeps) 
 	// The first paint, and the whole feed for a browser without EventSource.
 	// "scope" carries the same warning as /public/vouchers: these are this
 	// replica's orders, since this boot.
-	mux.HandleFunc("GET /public/orders", requireParticipant(cfg, func(w http.ResponseWriter, _ *http.Request, _ participantSession) {
+	mux.HandleFunc("GET /public/orders", requireIdentity(func(w http.ResponseWriter, _ *http.Request, _ foyerIdentity) {
 		noStore(w)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"orders":   deps.orders.snapshot(),
@@ -58,7 +57,7 @@ func registerParticipantOrderFeedHandlers(mux *http.ServeMux, deps handlerDeps) 
 	}))
 
 	// GET /public/orders/stream
-	mux.HandleFunc("GET /public/orders/stream", requireParticipant(cfg, func(w http.ResponseWriter, r *http.Request, _ participantSession) {
+	mux.HandleFunc("GET /public/orders/stream", requireIdentity(func(w http.ResponseWriter, r *http.Request, _ foyerIdentity) {
 		noStore(w)
 
 		flusher, canFlush := w.(http.Flusher)
