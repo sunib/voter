@@ -188,14 +188,20 @@ e2e. Step 7 is the only cluster change.
       suite does not run this recipe, so report anything that breaks back to them.
 - [ ] Delete `frontend/dev/kube-mock-plugin.ts`, or shrink it to a mock of `/public/`
       only.
-- [ ] `test/e2e`: install krm-foyer's chart beside Voter, with client `voter`, and take
+- [x] `test/e2e`: install krm-foyer's chart beside Voter, with client `voter`, and take
       the routes from krm-foyer's `test/e2e/cluster/room-pass/routes.yaml` (Room Pass,
       krm-foyer and the app on one host). `authentication-config.yaml` needs no change.
+      Done 2026-10-06: 0.3.0 by digest (`test/e2e/krm-foyer-values.yaml`), client
+      `voter-fixture`, plain HTTP with a NetworkPolicy admitting only Traefik. It has
+      `/k8s/`, `/stream/` and `/_foyer/`; **`/auth/` stays Voter's until step 2**, so
+      nobody has a krm-foyer session yet. `up.sh` waits for its 401 on `/k8s/api`.
 - [x] `test/e2e/room-pass/kustomization.yaml`: Room Pass `v2.0.0` → `v2.1.0`, image
       pinned by digest, `config/crd?ref=v2.1.0` as a remote base in place of the two
       raw CRD URLs (2.1.0 moved them to `config/crd/bases/`). Done 2026-10-06; the
       browser suite passed 10/10 against it.
-- [ ] Today `JOIN_ORIGIN` is `join.voter.test`; move it to the one shared host.
+- [x] `JOIN_ORIGIN` was `join.voter.test`; it is now the shared `app.voter.test`, with
+      Room Pass on exactly `/join`, `/bind` and `/logout` through prioritised
+      IngressRoutes, as in production (`test/e2e/edge.yaml`). Done 2026-10-06.
 
 ### 2. Frontend on krm-foyer's contract
 

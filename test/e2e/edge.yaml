@@ -78,6 +78,15 @@ spec:
       services:
         - name: room-pass
           port: 8080
+    # krm-foyer's prefixes (krm-foyer-values.yaml), whole segments only. /auth/
+    # joins them when the frontend speaks krm-foyer's contract; until then it is
+    # Voter's, and these answer 401 to everyone.
+    - match: Host(`app.voter.test`) && (PathPrefix(`/k8s/`) || PathPrefix(`/stream/`) || PathPrefix(`/_foyer/`))
+      kind: Rule
+      priority: 200
+      services:
+        - name: krm-foyer
+          port: http
     # Everything else -- the SPA, /auth/* and /public/* -- is Voter.
     - match: Host(`app.voter.test`)
       kind: Rule

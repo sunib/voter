@@ -132,6 +132,21 @@ kubectl wait --for=condition=Established \
 kubectl apply -f test/e2e/voter.yaml
 kubectl -n voter rollout restart deployment/voter
 kubectl -n voter rollout status deployment/voter --timeout=180s
+
+# krm-foyer, as released, beside Voter on the application's host
+# (docs/krm-foyer-migration.md, step 1). Chart and image are pinned by digest;
+# bump them together with krm-foyer-values.yaml's image.tag.
+krm_foyer_chart=oci://ghcr.io/configbutler/charts/krm-foyer:0.3.0@sha256:40f68f1ba1477e09a9813d304991518f600310b1f31e3a600634ba3a0c1ad0d2
+# The client secret of voter-fixture in dex.yaml: krm-foyer signs in as Voter's client.
+kubectl -n voter create secret generic krm-foyer-oidc --from-literal=client-secret=voter-fixture-secret \
+  --dry-run=client -o yaml | kubectl apply -f -
+# Made once and kept, so sessions survive a rerun, as Voter's fixed cookie keys do.
+if ! kubectl -n voter get secret krm-foyer-session-keys >/dev/null 2>&1; then
+  kubectl -n voter create secret generic krm-foyer-session-keys \
+    --from-literal=session-keys="$(head -c 32 /dev/urandom | base64)"
+fi
+helm upgrade --install krm-foyer "$krm_foyer_chart" --namespace voter \
+  -f test/e2e/krm-foyer-values.yaml --wait --timeout 180s
 printf 'Cluster ready. Kubeconfig: %s/.local/kubeconfig\n' "$PWD"
 
 # Ready, from where the browser stands. A finished rollout says the pods are up;
@@ -152,14 +167,19 @@ probe() {
   local ok=1
   if [ "$status" = 200 ] && grep -q 'Room code' "$body"; then ok=0; fi
   rm -f "$jar" "$body"
-  return "$ok"
+  [ "$ok" = 0 ] || return 1
+  # And krm-foyer on the same host: a 401 for a request without a session, with
+  # its own interruption header, so it is krm-foyer answering and not Voter.
+  status=$(curl -sk -D - -o /dev/null --resolve "app.voter.test:19443:$gateway" \
+    https://app.voter.test:19443/k8s/api || true)
+  grep -q '^HTTP/[0-9.]* 401' <<<"$status" && grep -qi '^krm-foyer-interruption:' <<<"$status"
 }
 streak=0
 for attempt in $(seq 1 90); do
   if probe; then
     streak=$((streak + 1))
     if [ "$streak" -ge 3 ]; then
-      echo "Fixture serves the join page through Traefik (attempt ${attempt})."
+      echo "Fixture serves the join page and krm-foyer through Traefik (attempt ${attempt})."
       exit 0
     fi
   else
@@ -167,5 +187,5 @@ for attempt in $(seq 1 90); do
   fi
   sleep 2
 done
-echo "ERROR: the join page was not served three times running within 180s (last answer: HTTP ${status})." >&2
+echo "ERROR: the join page and krm-foyer were not served three times running within 180s." >&2
 exit 1
