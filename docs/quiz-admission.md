@@ -1,6 +1,6 @@
 # Plan: ballot rules in admission, ahead of krm-foyer
 
-Status: **plan, not started (2026-10-06).** Preparation for step 4 of
+Status: **phase 1 merged (#21, `be6a268`, 2026-10-06), phase 2 not started.** Preparation for step 4 of
 [krm-foyer-migration.md](krm-foyer-migration.md) that does not wait for krm-foyer's
 release. Every phase below ships on Voter 1.x and is useful on its own.
 
@@ -87,24 +87,24 @@ the cluster before a Voter that fills the new fields**, or every vote is refused
 
 ### 1. Fields and digest (`feat:`, 1.x, deploys itself)
 
-- [ ] CRD: `spec.roundUID`, `spec.questionsDigest` on QuizSubmission (optional, so
+- [x] CRD: `spec.roundUID`, `spec.questionsDigest` on QuizSubmission (optional, so
       1.2.0's ballots stay valid); `status.openedAt`, `status.closedAt`,
       `status.questionsDigest` on QuizSession. Lower `answers` `maxItems` from 100 to
       25, the questions' bound, so CEL cost estimates fit in phase 3.
-- [ ] The reconciler writes `status.questionsDigest` (sha256 over the decoded
+- [x] The reconciler writes `status.questionsDigest` (sha256 over the decoded
       `spec.questions`, re-marshalled by Go). It writes `openedAt` on the first
       `live` and `closedAt` on each close, clearing it on reopen.
-- [ ] The vote handler fills `roundUID` and `questionsDigest` from the round it already
+- [x] The vote handler fills `roundUID` and `questionsDigest` from the round it already
       loads. The browser does not change yet.
-- [ ] The tally checks each pin that is present. Ballots without pins (the pasted
+- [x] The tally checks each pin that is present. Ballots without pins (the pasted
       interlude) are counted as today. `openedAt`/`closedAt` are not a counting rule.
-- [ ] `sameTally` treats a null status field as absent, or a closed round's
+- [x] `sameTally` treats a null status field as absent, or a closed round's
       `closedAt: null` would make every resync rewrite it.
-- [ ] Unit tests (`quiz_tally_test.go`, `participant_quiz_test.go`): digest stable
+- [x] Unit tests (`quiz_tally_test.go`, `participant_quiz_test.go`): digest stable
       across a state change, changed questions change it; recreated-round,
       changed-questions and unpinned ballots; `roundTimes` through open, close and
       reopen; a pinned ballot still counting after its round closes.
-- [ ] Copy the CRDs to `external/k8s` `voter-demo/crds` in the same change set as
+- [x] Copy the CRDs to `external/k8s` `voter-demo/crds` in the same change set as
       the release (image automation bumps only the image).
 
 ### 2. The policy, identity and round rules (`feat:`)
