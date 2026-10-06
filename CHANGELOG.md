@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.1.0](https://github.com/sunib/voter/compare/v2.0.1...v2.1.0) (2026-10-06)
+
+
+### Features
+
+* a shop-only mode, the coffee bar as production runs it ([3034fdd](https://github.com/sunib/voter/commit/3034fdd81e85e3a8775f3ff137c328a2f3e5660e))
+* open voting group by group, and hand the coffee menu to one person ([#33](https://github.com/sunib/voter/issues/33)) ([340089a](https://github.com/sunib/voter/commit/340089af56ecc3db7db3b6df04645d2d6bb28d40))
+
+
+### Documentation
+
+* plan the coffee-to-production ending of the 2026-10-07 demo ([1d9d6da](https://github.com/sunib/voter/commit/1d9d6da7698176c6ca366fbad53c6fae0cdb4cb9))
+
 ## [2.0.1](https://github.com/sunib/voter/compare/v2.0.0...v2.0.1) (2026-10-06)
 
 
