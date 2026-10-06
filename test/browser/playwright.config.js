@@ -14,6 +14,9 @@ const gateway = execFileSync(
 export default defineConfig({
   testDir: ".",
   testMatch: /\.spec\.js$/,
+  // A probe, not a test: it opens streaming URLs that never finish, and runs
+  // on demand with pw-probe.config.js.
+  testIgnore: /url-probe\.spec\.js$/,
   workers: 1,
   fullyParallel: false,
   timeout: 45000,
