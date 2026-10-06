@@ -7,7 +7,17 @@ import type {
   CoffeeVoucherSpec,
   StorefrontResponse,
 } from './coffeeTypes'
+import { appConfig } from './appConfig'
 import { requestJson } from './http'
+import {
+  COFFEECONFIGS,
+  changeReason,
+  conditionalPatch,
+  getObject,
+  mergePatch,
+  requestCommit,
+  type CommitReceipt,
+} from './kube'
 
 // Re-exported: callers that catch an error from these functions want the type,
 // and coffee.ts is where they already look.
@@ -57,10 +67,13 @@ export async function submitOrder(
   })
 }
 
+/** The configured CoffeeConfig, read through /k8s as this person and
+ *  projected the way the stream projects it. */
 export async function getAdminCoffeeConfig(): Promise<CoffeeConfig> {
-  return await requestJson<CoffeeConfig>('/public/coffeeconfig', {
-    cache: 'no-store',
-  })
+  return await getObject<CoffeeConfig>(
+    COFFEECONFIGS,
+    appConfig().coffeeConfigName,
+  )
 }
 
 export type PatchAdminCoffeeConfigOptions = {
@@ -70,26 +83,25 @@ export type PatchAdminCoffeeConfigOptions = {
 /** Receipt only: commitRequested means acceptance, not an observed Git commit. */
 export type PatchCoffeeConfigResult = {
   saved: boolean
-  commitRequested?: boolean
-  commitRequest?: string
-  commitError?: string
-}
+} & CommitReceipt
 
+/** Saves the editor's spec changes as this person: a merge patch conditional on
+ *  the uid and resourceVersion it was editing, then a CommitRequest so
+ *  ConfigButler commits it with the editor's reason as the message. */
 export async function patchAdminCoffeeConfig(
   intent: SaveRequest,
   options?: PatchAdminCoffeeConfigOptions,
 ): Promise<PatchCoffeeConfigResult> {
-  const headers = new Headers({
-    'content-type': 'application/json',
-  })
-  if (options?.reason?.trim()) {
-    headers.set('x-change-reason', options.reason.trim())
+  const config = appConfig()
+  await mergePatch(COFFEECONFIGS, config.coffeeConfigName, conditionalPatch(intent))
+  return {
+    saved: true,
+    ...(await requestCommit(
+      config.gitTargetName,
+      'coffee-save-',
+      changeReason(options?.reason),
+    )),
   }
-  return await requestJson<PatchCoffeeConfigResult>('/public/coffeeconfig', {
-    method: 'PATCH',
-    headers,
-    body: JSON.stringify(intent),
-  })
 }
 
 /** How many times each voucher has been redeemed, keyed by the lower-cased

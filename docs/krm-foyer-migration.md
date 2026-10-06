@@ -252,29 +252,55 @@ until steps 3 to 5. **The browser suite is red from here until step 6.**
 
 ### 3. Resources through `/k8s`
 
-- [ ] CoffeeConfig: get and conditional merge patch on
+Done 2026-10-06 on the same branch. Every write below is the person's own, through
+`/k8s`, with `fieldManager=voter` so `managedFields` does not credit "Mozilla"
+(`frontend/src/api/kube.ts`). Checked in Chromium against the fixture: a participant
+saves the menu at `/admin` (a `200` merge patch, the cluster holds the new value), and
+a label patch sent from the same page by hand is refused by the policy with its own
+message. **krm-stream is gone from `voter/go.mod`.**
+
+- [x] CoffeeConfig: get and conditional merge patch on
       `/k8s/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/coffeeconfigs/<name>`,
-      with the uid and resourceVersion precondition in the patch body, as
-      `participant_save.go` does. Then `POST` the CommitRequest from the browser, with
-      the same partial-success reporting as today.
-- [ ] A ValidatingAdmissionPolicy keeping a CoffeeConfig update to `spec`: no label,
-      annotation or finalizer changes by anyone but GitOps. It replaces
-      `decodeSaveIntent` and `ValidateMergePatch`. Check gitops-reverser's own writes
-      are exempt.
-- [ ] Databases: list, create and patch through `/k8s`. The intent annotation and commit
-      receipt (`addCommitReceipt`) move to the browser.
-- [ ] Round state: `PATCH` `quizsessions/<name>` `spec.state` through `/k8s` (operator).
-- [ ] The audience coffee-admin grant: the operator page creates and deletes RoleBinding
-      `voter-audience-coffee-admin` through `/k8s`. The group still comes from
-      `Room.spec.audienceGroup`, now read in the browser. Labels and annotations as in
-      `operator_audience_grant.go:97-125`.
+      with `metadata.uid` and `metadata.resourceVersion` in the patch as the API
+      server's preconditions. Then the browser `POST`s the CommitRequest, reporting
+      partial success when only the first write landed. Reads are projected like the
+      stream (`krm-full/v1`: no `managedFields`, no last-applied annotation), so the
+      editor's reconciliation sees the same shape.
+- [x] A ValidatingAdmissionPolicy keeping a person's write to `spec`
+      (`voter/config/admission/editable-spec-policy.yaml`): on CoffeeConfigs and
+      Databases, no label, annotation, finalizer or owner-reference changes, except the
+      intent annotation on a Database. It matches people only (`!startsWith('system:')`),
+      so Flux, gitops-reverser and other controllers are untouched. Tested by
+      impersonation on the fixture: spec changes pass; labels, annotations and
+      finalizers are refused for `demo:` and `github:` alike; `system:` users pass.
+      **A person's `kubectl apply` on these objects is refused too**, since `apply`
+      writes its last-applied annotation; they change through Git.
+- [x] Databases: list, create and patch through `/k8s`. The name check, the intent
+      annotation and the CommitRequest (only when `databaseGitTargetName` is set) are
+      in the browser (`api/databases.ts`).
+- [x] Round state: a merge patch of `quizsessions/<name>` `spec.state` through `/k8s`.
+- [x] The audience coffee-admin grant: the operator page reads, creates and deletes
+      the RoleBinding through `/k8s`, with the group from `Room.spec.audienceGroup` and
+      the same labels, annotation and missing-Role refusal as before.
+- [x] `/config.json` carries what these need: `gitTargetName`, `databaseGitTargetName`,
+      `commitRequestNamespace`, `commitCloseDelaySeconds`, `audienceCoffeeAdminRole`.
+- [x] Deleted: `participant_coffee.go`, `participant_save.go`, `participant_databases.go`,
+      `operator_audience_grant.go`, the round-state handler, and their tests.
+- [ ] Not run end to end yet: the operator's round switch and audience grant. The
+      fixture's Dex has no GitHub connector, so there is no operator to sign in as
+      there; step 6 has to give the fixture one (a second static user through the same
+      authproxy, mapped to `github:`), or test them against the cluster at 7.6.
+- [ ] The fixture's audience Role has no `databases` grants, unlike the cluster's
+      `participant-rbac.yaml`; add them so step 6 can drive the Databases pages.
+- [ ] Cluster copy of the policy: 7.2.
 
 ### 4. Votes (decision 1)
 
 The admission half of this step can ship before krm-foyer, on Voter 1.x:
 see [quiz-admission.md](quiz-admission.md).
 
-- [ ] CRD fields, digest and pins: [quiz-admission.md](quiz-admission.md) phase 1.
+- [x] CRD fields, digest and pins: [quiz-admission.md](quiz-admission.md) phase 1
+      (#21, released as 1.3.0 and on the cluster).
 - [ ] The ValidatingAdmissionPolicy described under decision 1:
       [quiz-admission.md](quiz-admission.md) phase 2, with its tests.
 - [ ] The browser creates the submission at `/k8s/.../quizsubmissions`. "Already voted"
@@ -341,7 +367,8 @@ change (decision 2), so everything goes through Flux.
      longer needs them; keep `get` and `create` (decision 1).
    - Voter's ServiceAccount loses the stream gateway's grants (step 5's Role item).
    - Add `get coffeeconfigs` for Voter's ServiceAccount.
-   - Add the two ValidatingAdmissionPolicies and their bindings.
+   - Add the two ValidatingAdmissionPolicies and their bindings: the ballot policy
+     (step 4) and `voter-editable-spec` from `voter/config/admission/`.
    - The `voter-audience-coffee-admin` RoleBinding stays out of Git, as today.
 3. **krm-foyer for Voter:** a HelmRelease in the `voter` namespace (no cross-namespace
    Traefik service), with these values:

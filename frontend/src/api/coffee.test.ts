@@ -8,6 +8,12 @@ import {
   submitOrder,
 } from './coffee'
 import { getSession } from './session'
+import { useTestAppConfig } from './testAppConfig'
+
+const COFFEE_URL =
+  '/k8s/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/coffeeconfigs/demo-coffee'
+const COMMITREQUESTS_URL =
+  '/k8s/apis/configbutler.ai/v1alpha3/namespaces/voter/commitrequests'
 
 // Every one of these tests exists because of a bug that actually shipped:
 // the editor called /public/admin/coffeeconfig, which the backend deleted with
@@ -46,9 +52,33 @@ function headerOf(name: string): string | null {
   return new Headers(only().init.headers).get(name)
 }
 
-beforeEach(() => {
+/** Answers each request by URL and method, recording it; for the two-write
+ *  save, where one stub body cannot answer both. */
+function route(
+  answer: (url: string, method: string) => { body?: unknown; status?: number },
+) {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = (init?.method ?? 'GET').toUpperCase()
+      calls.push({ url, init: init ?? {} })
+      const { body = {}, status = 200 } = answer(url, method)
+      return new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      })
+    }),
+  )
+}
+
+const bodyOf = (call: FetchCall) => JSON.parse(String(call.init.body))
+const headersOf = (call: FetchCall) => new Headers(call.init.headers)
+
+beforeEach(async () => {
   calls = []
   vi.stubGlobal('window', { location: { origin: 'https://demo.koudijs.dev' } })
+  await useTestAppConfig()
 })
 
 afterEach(() => {
@@ -60,38 +90,72 @@ afterEach(() => {
 async function signIn(csrfToken = 'csrf-from-session') {
   stubFetch({
     authenticated: true,
-    username: 'demo:abc',
     displayName: 'Someone',
     email: 'someone@koudijs.dev.test',
     groups: ['demo:voter-audience'],
+    connector: 'room-pass',
     csrfToken,
-    expiresAt: 0,
+    csrfHeader: 'X-CSRF-Token',
+    expiresAt: '2026-10-06T20:00:00Z',
   })
   await getSession()
   calls = []
 }
 
 describe('endpoint paths', () => {
-  it('reads the coffee config from the participant endpoint', async () => {
-    stubFetch({ spec: {} })
-    await getAdminCoffeeConfig()
+  it('reads the coffee config through /k8s, projected like the stream', async () => {
+    stubFetch({
+      metadata: {
+        name: 'demo-coffee',
+        managedFields: [{ manager: 'kubectl' }],
+        annotations: {
+          'kubectl.kubernetes.io/last-applied-configuration': '{}',
+        },
+      },
+      spec: {},
+    })
+    const config = await getAdminCoffeeConfig()
 
-    expect(only().url).toBe('/public/coffeeconfig')
-    // The legacy path is gone from the backend; calling it is a silent 404.
-    expect(only().url).not.toContain('/public/admin/')
+    expect(only().url).toBe(COFFEE_URL)
+    // The editor reconciles this read against what the stream delivered; the
+    // machinery the stream leaves out must not arrive as a server change.
+    expect(config.metadata).toEqual({ name: 'demo-coffee' })
   })
 
-  it('patches the coffee config on the participant endpoint', async () => {
+  it('patches the coffee config through /k8s, conditional on the version edited', async () => {
     await signIn()
-    stubFetch({ config: { spec: {} }, saved: true })
+    route(() => ({ body: { metadata: { name: 'coffee-save-x' } } }))
     await patchAdminCoffeeConfig({
       uid: 'coffee',
-      resourceVersion: '1',
+      resourceVersion: '7',
       patch: { spec: { shopName: 'New' } },
     })
 
-    expect(only().url).toBe('/public/coffeeconfig')
-    expect(only().init.method).toBe('PATCH')
+    const patch = calls[0]!
+    expect(patch.url).toBe(`${COFFEE_URL}?fieldManager=voter`)
+    expect(patch.init.method).toBe('PATCH')
+    expect(headersOf(patch).get('content-type')).toBe(
+      'application/merge-patch+json',
+    )
+    // uid and resourceVersion in a merge patch are the API server's
+    // preconditions: a replaced or moved-on object is a 409, never overwritten.
+    expect(bodyOf(patch)).toEqual({
+      spec: { shopName: 'New' },
+      metadata: { uid: 'coffee', resourceVersion: '7' },
+    })
+  })
+
+  it('refuses a patch outside spec without sending anything', async () => {
+    await signIn()
+    route(() => ({}))
+    await expect(
+      patchAdminCoffeeConfig({
+        uid: 'coffee',
+        resourceVersion: '1',
+        patch: { metadata: { labels: { x: 'y' } } },
+      }),
+    ).rejects.toThrow('Only spec is editable.')
+    expect(calls).toHaveLength(0)
   })
 
   it('passes the voucher through to the storefront as a query parameter', async () => {
@@ -118,16 +182,19 @@ describe('CSRF proof', () => {
     expect(headerOf('x-csrf-token')).toBe('token-abc')
   })
 
-  it('sends the session token on a config patch', async () => {
+  it('sends the session token on both writes of a save', async () => {
     await signIn('token-abc')
-    stubFetch({ config: { spec: {} }, saved: true })
+    route(() => ({ body: { metadata: { name: 'coffee-save-x' } } }))
     await patchAdminCoffeeConfig({
       uid: 'coffee',
       resourceVersion: '1',
       patch: { spec: {} },
     })
 
-    expect(headerOf('x-csrf-token')).toBe('token-abc')
+    expect(calls).toHaveLength(2)
+    for (const call of calls) {
+      expect(headersOf(call).get('x-csrf-token')).toBe('token-abc')
+    }
   })
 
   it('does not send a CSRF header on reads', async () => {
@@ -138,17 +205,46 @@ describe('CSRF proof', () => {
     expect(headerOf('x-csrf-token')).toBeNull()
   })
 
-  it('sends the conditional intent as JSON with CSRF', async () => {
+  it('asks ConfigButler to commit, with the reason as the message', async () => {
     await signIn('token-abc')
-    stubFetch({ config: { spec: {} }, saved: true })
-    await patchAdminCoffeeConfig(
+    route(() => ({ body: { metadata: { name: 'coffee-save-x' } } }))
+    const result = await patchAdminCoffeeConfig(
       { uid: 'coffee', resourceVersion: '1', patch: { spec: {} } },
-      { reason: 'raise the limit' },
+      { reason: '  raise the limit  ' },
     )
 
-    expect(headerOf('content-type')).toBe('application/json')
-    expect(headerOf('x-change-reason')).toBe('raise the limit')
-    expect(headerOf('x-csrf-token')).toBe('token-abc')
+    const commit = calls[1]!
+    expect(commit.url).toBe(`${COMMITREQUESTS_URL}?fieldManager=voter`)
+    expect(commit.init.method).toBe('POST')
+    expect(bodyOf(commit)).toEqual({
+      apiVersion: 'configbutler.ai/v1alpha3',
+      kind: 'CommitRequest',
+      metadata: { generateName: 'coffee-save-', namespace: 'voter' },
+      spec: {
+        gitTargetRef: { name: 'voter-demo' },
+        message: 'raise the limit',
+        closeDelaySeconds: 2,
+      },
+    })
+    expect(result).toEqual({
+      saved: true,
+      commitRequested: true,
+      commitRequest: 'coffee-save-x',
+    })
+  })
+
+  it('asks for no commit when the deployment names no GitTarget', async () => {
+    await useTestAppConfig({ gitTargetName: '' })
+    await signIn()
+    route(() => ({}))
+    const result = await patchAdminCoffeeConfig({
+      uid: 'coffee',
+      resourceVersion: '1',
+      patch: { spec: {} },
+    })
+
+    expect(calls).toHaveLength(1)
+    expect(result).toEqual({ saved: true })
   })
 
   it('forgets the token when the session is gone', async () => {
@@ -169,11 +265,11 @@ describe('CSRF proof', () => {
 describe('the save result', () => {
   it('reports a save that reached Kubernetes but not ConfigButler', async () => {
     await signIn()
-    stubFetch({
-      saved: true,
-      commitRequested: false,
-      commitError: 'asking ConfigButler to commit it failed',
-    })
+    route((url) =>
+      url.startsWith(COMMITREQUESTS_URL)
+        ? { status: 403, body: { kind: 'Status', message: 'forbidden' } }
+        : { body: {} },
+    )
 
     const result = await patchAdminCoffeeConfig({
       uid: 'coffee',

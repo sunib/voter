@@ -16,21 +16,6 @@ const (
 	kubeAPIServer = "https://kubernetes.default.svc"
 )
 
-// gitops-reverser serves CommitRequest at v1alpha3 and no longer offers
-// v1alpha1 -- api/v1alpha3 is the only API package in the operator. Pinning the
-// old version here made every "save now" fail with a no-matches error against a
-// current install. Both the typed apiVersion string and the GVR must agree, so
-// they share one constant.
-const commitRequestAPIVersion = "configbutler.ai/v1alpha3"
-
-func commitRequestGVR() schema.GroupVersionResource {
-	return schema.GroupVersionResource{
-		Group:    "configbutler.ai",
-		Version:  "v1alpha3",
-		Resource: "commitrequests",
-	}
-}
-
 func coffeeConfigGVR() schema.GroupVersionResource {
 	return schema.GroupVersionResource{
 		Group:    "examples.configbutler.ai",
@@ -38,19 +23,6 @@ func coffeeConfigGVR() schema.GroupVersionResource {
 		Resource: "coffeeconfigs",
 	}
 }
-
-// The platform team's "I need a database" API. A plain CRD with no controller
-// behind it: the point of the page that edits these is that the declared intent
-// is the deliverable, and whatever provisions it comes later.
-func databaseGVR() schema.GroupVersionResource {
-	return schema.GroupVersionResource{
-		Group:    "platform.configbutler.ai",
-		Version:  "v1alpha1",
-		Resource: "databases",
-	}
-}
-
-const databaseAPIVersion = "platform.configbutler.ai/v1alpha1"
 
 func toCoffeeConfig(obj *unstructured.Unstructured) (coffeeConfig, error) {
 	var out coffeeConfig

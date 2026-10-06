@@ -21,8 +21,10 @@ package main
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
@@ -149,4 +151,31 @@ func selfSubjectReview(ctx context.Context, cfg config, idToken string) (*authen
 		Kind:       "SelfSubjectReview",
 	}
 	return review, nil
+}
+
+// writeParticipantKubeError preserves the Kubernetes verdict. A 403 stays a
+// 403: the participant genuinely may not do that, and dressing it up as a
+// server error would hide the RBAC decision the demo is trying to show.
+func writeParticipantKubeError(w http.ResponseWriter, err error) {
+	var statusErr interface{ Status() metav1.Status }
+	if errors.As(err, &statusErr) {
+		st := statusErr.Status()
+		code := int(st.Code)
+		if code == 0 {
+			code = http.StatusInternalServerError
+		}
+		// 401 here means the token was rejected -- expired, most likely.
+		if code == http.StatusUnauthorized {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"error":    "your session has expired, please sign in again",
+				"loginUrl": "/auth/login",
+			})
+			return
+		}
+		writeJSON(w, code, map[string]any{"error": st.Message, "reason": string(st.Reason)})
+		return
+	}
+	writeJSON(w, http.StatusBadGateway, map[string]any{"error": "the Kubernetes API could not be reached"})
 }

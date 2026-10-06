@@ -1,0 +1,85 @@
+# What a person may change on the objects Voter's editors write: the spec, and
+# on a Database the one annotation that records why.
+#
+# Voter's save handlers used to hold this line (decodeSaveIntent refused any
+# patch outside spec, and krm-stream's ValidateMergePatch any protected field).
+# Under krm-foyer the browser writes through /k8s with the person's own token,
+# so the rule has to live where every such write passes: admission. Without it,
+# the coffee editor's `patch` grant would let anyone with a terminal relabel or
+# annotate the CoffeeConfig, and gitops-reverser would commit that to Git under
+# their name (docs/krm-foyer-migration.md, step 3).
+#
+# People only. Service accounts are not matched: Flux applies these objects
+# from Git with labels of its own, and gitops-reverser and other controllers
+# may annotate or finalize them. Every human identity on this cluster carries a
+# connector prefix (`demo:`, `github:`, `linkedin:`; authentication-config), so
+# "not a service account and not a system: user" is exactly the people.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: voter-editable-spec
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [examples.configbutler.ai]
+        apiVersions: ['*']
+        resources: [coffeeconfigs]
+        operations: [UPDATE]
+      - apiGroups: [platform.configbutler.ai]
+        apiVersions: ['*']
+        resources: [databases]
+        operations: [CREATE, UPDATE]
+  matchConditions:
+    - name: a-person
+      expression: >-
+        !request.userInfo.username.startsWith('system:')
+  variables:
+    # The one annotation a person may write, and only on a Database.
+    - name: intent
+      expression: "'platform.configbutler.ai/intent'"
+    - name: mayAnnotate
+      expression: "request.resource.resource == 'databases'"
+    - name: newAnnotations
+      expression: "object.metadata.?annotations.orValue({})"
+    - name: oldAnnotations
+      expression: "oldObject == null ? {} : oldObject.metadata.?annotations.orValue({})"
+  validations:
+    - expression: >-
+        oldObject == null
+          ? object.metadata.?labels.orValue({}).size() == 0
+          : object.metadata.?labels.orValue({}) == oldObject.metadata.?labels.orValue({})
+      messageExpression: >-
+        'Only spec can be changed here: the labels on ' + object.metadata.name +
+        ' are managed by GitOps.'
+      reason: Forbidden
+    - expression: >-
+        variables.newAnnotations.all(k,
+            (variables.mayAnnotate && k == variables.intent)
+            || (k in variables.oldAnnotations && variables.oldAnnotations[k] == variables.newAnnotations[k]))
+        && variables.oldAnnotations.all(k,
+            (variables.mayAnnotate && k == variables.intent) || k in variables.newAnnotations)
+      messageExpression: >-
+        variables.mayAnnotate
+          ? 'Only spec and the ' + variables.intent + ' annotation can be changed here.'
+          : 'Only spec can be changed here: the annotations on ' + object.metadata.name +
+            ' are managed by GitOps.'
+      reason: Forbidden
+    - expression: >-
+        oldObject == null
+          ? object.metadata.?finalizers.orValue([]).size() == 0
+            && object.metadata.?ownerReferences.orValue([]).size() == 0
+          : object.metadata.?finalizers.orValue([]) == oldObject.metadata.?finalizers.orValue([])
+            && object.metadata.?ownerReferences.orValue([]) == oldObject.metadata.?ownerReferences.orValue([])
+      messageExpression: >-
+        'Only spec can be changed here: finalizers and owner references on ' +
+        object.metadata.name + ' are not yours to set.'
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: voter-editable-spec
+spec:
+  policyName: voter-editable-spec
+  validationActions: [Deny]

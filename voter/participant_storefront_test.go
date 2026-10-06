@@ -70,8 +70,7 @@ func testnetVoucher(maximumUsage int) map[string]any {
 func fakeCoffeeClients(objs ...runtime.Object) (func(config, string) (participantClients, error), *dynamicfake.FakeDynamicClient) {
 	scheme := runtime.NewScheme()
 	listKinds := map[schema.GroupVersionResource]string{
-		coffeeConfigGVR():  "CoffeeConfigList",
-		commitRequestGVR(): "CommitRequestList",
+		coffeeConfigGVR(): "CoffeeConfigList",
 	}
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, listKinds, objs...)
 	return func(config, string) (participantClients, error) {
@@ -774,13 +773,4 @@ func waitForEvent(t *testing.T, ctx context.Context, events <-chan map[string]an
 			return nil
 		}
 	}
-}
-
-func mustJSON(t *testing.T, v any) string {
-	t.Helper()
-	b, err := json.Marshal(v)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	return string(b)
 }

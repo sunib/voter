@@ -129,6 +129,9 @@ kubectl wait --for=condition=Established \
   crd/coffeeconfigs.examples.configbutler.ai \
   crd/quizsessions.examples.configbutler.ai \
   crd/quizsubmissions.examples.configbutler.ai --timeout=60s
+# The admission policies that hold what a person may write through krm-foyer's
+# /k8s, from the same directory the cluster's copy is taken from.
+kubectl apply -f voter/config/admission/
 kubectl apply -f test/e2e/voter.yaml
 kubectl -n voter rollout restart deployment/voter
 kubectl -n voter rollout status deployment/voter --timeout=180s

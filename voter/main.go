@@ -91,13 +91,10 @@ func main() {
 	mux := http.NewServeMux()
 	registerOIDCHandlers(mux, oidcClient, cfg, deps.defaultNS)
 	registerJoinRoomHandler(mux)
-	registerParticipantCoffeeHandlers(mux, deps)
-	registerParticipantDatabaseHandlers(mux, deps)
 	registerParticipantStorefrontHandlers(mux, deps)
 	registerParticipantOrderFeedHandlers(mux, deps)
 	registerParticipantQuizHandlers(mux, deps)
 	registerParticipantAuthzHandlers(mux, deps)
-	registerAudienceGrantHandlers(mux, deps)
 	// Last: it owns "/" and therefore everything unclaimed above.
 	registerHandlers(mux, deps)
 

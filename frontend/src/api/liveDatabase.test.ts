@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { useTestAppConfig } from './testAppConfig'
 import { effectScope, type EffectScope } from 'vue'
 import type { StreamEvent } from '@configbutler/krm-stream'
 
@@ -52,6 +53,7 @@ async function fixture() {
     requests.push({ url, init })
     return host()
   })
+  await useTestAppConfig()
   vi.stubGlobal('fetch', fetch)
   scope = effectScope()
   const live = scope.run(() => useLiveDatabase('voter', 'checkout'))!
@@ -141,13 +143,23 @@ describe('the Database editor', () => {
     await live.save('Growth forecast doubled.')
 
     const save = requests.find((request) => request.init.method === 'PATCH')
-    expect(save?.url).toBe('/public/databases/checkout')
-    const headers = new Headers(save!.init.headers)
-    expect(headers.get('x-change-reason')).toBe('Growth forecast doubled.')
-    const body = JSON.parse(String(save!.init.body))
-    expect(body.uid).toBe('db')
-    expect(body.resourceVersion).toBe('1')
-    expect(body.patch).toEqual({ spec: { size: 'large' } })
+    expect(save?.url).toBe(
+      '/k8s/apis/platform.configbutler.ai/v1alpha1/namespaces/voter/databases/checkout?fieldManager=voter',
+    )
+    // One merge patch: the spec, the preconditions, and the reason on the
+    // object it explains -- no moment where the change has no reason.
+    expect(JSON.parse(String(save!.init.body))).toEqual({
+      spec: { size: 'large' },
+      metadata: {
+        uid: 'db',
+        resourceVersion: '1',
+        annotations: {
+          'platform.configbutler.ai/intent': 'Growth forecast doubled.',
+        },
+      },
+    })
+    // No Database GitTarget in this deployment, so no CommitRequest.
+    expect(requests.filter((r) => r.init.method === 'POST')).toEqual([])
   })
 
   // Only `spec` is editable, and the store does not quietly drop a write

@@ -9,8 +9,16 @@
 // EXPLAIN a refusal in advance, but it must not use them to hide the attempt --
 // the refusal the room should see is a real 403, not a disabled button.
 
-import { requestJson } from './http'
 import { appConfig } from './appConfig'
+import { createApiError, requestJson, type ApiError } from './http'
+import {
+  ROLEBINDINGS,
+  ROLES,
+  ROOMS,
+  createObject,
+  deleteObject,
+  getObject,
+} from './kube'
 
 export interface AuthzRule {
   /** "" for the core group, "*" when the grant really is unrestricted. */
@@ -173,23 +181,92 @@ export interface AudienceGrant {
   group?: string
 }
 
-/** Whether the room may edit the coffee menu. Reading this needs permission on
- *  rolebindings, which a participant does not have — so a 403 here is the
- *  correct answer for a participant and the caller should treat it as "not an
- *  operator" rather than as a fault. */
+/** Whether the room may edit the coffee menu: does the RoleBinding exist.
+ *  Reading it needs permission on rolebindings, which a participant does not
+ *  have -- so a 403 here is the correct answer for a participant, and the
+ *  caller treats it as "not an operator" rather than as a fault. */
 export async function getAudienceGrant(): Promise<AudienceGrant> {
-  return await requestJson<AudienceGrant>('/public/audience/coffee-admin')
+  const name = appConfig().audienceCoffeeAdminRole
+  try {
+    await getObject(ROLEBINDINGS, name)
+    return { granted: true, name }
+  } catch (cause) {
+    if ((cause as ApiError).status === 404) return { granted: false, name }
+    throw cause
+  }
 }
 
-/** Create or delete the RoleBinding. The caller's own token does it, so a
- *  refusal here is the API server's, rendered verbatim. */
+/** Create or delete the RoleBinding, as this person: a refusal is the API
+ *  server's, rendered verbatim. The binding is the one object here that is
+ *  deliberately not in Git (participant-rbac.yaml in the platform repository),
+ *  because the operator makes and unmakes it during the talk. */
 export async function setAudienceGrant(
   granted: boolean,
 ): Promise<AudienceGrant> {
-  return await requestJson<AudienceGrant>('/public/audience/coffee-admin', {
-    method: 'PUT',
-    body: JSON.stringify({ granted }),
-  })
+  const name = appConfig().audienceCoffeeAdminRole
+  if (!granted) {
+    try {
+      await deleteObject(ROLEBINDINGS, name)
+    } catch (cause) {
+      // Already gone is the state that was asked for.
+      if ((cause as ApiError).status !== 404) throw cause
+    }
+    return { granted: false, name }
+  }
+
+  // GitOps creates the Role; binding to a missing one would grant nobody
+  // anything and look like it worked. An operator who may bind but not read
+  // Roles (a 403 here) is let through: the binding's own create decides.
+  try {
+    await getObject(ROLES, name)
+  } catch (cause) {
+    const status = (cause as ApiError).status
+    if (status === 404) {
+      throw createApiError(424, {
+        error: `Role "${name}" does not exist in ${appConfig().namespace}. It is created by GitOps; binding to a missing Role would grant nobody anything.`,
+      })
+    }
+    if (status !== 403) throw cause
+  }
+
+  // The group comes from the Room, so it is the one Room Pass actually puts
+  // participants in, never a second copy of it here.
+  const room = await getObject<{ spec?: { audienceGroup?: string } }>(
+    ROOMS,
+    appConfig().roomName,
+  )
+  const group = room.spec?.audienceGroup ?? ''
+  if (group === '') {
+    throw new Error(
+      `Room "${appConfig().roomName}" declares no spec.audienceGroup, so there is nobody to grant this to.`,
+    )
+  }
+  try {
+    await createObject(ROLEBINDINGS, {
+      apiVersion: 'rbac.authorization.k8s.io/v1',
+      kind: 'RoleBinding',
+      metadata: {
+        name,
+        namespace: appConfig().namespace,
+        labels: {
+          'app.kubernetes.io/managed-by': 'voter',
+          'voter.configbutler.ai/grant': 'coffee-admin',
+        },
+        annotations: {
+          'voter.configbutler.ai/description':
+            'Created live from the operator page. Not a Flux resource; gitops-reverser mirrors it to the audit trail.',
+        },
+      },
+      subjects: [
+        { kind: 'Group', apiGroup: 'rbac.authorization.k8s.io', name: group },
+      ],
+      roleRef: { apiGroup: 'rbac.authorization.k8s.io', kind: 'Role', name },
+    })
+  } catch (cause) {
+    // Already granted is the state that was asked for.
+    if ((cause as ApiError).status !== 409) throw cause
+  }
+  return { granted: true, name, group }
 }
 
 // --- what a page needs ------------------------------------------------------

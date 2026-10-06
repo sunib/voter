@@ -13,11 +13,9 @@ See [architecture](../ARCHITECTURE.md) and
 | --- | --- |
 | `GET /healthz` | Process health |
 | `GET /public/build-info` | Build revision metadata |
-| `GET /config.json` | The deployment's settings (namespace, object names, commit link template, participant connector), without a session |
+| `GET /config.json` | The deployment's settings, without a session: namespace, object names, commit link template, participant connector, the GitTargets and CommitRequest namespace a save asks to commit to, and the audience grant's Role |
 | `GET /join-room?code=` | The QR code's target: Room Pass's join cookie, then a redirect to krm-foyer's login through Room Pass |
 | `/auth/login`, `/auth/callback`, `/auth/session`, `/auth/whoami`, `/auth/rules`, `/auth/logout` | Voter's own OIDC login, **no longer routed**: krm-foyer answers `/auth/` on the shared host. Deleted in step 5 |
-| `GET /public/coffeeconfig` | Read the configured object using the participant token |
-| `PATCH /public/coffeeconfig` | CSRF-protected patch and optional CommitRequest |
 | `GET /public/storefront`, `POST /public/orders` | Coffee menu and order decisions |
 | `GET /public/vouchers` | Process-local voucher usage |
 | `GET /public/rounds` | List voting rounds |
@@ -27,8 +25,11 @@ See [architecture](../ARCHITECTURE.md) and
 Voting uses persisted QuizSession/QuizSubmission resources. See the
 [demo runbook](../docs/voting-demo.md) and [sample round](config/demo-round.yaml).
 
-The `/public/*` handlers still read Voter's own session cookie and use its Dex ID
-token, so behind krm-foyer they answer 401 until steps 3 to 5 replace them. Live
+Saving the coffee menu and Databases, opening and closing rounds and the audience
+grant are the browser's own writes through krm-foyer's `/k8s` now; what a person may
+write is held by `config/admission/`. The remaining `/public/*` handlers still read
+Voter's own session cookie and use its Dex ID
+token, so behind krm-foyer they answer 401 until steps 4 and 5 replace them. Live
 streams are krm-foyer's `/stream/v1`; Voter no longer serves a stream or `/metrics`.
 
 ## Configuration
