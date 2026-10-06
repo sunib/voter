@@ -1,16 +1,20 @@
-// voteload drives the REAL participant path at room scale: Dex login through
-// the Room Pass connector, then a ballot cast with that participant's own
-// token. No browser, no shortcut, no seeded session -- every user in this
-// harness enrols and votes exactly the way a phone in the room does, which is
-// the only way the numbers mean anything.
+// voteload drives the REAL participant path at room scale: krm-foyer's login
+// through Dex and the Room Pass connector, a live stream of the coffee menu
+// held open, and a ballot cast with that participant's own token. No browser,
+// no shortcut, no seeded session -- every user in this harness enrols, watches
+// and votes the way a phone in the room does, which is the only way the
+// numbers mean anything.
 //
 // The chain per user:
 //
-//	GET  {app}/auth/login          -> Dex -> room-pass connector -> /join form
-//	POST {issuer}/join             -> Dex -> {app}/auth/callback -> session cookie
-//	GET  {app}/auth/session        -> csrfToken
-//	GET  {app}/public/rounds/{r}   -> the round's resourceVersion
-//	POST {app}/public/rounds/{r}   -> 201, a QuizSubmission created AS THAT PERSON
+//	GET  {app}/auth/login            -> krm-foyer -> Dex -> room-pass -> /join form
+//	POST {app}/join                  -> Dex -> {app}/auth/callback -> krm-foyer's session cookie
+//	GET  {app}/auth/session          -> displayName, connector, csrfToken, csrfHeader
+//	GET  {app}/stream/v1?...         -> the CoffeeConfig, through krm-foyer's shared watch,
+//	                                    held open until the run ends (-stream)
+//	GET  {app}/k8s/.../quizsessions/{r}    -> the round's uid, questions and digest
+//	POST {app}/k8s/.../quizsubmissions     -> 201, a ballot created AS THAT PERSON,
+//	                                          through Voter's admission policy
 //
 // The join code rotates (~15s), so it is re-read from Room status in the
 // background rather than captured once at start -- a 60s run outlives several
@@ -18,6 +22,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -26,6 +31,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -52,6 +58,10 @@ var (
 	roomNS    = flag.String("room-namespace", "voter", "namespace holding the Room")
 	roomName  = flag.String("room", "demo", "Room whose join code to read")
 	insecure  = flag.Bool("insecure", false, "skip TLS verification (local fixtures only)")
+	namespace = flag.String("namespace", "voter", "where the round, ballots and CoffeeConfig live")
+	coffee    = flag.String("coffee", "demo-coffee", "the CoffeeConfig every participant streams")
+	stream    = flag.Bool("stream", true, "hold a live stream of the CoffeeConfig open for the whole run")
+	dial      = flag.String("dial", "", "connect every request to this address's IP instead of resolving the host (the e2e fixture's Docker gateway)")
 	verbose   = flag.Bool("v", false, "log every failure as it happens")
 )
 
@@ -60,11 +70,16 @@ var (
 var hiddenField = regexp.MustCompile(`<input type="hidden" name="([^"]+)" value="([^"]*)"`)
 var formAction = regexp.MustCompile(`<form method="post" action="([^"]+)"`)
 
+// runCtx is the whole run's context: the streams are held open on it, so
+// they outlive each participant's own deadline and close together at the end.
+var runCtx context.Context
+
 type outcome struct {
 	user      int
 	phase     string // where it stopped: "" means it completed
 	err       string
 	login     time.Duration
+	synced    time.Duration // until the stream's first snapshot arrived
 	ballot    time.Duration
 	total     time.Duration
 	votedAt   time.Time
@@ -83,12 +98,14 @@ func main() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
+	runCtx = ctx
 
 	// One shared transport: connection reuse is what a real room does NOT get
 	// (250 separate phones), so this is deliberately generous and the numbers
 	// below are therefore an optimistic floor on the server side, not a
 	// simulation of 250 distinct TCP stacks.
 	tr := &http.Transport{
+		DialContext:         dialer(*dial),
 		TLSClientConfig:     &tls.Config{InsecureSkipVerify: *insecure, MinVersion: tls.VersionTLS12},
 		MaxIdleConns:        512,
 		MaxIdleConnsPerHost: 512,
@@ -197,16 +214,14 @@ func run(ctx context.Context, tr http.RoundTripper, i int, code *atomic.Value) (
 		return o
 	}
 
-	// 3. The session the browser would now hold. csrfToken is required on the
-	//    ballot, and canVote is the app's own connector check -- a login that
-	//    did not come through Room Pass is refused later with a 403, so catch
-	//    it here where the message is legible.
+	// 3. The session the browser would now hold: krm-foyer's, with the CSRF
+	//    proof every write needs and the connector admission keys on.
 	var sess struct {
 		Authenticated bool   `json:"authenticated"`
-		CSRF          string `json:"csrfToken"`
 		DisplayName   string `json:"displayName"`
-		Username      string `json:"username"`
-		CanVote       bool   `json:"canVote"`
+		Connector     string `json:"connector"`
+		CSRF          string `json:"csrfToken"`
+		CSRFHeader    string `json:"csrfHeader"`
 	}
 	if err := getJSON(ctx, client, *app+"/auth/session", &sess); err != nil {
 		o.phase, o.err = "auth-session", err.Error()
@@ -217,43 +232,109 @@ func run(ctx context.Context, tr http.RoundTripper, i int, code *atomic.Value) (
 		return o
 	}
 	o.login = time.Since(loginStart)
+
+	// 4. The coffee menu, live, as every phone on /coffee watches it: one
+	//    stream per participant, all served from krm-foyer's one shared watch.
+	//    Held open in the background until the run's deadline.
+	if *stream {
+		syncedAt, err := openStream(ctx, client)
+		if err != nil {
+			o.phase, o.err = "stream", err.Error()
+			return o
+		}
+		o.synced = syncedAt
+	}
 	if !*vote {
 		return o
 	}
-	if !sess.CanVote {
-		o.phase, o.err = "auth-session", "canVote=false (wrong connector)"
+	if sess.Connector != "room-pass" {
+		o.phase, o.err = "auth-session", fmt.Sprintf("connector %q is not room-pass: admission would refuse the ballot", sess.Connector)
 		return o
 	}
 
-	// 4. The round, for its resourceVersion. The handler refuses a ballot whose
-	//    resourceVersion does not match, so this cannot be cached across users.
+	// 5. The round: its uid and questions digest are the ballot's pins, and its
+	//    questions decide the answers.
+	base := *app + "/k8s/apis/examples.configbutler.ai/v1alpha1/namespaces/" + *namespace
 	var rd struct {
-		Round struct {
-			Metadata struct {
-				ResourceVersion string `json:"resourceVersion"`
-			} `json:"metadata"`
-		} `json:"round"`
-		Voted bool `json:"voted"`
+		Metadata struct {
+			UID string `json:"uid"`
+		} `json:"metadata"`
+		Spec struct {
+			Questions []struct {
+				ID      string   `json:"id"`
+				Type    string   `json:"type"`
+				Choices []string `json:"choices"`
+				Min     *float64 `json:"min"`
+			} `json:"questions"`
+		} `json:"spec"`
+		Status struct {
+			QuestionsDigest string `json:"questionsDigest"`
+		} `json:"status"`
 	}
-	if err := getJSON(ctx, client, *app+"/public/rounds/"+*round, &rd); err != nil {
-		o.phase, o.err = "get-round", err.Error()
-		return o
+	// A round opened moments ago has no digest until Voter's reconciler
+	// publishes it with the first tally; the page waits for it, and so does this.
+	for {
+		if err := getJSON(ctx, client, base+"/quizsessions/"+*round, &rd); err != nil {
+			o.phase, o.err = "get-round", err.Error()
+			return o
+		}
+		if rd.Status.QuestionsDigest != "" {
+			break
+		}
+		select {
+		case <-time.After(500 * time.Millisecond):
+		case <-ctx.Done():
+			o.phase, o.err = "get-round", "the round never published its questions digest"
+			return o
+		}
 	}
 
-	// 5. The ballot. This is the write that becomes a QuizSubmission created
-	//    with this participant's OWN token, which is what the audit webhook
-	//    attributes and the reverser commits.
+	// 6. The ballot: created with this participant's OWN token through /k8s,
+	//    which is what the audit webhook attributes and the reverser commits,
+	//    named and labelled as admission requires.
+	answers := make([]any, 0, len(rd.Spec.Questions))
+	for _, q := range rd.Spec.Questions {
+		a := map[string]any{"questionId": q.ID}
+		switch q.Type {
+		case "singleChoice":
+			a["singleChoice"] = q.Choices[i%len(q.Choices)]
+		case "multiChoice":
+			a["multiChoice"] = []string{q.Choices[i%len(q.Choices)]}
+		case "scale0to10":
+			a["number"] = i % 11
+		case "number":
+			if q.Min != nil {
+				a["number"] = *q.Min
+			} else {
+				a["number"] = 0
+			}
+		default:
+			a["freeText"] = fmt.Sprintf("Load rehearsal ballot %d.", i+1)
+		}
+		answers = append(answers, a)
+	}
 	ballotStart := time.Now()
 	payload, _ := json.Marshal(map[string]any{
-		"resourceVersion": rd.Round.Metadata.ResourceVersion,
-		"answers": []any{
-			map[string]any{"questionId": "approach", "singleChoice": choices[i%len(choices)]},
-			map[string]any{"questionId": "feedback", "freeText": fmt.Sprintf("Load rehearsal ballot %d.", i+1)},
+		"apiVersion": "examples.configbutler.ai/v1alpha1",
+		"kind":       "QuizSubmission",
+		"metadata": map[string]any{
+			"name": *round + "-" + strings.ToLower(sess.DisplayName),
+			"labels": map[string]any{
+				"voter.configbutler.ai/round":     *round,
+				"voter.configbutler.ai/submitter": sess.DisplayName,
+			},
+		},
+		"spec": map[string]any{
+			"sessionRef":      map[string]any{"group": "examples.configbutler.ai", "kind": "QuizSession", "name": *round},
+			"roundUID":        rd.Metadata.UID,
+			"questionsDigest": rd.Status.QuestionsDigest,
+			"submittedAt":     time.Now().UTC().Format(time.RFC3339),
+			"answers":         answers,
 		},
 	})
-	vreq, _ := http.NewRequestWithContext(ctx, "POST", *app+"/public/rounds/"+*round, bytes.NewReader(payload))
+	vreq, _ := http.NewRequestWithContext(ctx, "POST", base+"/quizsubmissions?fieldManager=voter", bytes.NewReader(payload))
 	vreq.Header.Set("Content-Type", "application/json")
-	vreq.Header.Set("X-CSRF-Token", sess.CSRF)
+	vreq.Header.Set(sess.CSRFHeader, sess.CSRF)
 	vreq.Header.Set("Origin", *app)
 	vresp, err := client.Do(vreq)
 	if err != nil {
@@ -272,9 +353,75 @@ func run(ctx context.Context, tr http.RoundTripper, i int, code *atomic.Value) (
 	return o
 }
 
-// Spread across the round's four choices so the results screen looks like a
-// room rather than a bot.
-var choices = []string{"GitOps", "kubectl or a cluster UI", "A mix of both", "I am still exploring"}
+// dialer connects to the given IP, keeping the port and the TLS server name of
+// the URL, so the fixture's *.voter.test hosts work without /etc/hosts. Empty
+// resolves names as usual.
+func dialer(ip string) func(context.Context, string, string) (net.Conn, error) {
+	d := &net.Dialer{Timeout: 10 * time.Second}
+	if ip == "" {
+		return d.DialContext
+	}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		_, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		return d.DialContext(ctx, network, net.JoinHostPort(ip, port))
+	}
+}
+
+// openStream opens krm-foyer's stream of the CoffeeConfig, waits for its
+// first snapshot (the "synced" event), and keeps reading in the background
+// until the run's context ends -- a phone that stays on the page. It returns
+// how long the snapshot took.
+func openStream(ctx context.Context, client *http.Client) (time.Duration, error) {
+	started := time.Now()
+	q := url.Values{
+		"group": {"examples.configbutler.ai"}, "version": {"v1alpha1"}, "resource": {"coffeeconfigs"},
+		"namespace": {*namespace}, "name": {*coffee},
+	}
+	// The run's context, not this user's: the stream outlives the vote.
+	req, _ := http.NewRequestWithContext(runCtx, "GET", *app+"/stream/v1?"+q.Encode(), nil)
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	if resp.StatusCode != 200 {
+		_ = resp.Body.Close()
+		return 0, fmt.Errorf("stream answered %d", resp.StatusCode)
+	}
+	synced := make(chan error, 1)
+	go func() {
+		defer func() { _ = resp.Body.Close() }()
+		sc := bufio.NewScanner(resp.Body)
+		sc.Buffer(make([]byte, 64<<10), 1<<20)
+		reported := false
+		for sc.Scan() {
+			line := sc.Text()
+			if reported || !strings.HasPrefix(line, "data:") {
+				continue
+			}
+			switch {
+			case strings.Contains(line, `"type":"synced"`):
+				synced <- nil
+				reported = true
+			case strings.Contains(line, `"type":"error"`):
+				synced <- fmt.Errorf("stream error: %s", firstLine(strings.TrimPrefix(line, "data:")))
+				reported = true
+			}
+		}
+		if !reported {
+			synced <- fmt.Errorf("stream ended before its snapshot: %v", sc.Err())
+		}
+	}()
+	select {
+	case err := <-synced:
+		return time.Since(started), err
+	case <-ctx.Done():
+		return 0, fmt.Errorf("no snapshot before the deadline")
+	}
+}
 
 func get(ctx context.Context, c *http.Client, u string) (string, *url.URL, int, error) {
 	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
@@ -401,13 +548,14 @@ func report(rs []outcome, begin time.Time) {
 		return ds
 	}
 	login := collect(func(o outcome) time.Duration { return o.login })
+	synced := collect(func(o outcome) time.Duration { return o.synced })
 	ballot := collect(func(o outcome) time.Duration { return o.ballot })
 	total := collect(func(o outcome) time.Duration { return o.total })
 	fmt.Printf("\n%-10s %10s %10s %10s %10s\n", "phase", "p50", "p95", "p99", "max")
 	for _, row := range []struct {
 		name string
 		ds   []time.Duration
-	}{{"login", login}, {"ballot", ballot}, {"end-to-end", total}} {
+	}{{"login", login}, {"stream", synced}, {"ballot", ballot}, {"end-to-end", total}} {
 		fmt.Printf("%-10s %10s %10s %10s %10s\n", row.name,
 			pct(row.ds, 0.50), pct(row.ds, 0.95), pct(row.ds, 0.99), pct(row.ds, 1.0))
 	}
