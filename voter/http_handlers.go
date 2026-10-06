@@ -16,7 +16,6 @@ import (
 )
 
 type handlerDeps struct {
-	streams   *streamRuntime
 	cfg       config
 	defaultNS string
 
@@ -45,12 +44,6 @@ func (d handlerDeps) participantClientsFor(idToken string) (participantClients, 
 		return d.newClients(d.cfg, idToken)
 	}
 	return newParticipantClients(d.cfg, idToken)
-}
-
-func metricsHandler(metrics *streamMetrics) http.Handler {
-	mux := http.NewServeMux()
-	mux.Handle("GET /metrics", metrics)
-	return mux
 }
 
 func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
@@ -95,6 +88,10 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			// So a save can link the commit it became. Empty when unset, which
 			// the page renders as a plain sha rather than a dead link.
 			"commitURLTemplate": deps.cfg.AuditTrailCommitURLTemplate,
+			// Which logins are the audience, for what the page shows. The rule
+			// that counts is admission's; this is so a page explaining a
+			// refusal agrees with it, without a second copy in the browser.
+			"participantConnector": deps.cfg.ParticipantConnectorID,
 		})
 	})
 

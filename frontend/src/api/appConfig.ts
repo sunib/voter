@@ -14,6 +14,8 @@ export interface AppConfig {
    *  deployment has not been told where its audit trail is readable, in which
    *  case a sha is shown as plain text -- a dead link would be worse. */
   commitURLTemplate: string
+  /** The Dex connector whose logins are the audience, and so may vote. */
+  participantConnector: string
 }
 
 let loaded: AppConfig | null = null

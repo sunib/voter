@@ -25,7 +25,7 @@ import {
 import { useAuthorization } from '../api/useAuthorization'
 import PermissionRequirements from '../components/PermissionRequirements.vue'
 import { setRoundState } from '../api/quiz'
-import { currentSession } from '../api/session'
+import { currentSession, loginURL } from '../api/session'
 import { appConfig } from '../api/appConfig'
 import type { KRMObject } from '@configbutler/krm-stream'
 
@@ -110,13 +110,13 @@ const sortedRounds = computed(() =>
     ),
 )
 
-// The QR carries the same two parameters room-qr uses -- "code" so nobody types
-// it, "return" so they land on the quizzes rather than the front page. Keeping
-// the contract identical means the terminal tool and this page stay swappable.
+// The QR points at Voter's /join-room, which hands the code to Room Pass in
+// its join cookie and then starts krm-foyer's login, so nobody types it.
+// Room Pass's room-qr tool does the same with LOGIN_PATH=/join-room.
 const qrSvg = ref('')
 const joinUrl = computed(() =>
   joinCode.value
-    ? `${window.location.origin}/auth/login?code=${encodeURIComponent(joinCode.value)}&return=%2F`
+    ? `${window.location.origin}/join-room?code=${encodeURIComponent(joinCode.value)}`
     : '',
 )
 
@@ -217,9 +217,10 @@ const grantTimer = setInterval(() => void refreshGrant(), 5000)
 onBeforeUnmount(() => clearInterval(grantTimer))
 
 function signInAsOperator() {
-  // Allowlisted by OIDC_CONNECTOR_CHOICES, not free text; the default path
-  // stays room-pass so a room full of strangers is never shown this door.
-  window.location.assign('/auth/login?connector=github&return=%2Froom')
+  // Allowlisted by krm-foyer's login.authorizationParameters, not free text;
+  // the default stays room-pass so a room full of strangers is never shown
+  // this door.
+  window.location.assign(loginURL('/room', 'github'))
 }
 </script>
 

@@ -6,6 +6,7 @@ import { formatConflictValue, humanizePath } from '../adminFormatters'
 import { formatMoney, getVoucherUsage } from '../api/coffee'
 import { useLiveCoffeeConfig } from '../api/liveCoffeeConfig'
 import { appConfig } from '../api/appConfig'
+import { loginURL } from '../api/session'
 import { commitURL, shortSha, useCommitStatus } from '../api/commitStatus'
 import { ADMIN_REQUIREMENTS } from '../api/authz'
 import { useAuthorization } from '../api/useAuthorization'
@@ -399,7 +400,7 @@ onBeforeUnmount(clearAllFlashes)
       <a
         v-if="state.status === 'terminal'"
         class="button"
-        href="/auth/login?return=%2Fadmin"
+        :href="loginURL('/admin')"
         >Sign in again</a
       >
       <button

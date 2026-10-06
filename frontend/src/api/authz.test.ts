@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   allows,
   extraVerbs,
+  flattenResourceRules,
   missingPermissions,
   ADMIN_REQUIREMENTS,
   ROOM_REQUIREMENTS,
@@ -10,7 +11,17 @@ import {
 } from './authz'
 
 function authorization(rules: Authorization['rules']): Authorization {
-  return { namespace: 'voter', rules, incomplete: false, evaluationError: '' }
+  return {
+    namespace: 'voter',
+    rules,
+    incomplete: false,
+    evaluationError: '',
+    review: {
+      apiVersion: 'authorization.k8s.io/v1',
+      kind: 'SelfSubjectRulesReview',
+      spec: { namespace: 'voter' },
+    },
+  }
 }
 
 const COFFEE = 'examples.configbutler.ai'
@@ -166,5 +177,59 @@ describe('the declared page requirements', () => {
       (r) => r.resource === 'rolebindings',
     ).map((r) => r.verb)
     expect(rolebindings.sort()).toEqual(['create', 'delete', 'get'])
+  })
+})
+
+// Ported from the Go handler that used to answer /auth/rules; these are its
+// rules, now kept in the browser.
+describe('flattenResourceRules', () => {
+  it('merges the verbs of every rule for one group and resource', () => {
+    expect(
+      flattenResourceRules([
+        { apiGroups: [COFFEE], resources: ['coffeeconfigs'], verbs: ['get'] },
+        { apiGroups: [COFFEE], resources: ['coffeeconfigs'], verbs: ['patch', 'get'] },
+      ]),
+    ).toEqual([
+      { apiGroup: COFFEE, resource: 'coffeeconfigs', verbs: ['get', 'patch'] },
+    ])
+  })
+
+  // Merging would show "patch" as holding on every CoffeeConfig, when it only
+  // holds on one -- a page claiming more than the API server will allow.
+  it('keeps a grant on named objects apart from an unrestricted one', () => {
+    expect(
+      flattenResourceRules([
+        { apiGroups: [COFFEE], resources: ['coffeeconfigs'], verbs: ['get'] },
+        {
+          apiGroups: [COFFEE],
+          resources: ['coffeeconfigs'],
+          resourceNames: ['demo-coffee'],
+          verbs: ['patch'],
+        },
+      ]),
+    ).toEqual([
+      { apiGroup: COFFEE, resource: 'coffeeconfigs', verbs: ['get'] },
+      {
+        apiGroup: COFFEE,
+        resource: 'coffeeconfigs',
+        verbs: ['patch'],
+        names: ['demo-coffee'],
+      },
+    ])
+  })
+
+  it('reads a rule without apiGroups as the core group, and sorts core first', () => {
+    expect(
+      flattenResourceRules([
+        { apiGroups: [COFFEE], resources: ['quizsessions'], verbs: ['list'] },
+        { resources: ['configmaps'], verbs: ['get'] },
+      ]).map((row) => `${row.apiGroup}/${row.resource}`),
+    ).toEqual(['/configmaps', `${COFFEE}/quizsessions`])
+  })
+
+  it('passes a wildcard through rather than inventing resources', () => {
+    expect(
+      flattenResourceRules([{ apiGroups: ['*'], resources: ['*'], verbs: ['*'] }]),
+    ).toEqual([{ apiGroup: '*', resource: '*', verbs: ['*'] }])
   })
 })

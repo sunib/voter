@@ -67,9 +67,9 @@ func main() {
 	}
 	sessionCookieCodec = sc
 
-	streams, err := newStreamRuntime(&cfg)
+	serviceAccount, err := newServiceAccountClient(&cfg)
 	if err != nil {
-		log.Fatalf("streams: %v", err)
+		log.Fatalf("kubernetes: %v", err)
 	}
 
 	bootCtx, bootCancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -82,7 +82,6 @@ func main() {
 		cfg.OIDCIssuerURL, cfg.OIDCClientID, cfg.OIDCRedirectURL, cfg.AppOrigin, cfg.OIDCConnectorID)
 
 	deps := handlerDeps{
-		streams:   streams,
 		cfg:       cfg,
 		defaultNS: applicationNamespace(cfg),
 		vouchers:  newVoucherLedger(),
@@ -90,19 +89,13 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	metricsServer := &http.Server{Addr: cfg.MetricsAddress, Handler: metricsHandler(streams.metrics), ReadHeaderTimeout: 5 * time.Second, WriteTimeout: 5 * time.Second}
-	metricsListener, err := net.Listen("tcp", cfg.MetricsAddress)
-	if err != nil {
-		log.Fatalf("metrics listener: %v", err)
-	}
-	go func() { log.Fatal(metricsServer.Serve(metricsListener)) }()
 	registerOIDCHandlers(mux, oidcClient, cfg, deps.defaultNS)
+	registerJoinRoomHandler(mux)
 	registerParticipantCoffeeHandlers(mux, deps)
 	registerParticipantDatabaseHandlers(mux, deps)
 	registerParticipantStorefrontHandlers(mux, deps)
 	registerParticipantOrderFeedHandlers(mux, deps)
 	registerParticipantQuizHandlers(mux, deps)
-	registerParticipantStreamHandlers(mux, deps)
 	registerParticipantAuthzHandlers(mux, deps)
 	registerAudienceGrantHandlers(mux, deps)
 	// Last: it owns "/" and therefore everything unclaimed above.
@@ -120,7 +113,7 @@ func main() {
 	// It runs for the life of the process, like the metrics server above: this
 	// binary has no graceful shutdown to hang a cancel off, and a half-stopped
 	// tally would be worse than a stopped one.
-	go newQuizReconciler(streams.serviceAccount, deps.defaultNS).Run(context.Background())
+	go newQuizReconciler(serviceAccount, deps.defaultNS).Run(context.Background())
 
 	addr := net.JoinHostPort(cfg.Host, cfg.Port)
 	srv := &http.Server{

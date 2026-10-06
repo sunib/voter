@@ -24,14 +24,13 @@ defineProps<{
 const meaning: Record<string, string> = {
   FORBIDDEN: 'Kubernetes refused this identity. RBAC, working as intended.',
   UNAUTHENTICATED: 'The credential was rejected — usually an expired session.',
-  SCOPE_INVALID:
-    'The backend will not serve this scope at all: it is not on the stream allowlist.',
+  SCOPE_INVALID: 'krm-foyer will not serve this scope: the request is malformed.',
   UPSTREAM_UNAVAILABLE:
-    "The API server could not be reached, or the application's own ServiceAccount cannot watch this resource.",
+    "The API server could not be reached, or krm-foyer's shared-watch identity cannot watch this resource.",
   RESYNC_REQUIRED: 'The stream fell too far behind and needs a fresh snapshot.',
   SLOW_CONSUMER: 'This browser could not keep up with the stream.',
   INTERNAL:
-    "Something failed inside the stream. Check the application's ServiceAccount RBAC for this resource first — the shared watch runs as the application, not as you.",
+    "Something failed inside the stream. Check the RBAC of krm-foyer's shared-watch identity for this resource first — a shared watch runs as that identity, not as you.",
 }
 </script>
 
@@ -69,9 +68,10 @@ const meaning: Record<string, string> = {
         >
       </dd>
 
-      <dt>As</dt>
+      <dt>Signed in as</dt>
       <dd>
-        <code>{{ session?.username || 'unknown' }}</code>
+        <code>{{ session?.displayName || 'unknown' }}</code>
+        <span v-if="session?.connector"> through {{ session.connector }}</span>
       </dd>
 
       <dt>Groups</dt>

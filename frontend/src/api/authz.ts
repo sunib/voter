@@ -1,7 +1,7 @@
 // What this identity may do, as the API server reports it.
 //
-// Every value here originates in a SelfSubjectRulesReview the backend spent
-// with THIS browser's token. Nothing in the SPA decides permissions; a page
+// Every value here originates in a SelfSubjectRulesReview this browser posts
+// through krm-foyer's /k8s, so the API server answers with THIS person's token. Nothing in the SPA decides permissions; a page
 // that reads this is rendering Kubernetes' answer, and the same answer is what
 // the API server will give when the page actually tries the thing.
 //
@@ -9,7 +9,8 @@
 // EXPLAIN a refusal in advance, but it must not use them to hide the attempt --
 // the refusal the room should see is a real 403, not a disabled button.
 
-import { currentCsrfToken } from './session'
+import { requestJson } from './http'
+import { appConfig } from './appConfig'
 
 export interface AuthzRule {
   /** "" for the core group, "*" when the grant really is unrestricted. */
@@ -26,6 +27,28 @@ export interface Authorization {
   /** An authorizer could not enumerate. The list is a floor, not the truth. */
   incomplete: boolean
   evaluationError: string
+  /** The review exactly as the API server returned it, for anyone who wants
+   *  to read the answer before this page flattened it. */
+  review: SelfSubjectRulesReview
+}
+
+/** The parts of authorization.k8s.io/v1 SelfSubjectRulesReview read here. */
+export interface ResourceRule {
+  verbs: string[]
+  apiGroups?: string[]
+  resources?: string[]
+  resourceNames?: string[]
+}
+export interface SelfSubjectRulesReview {
+  apiVersion: string
+  kind: string
+  spec: { namespace: string }
+  status?: {
+    resourceRules?: ResourceRule[]
+    nonResourceRules?: unknown[]
+    incomplete?: boolean
+    evaluationError?: string
+  }
 }
 
 /** The verbs the table shows as columns, in the order a reader expects: read
@@ -41,21 +64,75 @@ export const DISPLAY_VERBS = [
   'delete',
 ] as const
 
+/** Asks the API server what this identity may do in the application's
+ *  namespace. A review is a create, so it carries the CSRF proof like any
+ *  other write; it changes nothing. */
 export async function getAuthorization(): Promise<Authorization> {
-  const res = await fetch('/auth/rules', {
-    credentials: 'include',
-    headers: { accept: 'application/json' },
-  })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw Object.assign(
-      new Error(
-        body.error ?? `Could not read your permissions (${res.status})`,
-      ),
-      { status: res.status },
-    )
+  const namespace = appConfig().namespace
+  const review = await requestJson<SelfSubjectRulesReview>(
+    '/k8s/apis/authorization.k8s.io/v1/selfsubjectrulesreviews',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        apiVersion: 'authorization.k8s.io/v1',
+        kind: 'SelfSubjectRulesReview',
+        spec: { namespace },
+      }),
+    },
+  )
+  return {
+    namespace,
+    rules: flattenResourceRules(review.status?.resourceRules ?? []),
+    // Incomplete means an authorizer could not enumerate -- a webhook,
+    // typically. The page must say so rather than present a short list as the
+    // whole truth.
+    incomplete: review.status?.incomplete ?? false,
+    evaluationError: review.status?.evaluationError ?? '',
+    review,
   }
-  return (await res.json()) as Authorization
+}
+
+/** One row per apiGroup/resource pair, with the union of its verbs: what
+ *  `kubectl auth can-i --list` shows. The API server returns rules in whatever
+ *  order its authorizers produced them, and a pair can appear more than once
+ *  when several bindings contribute.
+ *
+ *  Rules carrying resourceNames are kept SEPARATE from unrestricted ones for
+ *  the same resource: merging them would show a verb as unconditional when it
+ *  only applies to one named object. A wildcard group or resource is passed
+ *  through as "*" rather than expanded -- the caller really does hold it on
+ *  everything, and inventing a list of concrete resources would be guessing
+ *  at the cluster's types. */
+export function flattenResourceRules(rules: ResourceRule[]): AuthzRule[] {
+  const rows = new Map<string, AuthzRule & { verbSet: Set<string> }>()
+  for (const rule of rules) {
+    const names = [...(rule.resourceNames ?? [])].sort()
+    const groups = rule.apiGroups?.length ? rule.apiGroups : ['']
+    for (const apiGroup of groups) {
+      for (const resource of rule.resources ?? []) {
+        const key = JSON.stringify([apiGroup, resource, names])
+        let row = rows.get(key)
+        if (row === undefined) {
+          row = { apiGroup, resource, verbs: [], verbSet: new Set() }
+          if (names.length > 0) row.names = names
+          rows.set(key, row)
+        }
+        for (const verb of rule.verbs) row.verbSet.add(verb)
+      }
+    }
+  }
+  const out: AuthzRule[] = [...rows.values()].map(
+    ({ verbSet, ...row }) => ({ ...row, verbs: [...verbSet].sort() }),
+  )
+  // Stable order so the table does not reshuffle under a poll. Core group
+  // ("") first, then alphabetical, which puts the demo's own types together.
+  const byText = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
+  return out.sort(
+    (a, b) =>
+      byText(a.apiGroup, b.apiGroup) ||
+      byText(a.resource, b.resource) ||
+      byText((a.names ?? []).join(','), (b.names ?? []).join(',')),
+  )
 }
 
 /** True when the identity holds `verb` on `resource` unconditionally.
@@ -101,18 +178,7 @@ export interface AudienceGrant {
  *  correct answer for a participant and the caller should treat it as "not an
  *  operator" rather than as a fault. */
 export async function getAudienceGrant(): Promise<AudienceGrant> {
-  const res = await fetch('/public/audience/coffee-admin', {
-    credentials: 'include',
-    headers: { accept: 'application/json' },
-  })
-  const body = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    throw Object.assign(
-      new Error(body.error ?? `Could not read the grant (${res.status})`),
-      { status: res.status },
-    )
-  }
-  return body as AudienceGrant
+  return await requestJson<AudienceGrant>('/public/audience/coffee-admin')
 }
 
 /** Create or delete the RoleBinding. The caller's own token does it, so a
@@ -120,23 +186,10 @@ export async function getAudienceGrant(): Promise<AudienceGrant> {
 export async function setAudienceGrant(
   granted: boolean,
 ): Promise<AudienceGrant> {
-  const res = await fetch('/public/audience/coffee-admin', {
+  return await requestJson<AudienceGrant>('/public/audience/coffee-admin', {
     method: 'PUT',
-    credentials: 'include',
-    headers: {
-      'content-type': 'application/json',
-      'x-csrf-token': currentCsrfToken(),
-    },
     body: JSON.stringify({ granted }),
   })
-  const body = await res.json().catch(() => ({}))
-  if (!res.ok) {
-    throw Object.assign(
-      new Error(body.error ?? `Could not change the grant (${res.status})`),
-      { status: res.status },
-    )
-  }
-  return body as AudienceGrant
 }
 
 // --- what a page needs ------------------------------------------------------

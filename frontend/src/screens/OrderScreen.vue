@@ -12,6 +12,7 @@ import {
 } from '../api/coffee'
 import { useLiveCoffeeConfig } from '../api/liveCoffeeConfig'
 import { appConfig } from '../api/appConfig'
+import { loginURL } from '../api/session'
 import { useCartStore } from '../stores/cart'
 
 const cart = useCartStore()
@@ -181,7 +182,7 @@ watch(
           'Reconnecting to live prices. Displayed prices may be out of date; your order is priced by the server.'
         }}
       </p>
-      <a v-if="live.state.value.status === 'terminal'" href="/auth/login"
+      <a v-if="live.state.value.status === 'terminal'" :href="loginURL('/coffee')"
         >Sign in again</a
       >
       <button

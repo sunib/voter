@@ -14,11 +14,11 @@ import (
 // join codes, admin password and forward-auth ServiceAccount -- are gone along
 // with the code behind them.
 type config struct {
-	// Metrics has its own listener and is never routed by the application ingress.
-	MetricsAddress string `envconfig:"METRICS_ADDRESS" default:"127.0.0.1:9090"`
-	// An explicit local development credential; never discover the user's default kubeconfig.
+	// Voter's own credential outside a cluster, for local development; never
+	// discover the user's default kubeconfig. The name is from when it was the
+	// stream gateway's.
 	StreamKubeconfig string `envconfig:"STREAM_KUBECONFIG"`
-	// Public cluster TLS trust copied at startup, without shared-client credentials.
+	// Public cluster TLS trust copied at startup, without Voter's own credentials.
 	participantTLS *rest.TLSClientConfig
 
 	Host string `envconfig:"HOST" default:"0.0.0.0"`

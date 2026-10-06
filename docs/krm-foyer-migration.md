@@ -205,24 +205,46 @@ e2e. Step 7 is the only cluster change.
 
 ### 2. Frontend on krm-foyer's contract
 
-- [ ] krm-stream browser client 0.4.0 → 0.7.0 (the gateway krm-foyer pins), stream URL
-      `/public/stream` → `/stream/v1`. Check projections (`krm-spec/v1`) and the error
-      events, which changed since 0.4.0.
-- [ ] `api/session.ts` reads krm-foyer's `/auth/session` (`displayName`, `groups`,
-      `connector`, `csrfToken`, `csrfHeader`, `expiresAt`). `canVote` becomes
-      `connector === 'room-pass'`, for display only.
-- [ ] Application settings (`namespace`, `coffeeConfigName`, `roomName`,
-      `commitURLTemplate`) come from a static `/config.json` that Voter serves,
-      rendered from its environment. They are no longer in the session.
-- [ ] Login links: `return=` → `return_to=`, `connector=` → `oidc.connector_id=`
-      (`AdminScreen.vue`, `DatabaseEditScreen.vue`, `RoomScreen.vue:221`,
-      `OrderScreen.vue`). Logout: `POST /auth/logout`, then to Room Pass's `/join` for
-      its own sign-out form (room-pass.md, "Logout is two programs").
-- [ ] Merge the two fetch wrappers (`api/http.ts`, `api/quiz.ts:1-21`) into one, using
-      the CSRF header name from the session.
-- [ ] `/auth/whoami` is JSON now. `IdentityScreen.vue` and `useAuthorization.ts` post a
-      SelfSubjectRulesReview to `/k8s/apis/authorization.k8s.io/v1/selfsubjectrulesreviews`
-      instead of `/auth/rules`. `flattenResourceRules` moves to the browser.
+Done 2026-10-06 on branch `krm-foyer-frontend-contract`, checked in Chromium against
+the fixture: QR link from another site → Room Pass's join page with the code filled in
+→ signed in through krm-foyer; `/auth/session` and `/auth/whoami` from krm-foyer; the
+rounds and the CoffeeConfig live over `/stream/v1`; the rules table from a review
+through `/k8s`; sign-out ends on Room Pass's "already enrolled" page with krm-foyer's
+cookie gone. What still fails is exactly `/public/*`, which needs Voter's old session
+until steps 3 to 5. **The browser suite is red from here until step 6.**
+
+- [x] krm-stream browser client 0.4.0 → **0.10.0** (what krm-foyer 0.3.0's gateway
+      runs; 0.7.0 was the plan's guess), stream URL `/public/stream` → `/stream/v1`.
+      `connectManagedResourceStream` became `connectResourceStream` with a callback
+      (krm-stream `docs/migrating.md`).
+- [x] `api/session.ts` reads krm-foyer's `/auth/session`. `expiresAt` is a timestamp
+      string now, and there is no Kubernetes username in it: `/auth/whoami` has that.
+      `canVote(session)` compares the connector with `participantConnector` from
+      `/config.json`, for display only, so the browser holds no second copy of the rule.
+- [x] Application settings come from `/config.json`, which Voter serves from its
+      environment without a session (`namespace`, `coffeeConfigName`, `roomName`,
+      `commitURLTemplate`, `participantConnector`).
+- [x] Login links go through `loginURL(returnTo, connector)`: `return_to=` and
+      `oidc.connector_id=`. krm-foyer defaults the connector to `room-pass`. Logout is
+      `POST /auth/logout`; a Room Pass participant then goes to `/join` for its own
+      sign-out form, the operator to the signed-out screen.
+- [x] One fetch wrapper (`api/http.ts`), with the CSRF header the session names.
+- [x] `/auth/whoami` (JSON) for the Kubernetes name; a SelfSubjectRulesReview posted to
+      `/k8s/apis/authorization.k8s.io/v1/selfsubjectrulesreviews` in place of
+      `/auth/rules`, flattened in the browser. The "as YAML" links became the raw
+      review, expandable on the page.
+- [x] **Brought forward from step 5:** `/join-room?code=` in Voter (`join_room.go`),
+      because the QR code pointed at `/auth/login?code=`, which is krm-foyer's now. The
+      QR in `RoomScreen.vue` points there.
+- [x] **Brought forward from step 5:** Voter's own krm-stream gateway is gone
+      (`stream_runtime.go`, `participant_stream.go`, `/public/stream`), and with it
+      the `/metrics` listener, which served only its counters; krm-foyer has its own.
+      The tally reconciler keeps a plain service-account client
+      (`service_account.go`). `krm-stream/gateway` stays in `go.mod` only for
+      `Project` and `ValidateMergePatch` in the CoffeeConfig and Databases handlers,
+      which step 3 deletes.
+- [x] Fixture: krm-foyer has `/auth/` too, defaults to the `room-pass` connector, and
+      shares watches on coffeeconfigs, quizsessions, databases and rooms.
 
 ### 3. Resources through `/k8s`
 

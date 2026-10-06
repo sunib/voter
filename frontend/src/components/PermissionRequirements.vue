@@ -125,11 +125,11 @@ const satisfied = computed(() => missing.value.length === 0)
         :error="error"
         :highlight="highlight"
       />
+      <details v-if="authz" class="raw-answer">
+        <summary>The same answer, as the API server returned it</summary>
+        <pre>{{ JSON.stringify(authz.review, null, 2) }}</pre>
+      </details>
       <p class="tech-facts__links">
-        <a href="/auth/rules?as=yaml" target="_blank" rel="noopener">
-          The same answer as YAML
-          <i class="pi pi-external-link" aria-hidden="true" />
-        </a>
         <RouterLink class="text-link" to="/me"
           >Your identity and full permissions</RouterLink
         >

@@ -8,13 +8,13 @@
 import { onScopeDispose, ref, shallowRef } from 'vue'
 import {
   LiveResourceStore,
-  connectManagedResourceStream,
+  applyStreamEvent,
+  connectResourceStream,
   readOnlyPolicy,
   resourceStreamURL,
   type ConnectionState,
   type ErrorCode,
   type KRMObject,
-  type ManagedStreamHandle,
 } from '@configbutler/krm-stream'
 
 export interface LiveScope {
@@ -27,9 +27,8 @@ export interface LiveScope {
 }
 
 /**
- * Watches a scope and keeps `items` current. The backend's allowlist decides
- * which scopes are servable at all, and Kubernetes decides whether this
- * identity may read them -- a refusal arrives as a terminal state, not an
+ * Watches a scope through krm-foyer's /stream/v1 and keeps `items` current.
+ * Kubernetes decides whether this identity may read it -- a refusal arrives as a terminal state, not an
  * exception, because "you may not watch this" is an answer the caller renders.
  */
 export function useLiveResources(scope: LiveScope) {
@@ -48,7 +47,7 @@ export function useLiveResources(scope: LiveScope) {
   const errorCode = ref<ErrorCode | ''>('')
   const terminal = ref(false)
 
-  const url = resourceStreamURL('/public/stream', scope)
+  const url = resourceStreamURL('/stream/v1', scope)
 
   function refresh() {
     // Copy out on every change: the library prunes its own store on delete, so
@@ -58,24 +57,39 @@ export function useLiveResources(scope: LiveScope) {
 
   const stopSubscription = store.subscribe(refresh)
 
-  let handle: ManagedStreamHandle | null = null
-  handle = connectManagedResourceStream(url, store, {
-    onStateChange(next) {
-      state.value = next
-      if (next.status === 'live') {
-        error.value = ''
-      }
+  const handle = connectResourceStream(
+    url,
+    (event) => {
+      applyStreamEvent(store, event)
     },
-    onError(code: ErrorCode, message: string, isTerminal: boolean) {
-      errorCode.value = code
-      error.value = message || code
-      terminal.value = isTerminal
+    {
+      onError(code: ErrorCode, message: string, isTerminal: boolean) {
+        errorCode.value = code
+        error.value = message || code
+        terminal.value = isTerminal
+      },
     },
+  )
+  function showState(next: Readonly<ConnectionState>) {
+    state.value = next
+    if (next.status === 'live') {
+      error.value = ''
+    }
+  }
+  showState(handle.state)
+  const stopState = handle.subscribe(showState)
+  // Only a throw in the callbacks above rejects this. It ends the stream, so
+  // report it as a terminal fault rather than as an unhandled rejection.
+  handle.closed.catch((cause: unknown) => {
+    errorCode.value = 'INTERNAL'
+    error.value = (cause as Error).message
+    terminal.value = true
   })
 
   onScopeDispose(() => {
     stopSubscription()
-    handle?.close()
+    stopState()
+    handle.close()
   })
 
   return {

@@ -47,6 +47,7 @@ func TestConfigEndpoint(t *testing.T) {
 		CoffeeConfigName:            "demo-coffee",
 		RoomName:                    "demo",
 		AuditTrailCommitURLTemplate: "https://example.test/commit/{sha}",
+		ParticipantConnectorID:      "room-pass",
 	}})
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/config.json", nil))
@@ -58,10 +59,11 @@ func TestConfigEndpoint(t *testing.T) {
 		t.Fatalf("not JSON: %v", err)
 	}
 	want := map[string]string{
-		"namespace":         "voter",
-		"coffeeConfigName":  "demo-coffee",
-		"roomName":          "demo",
-		"commitURLTemplate": "https://example.test/commit/{sha}",
+		"namespace":            "voter",
+		"coffeeConfigName":     "demo-coffee",
+		"roomName":             "demo",
+		"commitURLTemplate":    "https://example.test/commit/{sha}",
+		"participantConnector": "room-pass",
 	}
 	for k, v := range want {
 		if body[k] != v {

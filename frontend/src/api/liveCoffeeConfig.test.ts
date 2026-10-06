@@ -27,7 +27,7 @@ async function fixture(editable = true) {
   const requests: RequestInit[] = []
   const host = vi.fn(async (_init: RequestInit) => json({ saved: true }))
   const fetch = vi.fn(async (url: string, init: RequestInit = {}) => {
-    if (url.startsWith('/public/stream'))
+    if (url.startsWith('/stream/v1'))
       return new Response(
         new ReadableStream<Uint8Array>({
           start(c) {

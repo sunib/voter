@@ -1423,6 +1423,28 @@ p {
   color: rgb(var(--accent));
 }
 
+/* A Kubernetes answer before this page rendered it: a SelfSubjectRulesReview
+   or SelfSubjectReview, as JSON. */
+.raw-answer {
+  margin: 0.7rem 0;
+}
+
+.raw-answer summary {
+  cursor: pointer;
+  color: rgb(var(--accent));
+}
+
+.raw-answer pre {
+  margin: 0.5rem 0 0;
+  padding: 0.6rem 0.8rem;
+  max-height: 24rem;
+  overflow: auto;
+  border-radius: 10px;
+  background: rgb(var(--line) / 0.05);
+  color: rgb(var(--ink));
+  font-size: 0.8rem;
+}
+
 .identity-card__more {
   margin-top: 0.7rem;
   font-size: 0.86rem;
