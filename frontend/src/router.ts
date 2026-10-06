@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 import { getSession } from './api/session'
+import { shopOnlyRedirect } from './shopOnly'
 import HomeScreen from './screens/HomeScreen.vue'
 import IdentityScreen from './screens/IdentityScreen.vue'
 import RoomScreen from './screens/RoomScreen.vue'
@@ -114,6 +115,10 @@ export const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  const shop = shopOnlyRedirect(to.name)
+  if (shop) {
+    return shop
+  }
   if (to.meta.public) {
     return true
   }

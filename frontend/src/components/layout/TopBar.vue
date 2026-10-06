@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
+import { shopOnly } from '../../shopOnly'
 import BuildAgeBadge from './BuildAgeBadge.vue'
 import SessionIdentityBadge from './SessionIdentityBadge.vue'
 import type { ShellWidth } from './shellWidth'
@@ -17,12 +18,15 @@ const route = useRoute()
 // Quizzes and coffee are the two halves of the demo, and neither is a
 // sub-section of the other, so they get peer tabs rather than one being the
 // home page and the other a link buried in a hero.
-const tabs = [
+const allTabs = [
   { key: 'quizzes', to: '/', label: 'Quizzes' },
   { key: 'coffee', to: '/coffee', label: 'Coffee' },
   { key: 'databases', to: '/databases', label: 'Databases' },
   { key: 'room', to: '/room', label: 'Room' },
 ] as const
+// Production is the coffee bar alone, and says so where the demo says its name.
+const production = shopOnly()
+const tabs = production ? allTabs.filter((tab) => tab.key === 'coffee') : allTabs
 
 // By route name, not by path prefix: /answer/:session and /thanks live at the
 // root but belong to a half each, and RouterLink's own active matching would
@@ -46,8 +50,8 @@ const widthClass = computed(() => shellWidthClass(props.width))
          stacks correctly when a screen asks for a narrow column. -->
     <div class="top-bar__track page-shell" :class="widthClass">
       <div class="top-bar__inner">
-        <RouterLink to="/" class="top-bar__brand">
-          <span class="top-bar__eyebrow">YAML Voter</span>
+        <RouterLink :to="production ? '/coffee' : '/'" class="top-bar__brand">
+          <span class="top-bar__eyebrow">{{ production ? 'Production' : 'YAML Voter' }}</span>
           <span class="top-bar__title">{{ title ?? 'Demo' }}</span>
         </RouterLink>
 

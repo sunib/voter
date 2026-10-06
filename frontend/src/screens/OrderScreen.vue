@@ -14,6 +14,7 @@ import { useLiveCoffeeConfig } from '../api/liveCoffeeConfig'
 import { appConfig } from '../api/appConfig'
 import { loginURL } from '../api/session'
 import { useCartStore } from '../stores/cart'
+import { shopOnly } from '../shopOnly'
 
 const cart = useCartStore()
 const route = useRoute()
@@ -201,8 +202,10 @@ watch(
       </p>
       <div class="hero-actions">
         <span class="pill" :class="`pill--${voucherTone}`">{{ voucherHeadline }}</span>
-        <RouterLink class="button button--secondary" to="/admin">Edit the menu</RouterLink>
-        <RouterLink class="text-link" to="/admin/orders">Live orders</RouterLink>
+        <template v-if="!shopOnly()">
+          <RouterLink class="button button--secondary" to="/admin">Edit the menu</RouterLink>
+          <RouterLink class="text-link" to="/admin/orders">Live orders</RouterLink>
+        </template>
       </div>
       <p v-if="storefront?.voucher.displayMessage" class="voucher-copy">
         {{ storefront.voucher.displayMessage }}

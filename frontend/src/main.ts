@@ -13,7 +13,6 @@ import Aura from '@primeuix/themes/aura'
 const app = createApp(App)
 
 app.use(createPinia())
-app.use(router)
 
 // PrimeVue: use a PrimeUIX preset for polished form controls.
 // We still keep overall page aesthetics (fonts/background) via our global CSS.
@@ -25,9 +24,14 @@ app.use(PrimeVue, {
 
 // Every screen reads the deployment's settings synchronously, so they are in
 // hand before anything renders. Without them no screen can address its objects;
-// say so rather than mount pages that would each fail in their own way.
+// say so rather than mount pages that would each fail in their own way. The
+// router goes in after it too: installing it starts the first navigation, and
+// its guard asks the configuration whether this deployment is shop-only.
 loadAppConfig().then(
-  () => app.mount('#app'),
+  () => {
+    app.use(router)
+    app.mount('#app')
+  },
   (cause: unknown) => {
     console.error(cause)
     const root = document.getElementById('app')

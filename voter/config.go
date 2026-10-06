@@ -45,6 +45,13 @@ type config struct {
 	// group.
 	AudienceBallotRole string `envconfig:"AUDIENCE_BALLOT_ROLE" default:"voter-audience-ballot"`
 
+	// ShopOnly turns this deployment into the coffee bar and nothing else: the
+	// production side of the demo, which Flux fills from Git and nobody edits.
+	// The page offers only the order screen, and there are no rounds to tally.
+	// What makes it read-only is RBAC in its namespace; this only stops the
+	// page offering what Kubernetes would refuse.
+	ShopOnly bool `envconfig:"SHOP_ONLY"`
+
 	// ConfigButlerGitTargetName names the ConfigButler GitTarget whose open
 	// commit window should be finalized after a successful CoffeeConfig patch.
 	// Set to "" to disable the save-message side effect entirely.

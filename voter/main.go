@@ -83,7 +83,12 @@ func main() {
 	// tally must be running before the first phone connects. It runs for the
 	// life of the process: this binary has no graceful shutdown to hang a cancel
 	// off, and a half-stopped tally would be worse than a stopped one.
-	go newQuizReconciler(serviceAccount, deps.defaultNS).Run(context.Background())
+	//
+	// Not in a shop-only deployment: it has no rounds, and its ServiceAccount
+	// may not read them.
+	if !cfg.ShopOnly {
+		go newQuizReconciler(serviceAccount, deps.defaultNS).Run(context.Background())
+	}
 
 	addr := net.JoinHostPort(cfg.Host, cfg.Port)
 	srv := &http.Server{

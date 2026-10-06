@@ -14,6 +14,7 @@ export const TEST_CONFIG: AppConfig = {
   commitCloseDelaySeconds: 2,
   audienceCoffeeAdminRole: 'voter-audience-coffee-admin',
   audienceBallotRole: 'voter-audience-ballot',
+  shopOnly: false,
 }
 
 export async function useTestAppConfig(

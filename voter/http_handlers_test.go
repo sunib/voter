@@ -76,6 +76,7 @@ func TestConfigEndpoint(t *testing.T) {
 		"commitCloseDelaySeconds": float64(2),
 		"audienceCoffeeAdminRole": "voter-audience-coffee-admin",
 		"audienceBallotRole":      "voter-audience-ballot",
+		"shopOnly":                false,
 	}
 	for k, v := range want {
 		if body[k] != v {
