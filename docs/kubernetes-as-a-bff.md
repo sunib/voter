@@ -1,5 +1,116 @@
 # Kubernetes as your backend: one vote, every stage of the API server
 
+## Kubernetes is an operating system for your datacenter
+
+On your laptop, programs don't write to the disk directly. They ask the kernel through
+system calls, and the kernel checks permissions, keeps the file system consistent, and
+tells anyone who is watching. Kubernetes is the same idea, one level up: an operating
+system for a datacenter. **Its kernel is the `kube-apiserver`.**
+
+### Everything is a resource
+
+Kubernetes keeps one kind of thing: **resources**. A resource is a typed, named
+document with the same shape every time: `apiVersion` and `kind` say what it is,
+`metadata` says which one, `spec` is what you want, and `status` is what is true right
+now.
+
+```yaml
+apiVersion: v1                    # a built-in type
+kind: ConfigMap
+metadata:
+  name: shop-settings
+  namespace: voter
+data:
+  currency: EUR
+```
+
+Every resource gets the same REST API, with the same verbs: `get`, `list`, `watch`,
+`create`, `update`, `patch`, `delete`.
+
+```text
+GET    /api/v1/namespaces/voter/configmaps/shop-settings
+POST   /apis/examples.configbutler.ai/v1alpha1/namespaces/voter/quizsubmissions
+GET    /apis/examples.configbutler.ai/v1alpha1/namespaces/voter/quizsessions?watch=true
+```
+
+`watch` is the verb that matters most. It turns the API into a stream of changes, and
+everything that reacts to the cluster is built on it.
+
+### The types are yours: CustomResourceDefinitions
+
+The list of types is not fixed. A **CustomResourceDefinition** (CRD) adds a new one,
+with its own schema. From then on it gets the whole API for free: the REST paths,
+`kubectl`, RBAC, watches, validation and the audit log. No server code is involved.
+
+```yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: quizsessions.examples.configbutler.ai
+spec:
+  group: examples.configbutler.ai
+  scope: Namespaced
+  names: {kind: QuizSession, plural: quizsessions}
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources: {status: {}}    # spec for people, status for controllers
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                state: {type: string, enum: [draft, live, closed]}
+```
+
+After that, a quiz round is as much a Kubernetes resource as a ConfigMap is:
+
+```console
+$ kubectl -n voter get quizsessions
+NAME         STATE    VOTES   TITLE                                               CREATED
+demo1        closed   38      How do you change Kubernetes configuration today?   19d
+evaluation   live     2       Now that you have seen it — would you run this?     19d
+```
+
+The STATE and VOTES columns are declared in the CRD (`additionalPrinterColumns`), and
+VOTES reads the round's `status`.
+
+Voter defines three types this way: `QuizSession` (a round), `QuizSubmission` (a
+ballot) and `CoffeeConfig` (a menu). Its "database schema" is three CRDs.
+
+### One door: the kube-apiserver
+
+Every call goes through the kube-apiserver: from `kubectl`, from a browser, from
+controllers, from Flux, and from Kubernetes's own components. **Nobody queries etcd
+directly.** etcd is the storage behind the API server, the way a disk sits behind a
+kernel.
+
+```mermaid
+flowchart LR
+    K(["kubectl"]) --> API
+    B(["a phone in the audience"]) --> API
+    C(["controllers"]) --> API
+    F(["Flux / GitOps"]) --> API
+    API["<b>kube-apiserver</b><br/>authenticates · authorizes<br/>validates · stores · notifies"] --> E[("etcd")]
+```
+
+Because there is only one door, every rule placed at it applies to every client, and
+every write is in the same audit log. That is what makes the API server usable as a
+backend.
+
+### Today: only the API server
+
+Kubernetes is famous for running containers: Pods, Deployments, Services, nodes and
+networking. **None of that is in this talk.** The API server is useful on its own,
+and all of the following happens there, before any container is involved.
+
+---
+
+## One vote, all the way through
+
 A phone in the audience casts a vote. No application code decides **who** may vote,
 **which name** the ballot carries, **whether the round is open**, or **whether these were
 the questions on screen**. The Kubernetes API server decides all four, one stage at a
