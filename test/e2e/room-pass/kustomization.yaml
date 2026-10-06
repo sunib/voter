@@ -11,14 +11,13 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: voter
 resources:
-  - https://github.com/sunib/room-pass//deploy/base?ref=v2.0.0
-  - https://raw.githubusercontent.com/sunib/room-pass/v2.0.0/config/crd/room-pass.koudijs.dev_rooms.yaml
-  - https://raw.githubusercontent.com/sunib/room-pass/v2.0.0/config/crd/room-pass.koudijs.dev_participants.yaml
+  - https://github.com/sunib/room-pass//deploy/base?ref=v2.1.0
+  - https://github.com/sunib/room-pass//config/crd?ref=v2.1.0
 images:
   - name: room-pass
     newName: ghcr.io/sunib/room-pass
-    newTag: 2.0.0
-    digest: sha256:eb5fee5161e52eb6de3983c811ddc883838cbee1dfea33fb013374696e189416
+    newTag: 2.1.0
+    digest: sha256:346b4422278dc7b2f6f2f20d52bee59874916e3021fb477321c0aacca19e58de
 patches:
   # deploy/base carries Room Pass's own fixture origins (*.room-pass.test).
   # These are this fixture's: the join page and the issuer each get a host,
