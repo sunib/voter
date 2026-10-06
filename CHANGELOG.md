@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.1](https://github.com/sunib/voter/compare/v2.0.0...v2.0.1) (2026-10-06)
+
+
+### Documentation
+
+* plan the 2026-10-07 demo, and the delete-poisons-author bug ([#30](https://github.com/sunib/voter/issues/30)) ([581d449](https://github.com/sunib/voter/commit/581d449212e37cf3a6e9e26bc7a9cf1bde2ccba5))
+* the system as it runs after the krm-foyer cutover ([#29](https://github.com/sunib/voter/issues/29)) ([fcee30e](https://github.com/sunib/voter/commit/fcee30ea9e193e3f07ecc22620d150d90d4251f6))
+
 ## [2.0.0](https://github.com/sunib/voter/compare/v1.3.1...v2.0.0) (2026-10-06)
 
 
