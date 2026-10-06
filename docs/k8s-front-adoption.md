@@ -1,9 +1,11 @@
 # krm-foyer adoption in Voter
 
-> **Superseded for the transport (2026-10-06)** by
-> [krm-foyer-migration.md](krm-foyer-migration.md): the reuse evidence and the
-> prerequisites below now exist. The domain questions (quiz acceptance, read privacy,
-> CoffeeConfig restrictions) are carried into that plan's decisions and steps.
+> **Finished, and kept as history.** Superseded on 2026-10-06 by
+> [krm-foyer-migration.md](krm-foyer-migration.md), which was carried out the same day:
+> Voter 2.0.0 runs behind krm-foyer on `demo.koudijs.dev`. The domain questions raised
+> below were answered there: quiz acceptance and read privacy by the `voter-ballot`
+> admission policy and participants' `get`/`create`-only grant, CoffeeConfig
+> restrictions by `voter-editable-spec`.
 
 Status: recommendation for planning; no implementation or deployment change authorized
 by this document. The [product design](https://github.com/ConfigButler/krm-foyer/blob/main/docs/design.md)

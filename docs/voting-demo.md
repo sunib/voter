@@ -11,13 +11,17 @@ round, with the answer count on each card, and links to the coffee bar; the
 any screen.
 
 The count is stamped "as of <time>". If that stops moving while the room is
-still voting, the tally controller is down, not the room — reload, and the page
-falls back to reading the result on demand with a **Refresh results** button.
+still voting, the tally controller is down, not the room. There is no fallback:
+the round's `status` is the only source of results, and a round never tallied
+says it is waiting rather than showing zeroes. Just after a vote the page says
+"Counting your vote…" for the second the tally takes.
 
-**Only a Room Pass session may vote.** An operator signed in through GitHub can
-open and close rounds and read results, but the ballot form refuses them: the
-session did not come through the door. That is an application rule, not an RBAC
-one — see below for voting as yourself anyway.
+**Only a Room Pass session may vote quietly.** An operator signed in through
+GitHub can open and close rounds and read results, but the page does not offer
+them the ballot form. The rule behind it is Kubernetes', since 2.0.0: the
+`voter-ballot` admission policy refuses a ballot from anyone but a `demo:` user
+unless it is labelled `voter.configbutler.ai/cast-by: operator` — see below for
+voting as yourself anyway.
 
 ## What the room sees in Git
 
@@ -48,11 +52,12 @@ A run through it:
    round-two ballot appended to the file their round-one ballot created. Same
    objects as the file next door; the difference is one template string reading
    one label.
-6. **Try to vote as the operator.** The form refuses. Then run
+6. **Try to vote as the operator.** The page offers no form. Then run
    [demo1-b.yaml](../voter/config/demo1-b.yaml) — three ballots and a
    CommitRequest — and one commit appears carrying all three, under a message
-   written by hand. The app has a rule, Kubernetes has a different one, and
-   cluster-admin sits on the far side of the gap:
+   written by hand. Each ballot carries `cast-by: operator`, because admission
+   refuses an operator's ballot without it: cluster-admin can still stuff the
+   ballot box, just not quietly:
 
    ```console
    kubectl create -f voter/config/demo1-b.yaml
@@ -79,44 +84,51 @@ them. The Voter repository sample is a template, not a second reconciler.
 2. Let Flux reconcile and verify the questions on the home page.
 3. Share the round link and project the presenter results page. It follows the
    votes on its own.
-4. To close, change `spec.state` to `closed` in Git and push. A request that read
-   the live state just before closure can still finish; this is not an atomic cutoff.
+4. To close, change `spec.state` to `closed` in Git and push. Admission reads the
+   round's state on every ballot create, so once the API server has the closed
+   round, a ballot is refused with "This round is not open for voting."
 5. For another round, add a resource with a new name. Reopening a closed round
    keeps its existing QuizSubmissions and does not let existing voters vote again.
    A round recreated under a name already used INHERITS the old round's ballots,
    which is why every round gets a new name -- see
    [deliberate-simplifications.md](deliberate-simplifications.md), entry 1.
 
-Do not change questions after voting begins. A browser with an older resource
-version is asked to reload, and answers invalid under a changed question set are
-excluded from results. Use a new round for a changed question set instead.
+Do not change questions after voting begins. A ballot pins the round's
+`status.questionsDigest`; a browser holding older questions is refused by
+admission with "The round changed. Reload the questions before voting.", and
+answers invalid under a changed question set are excluded from results. Use a new round for a changed question set instead.
 
 ## Behavior and limits
 
 A **QuizSubmission** is one participant's submitted answers for a QuizSession
 (round). Draft answers can change before submission. Submitting creates a new
-QuizSubmission; the app never edits an existing one. Each participant has one
-QuizSubmission per round, named `<round>-<participant>`, so retries do not create
-additional submissions.
+QuizSubmission, from the browser through krm-foyer's `/k8s` with the
+participant's own token; the app never edits an existing one. Each participant
+has one QuizSubmission per round, named `<round>-<display name>`, so retries do
+not create additional submissions.
 
 - QuizSubmissions survive application restarts because Kubernetes stores them.
-- An enrolled identity can create one QuizSubmission per round through Voter. Duplicate
+- An enrolled identity can create one QuizSubmission per round. Duplicate
   submits, including those with changed answers, never replace the recorded QuizSubmission.
-  Reopening a round asks whether this participant already voted and shows that instead of
-  the questions. A submit that still races through, such as a second tab or a retried lost
-  success response, is refused by the create; the app then reports the existing vote and
-  shows results.
-- Required answers, choices, types, numeric bounds and text length are checked on
-  the server. Drafts survive reloads, scoped to the participant and round UID.
-- Answers are shared with the room, including free text. These submissions are not anonymous;
-  participant RBAC allows reading submissions. Avoid collecting sensitive answers.
-- Application voting rules are not Kubernetes admission rules. Direct API clients
-  with the granted create permission can bypass them. Re-enrollment can also create
-  another identity. This is an audience demo, not an election system.
-- Results use explicit reads, with paginated QuizSubmission retrieval. No polling loops or
-  additional watches are opened. This has browser coverage with two participants,
-  not a measured 200-person capacity guarantee. The shared CoffeeConfig streaming
-  and load rehearsal in PLAN.md remain outstanding.
+  Reopening a round asks whether this participant already voted (a `get` of their own
+  ballot's name) and shows that instead of the questions. A submit that still races
+  through, such as a second tab or a retried lost success response, is the API server's
+  409; the page then says "You have already voted" and shows results.
+- The ballot's shape — who may cast it, its name, labels, pins, and a live round — is
+  checked by the `voter-ballot` admission policy, so a direct API client is held to the
+  same rules as the page. Required answers, choices, types, numeric bounds and text
+  length are checked in the browser for quick feedback and again by the tally, which
+  files but does not count an invalid ballot. Drafts survive reloads, per round, in the
+  browser.
+- Answers are shared with the room, including free text. These submissions are not
+  anonymous: participants cannot list them, but the results show free text and the
+  audit trail files every ballot under its voter's name. Avoid collecting sensitive answers.
+- Re-enrollment under another display name creates another identity. This is an
+  audience demo, not an election system.
+- Results arrive live on the `quizsessions` stream through krm-foyer's shared watch;
+  no per-round request or extra subscription. The load rehearsal on the fixture took
+  200 participants through join, stream and vote, with 197 concurrent streams on one
+  shared watch.
 
 Every `examples.configbutler.ai` CRD -- both quiz kinds and CoffeeConfig -- is
 defined under `voter/config/crd/`, and the room-pass e2e fixture applies that

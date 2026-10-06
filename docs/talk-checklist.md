@@ -31,27 +31,28 @@ now exists in the request body.
 
 ## Which layer produced each refusal in the demo
 
-Have this straight before you walk on. Three of these are Kubernetes; one is
-not, and being caught claiming otherwise costs you the room.
+Have this straight before you walk on. Since 2.0.0 (2026-10-06) every one of
+these is Kubernetes: the page writes through krm-foyer's `/k8s` with the
+person's own token, and Voter has no vote handler left to hold a rule. Being able
+to say which *part* of the API server refused is the point.
 
 | The refusal the room sees | Produced by | Mechanism |
 |---|---|---|
 | A participant cannot open or close a round | **kube-apiserver** | No `patch` on `quizsessions` in the audience Role |
 | A participant cannot edit the coffee menu | **kube-apiserver** | No `patch` on `coffeeconfigs` until you grant it |
 | A participant cannot delete the menu | **kube-apiserver** | No `delete`, ever |
-| A participant cannot vote twice | **kube-apiserver** | One `QuizSubmission` per identity per round; the create is atomic, so two tabs still make one vote |
+| A participant cannot vote twice | **kube-apiserver** (admission + name) | `voter-ballot` makes the ballot's name `<round>-<display name>`; the second create is a 409, so two tabs still make one vote |
+| A participant cannot vote in somebody else's name | **kube-apiserver** (admission) | `voter-ballot` checks the name and labels against the token's display name, which no request can set |
+| A participant cannot vote after the round closes | **kube-apiserver** (admission) | `voter-ballot`: "This round is not open for voting." |
+| A participant cannot relabel or annotate the menu, even with the grant | **kube-apiserver** (admission) | `voter-editable-spec`: a person may change only `spec` |
 | The grant switch is absent from a participant's `/room` | **kube-apiserver** | No `get` on `rolebindings`, so the page has nothing to render |
-| **An operator signed in with GitHub cannot vote** | **the application** | The vote handler checks the Dex connector and returns its own 403 |
+| **An operator signed in with GitHub cannot vote quietly** | **kube-apiserver** (admission) | `voter-ballot`: a ballot from anyone but a `demo:` user must carry `voter.configbutler.ai/cast-by: operator` |
 
-That last row is [deliberate simplification #4](deliberate-simplifications.md).
-The operator is bound to `cluster-admin`, so the API server has no objection to
-the same write made with `kubectl` — and the reason for the rule is mundane
-rather than security: a GitHub profile name has never been folded by Room Pass,
-usually contains a space, and would be refused as a label value with a 422 that
-means nothing to anyone watching.
-
-Say it rather than let it be discovered. The honest version is a better beat
-than the overclaim, because it sets up the structural point below.
+That last row is the one the room will poke at. The operator is bound to
+`cluster-admin`, and RBAC has no objection to their ballot. Admission does: the
+operator may cast one, but only by labelling it as theirs, and the label lands
+in Git with the commit. The page does not offer the operator a vote at all; that
+is courtesy, the policy is the control.
 
 ---
 
@@ -75,7 +76,7 @@ is admission.
 
 ---
 
-## The admission layer, and why this demo does not use it
+## The admission layer, and what this demo uses it for
 
 Two shapes, same position in the request path:
 
@@ -87,29 +88,33 @@ Two shapes, same position in the request path:
   of your cluster. `failurePolicy: Fail` means an outage of your webhook is an
   outage of the resource it guards; `Ignore` means your rule is advisory.
 
-**This cluster has neither** — `kubectl get validatingadmissionpolicies` returns
-nothing. That is why the vote gate is in the application, and the checklist
-above has one row that says "the application".
+**This cluster runs two policies, no webhooks**: `kubectl get
+validatingadmissionpolicies` lists `voter-ballot` and `voter-editable-spec`
+(sources in [`voter/config/admission/`](../voter/config/admission/)). Both match
+people only — `system:` users and service accounts are not voters and not
+editors.
 
-What it would buy, in one line each:
+`voter-ballot` is the declared-operator version, not the flat one. A flat *"only
+`demo:` identities may create ballots"* would also refuse your own seeded Ada
+Lovelace and Grace Hopper, the "Casting your own answers" interlude in the
+runbook. Instead an operator may cast a ballot, but it must carry
+`voter.configbutler.ai/cast-by: operator`, and the interlude ballots in
+[`demo1-b.yaml`](../voter/config/demo1-b.yaml) do. The trail is *more* honest
+for it:
 
-- The operator's ballot could be refused, or required to *declare itself*, by
-  Kubernetes rather than by the app.
-- The demo would show three mechanisms instead of two, and *"here is what each
-  one cannot do"* is a better closing than *"here is what we used."*
+> I can still stuff the ballot box, I just cannot do it quietly.
 
-What it costs, and why it is not built:
+What it costs, said plainly:
 
-- A policy scoped wrong, or a CEL expression that errors, takes voting out for
-  the whole room. `failurePolicy` decides whether that fails open or closed, and
-  neither is a comfortable thing to discover on stage.
-- **The obvious version breaks the demo.** A flat *"only `demo:` identities may
-  create ballots"* also refuses your own seeded Ada Lovelace and Grace Hopper,
-  which is the "Casting your own answers" interlude in the runbook.
-- The more interesting version — an operator may cast a ballot, but it must
-  carry a label saying so — keeps the interlude and makes the trail *more*
-  honest. `I can still stuff the ballot box, I just cannot do it quietly.` That
-  is the one worth building, and it is worth building calmly.
+- Both policies are `failurePolicy: Fail`. A policy that errors takes voting, or
+  menu saves, out for the whole room — closed, not open. That was the price of
+  moving the rules off Voter's handlers, where anyone with a terminal could
+  always walk around them.
+- A ballot that names a round which does not exist passes `voter-ballot`
+  vacuously. Nothing counts it — the tally only counts rounds it tallies — but
+  it is a gap, not a rule.
+- The admission policies have no envtest suite in CI yet; the evidence is the
+  browser fixture's `boundaries.spec.js`.
 
 ---
 
@@ -126,17 +131,20 @@ without submitting it. `kubectl auth can-i` has the same limit.
 
 So: a permission table can promise you *may*, and admission can still say no.
 Worth thirty seconds, because it is the honest edge of the nicest screen in the
-talk.
+talk — and this demo has a live example: with the menu grant on, `/me` says the
+room may `patch` the CoffeeConfig, and `voter-editable-spec` still refuses a
+patch that touches a label.
 
 ---
 
 ## Questions you will get
 
 **"Doesn't the app still decide, since it holds the token?"**
-It holds the token and spends it; it does not evaluate anything. Every refusal
-in the table above except one is rendered from an API server response the app
-could not have produced. The app can choose *not to ask* — which is exactly what
-the vote gate does — and that is the honest limit of the claim.
+The app does not hold the token. krm-foyer keeps the session and passes the
+person's own token to the API server on `/k8s`; the page builds the request and
+renders the answer. Every refusal in the table above is an API server response
+the app could not have produced. The page can choose *not to ask* — it hides the
+vote from the operator — and that is the honest limit of the claim.
 
 **"What stops a participant calling the API directly with their token?"**
 Nothing, and that is the design. Their RBAC is the same whether the request
@@ -144,8 +152,10 @@ comes from the page or from `curl`. The page is a convenience over a credential
 the person genuinely holds.
 
 **"What stops you?"**
-At the RBAC layer, nothing — see above. Name admission as the answer and say
-this cluster does not use it yet.
+At the RBAC layer, nothing — see above. At admission, nothing stops me either,
+but `voter-ballot` makes me say so: my ballot carries `cast-by: operator`, and so
+does its commit. And as cluster-admin I could delete the policy — through Git,
+where that too is a commit.
 
 **"Could an attendee's commit get reconciled back into the cluster?"**
 No. `k8s-audit-trail` is not a Flux source. See "Two repositories" in the
@@ -155,10 +165,12 @@ runbook.
 
 ## What not to claim
 
-- **Not** "authorization is entirely Kubernetes'." One refusal is the
-  application's, and it is documented.
+- **Not** "the app cannot refuse you." The page hides what you may not do
+  (the operator's vote, the grant switch); the refusals that count are the API
+  server's.
 - **Not** "RBAC prevents the admin from voting." It cannot. Nothing in RBAC
   constrains an administrator.
 - **Not** "the permission table shows everything that could refuse you." It
   shows RBAC. Admission is invisible to it, here and everywhere.
-- **Not** "we use admission control." This cluster has no policy and no webhook.
+- **Not** "admission stops the admin." It makes the admin's ballot declare
+  itself; cluster-admin can still change the policy, through Git.

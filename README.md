@@ -7,15 +7,20 @@ workflow.
 Login works, and so does the coffee journey: browse the menu, order, hit the
 depleted voucher, edit the CoffeeConfig, and watch every order — placed or
 refused — land on the live feed at `/admin/orders`. Voting and conditional live
-editing also work. Shared-stream capacity and observed Git commits remain
-release gates; see [PLAN.md](PLAN.md) for implementation and deployment status.
+editing also work. Since 2.0.0 (2026-10-06) Voter runs behind
+[krm-foyer](https://github.com/ConfigButler/krm-foyer); what is still open is in
+[PLAN.md](PLAN.md) and the migration's [Left over](docs/krm-foyer-migration.md#left-over).
 
 ## How access works
 
 Room Pass admits attendees using a room code. Dex also supports GitHub and
-LinkedIn login. Voter is the OIDC client and serves the Vue frontend and Go
-backend from one image. It sends the signed-in person's Dex ID token to Kubernetes;
-Kubernetes authentication, RBAC and admission decide what that person can do.
+LinkedIn login. krm-foyer is the OIDC client: it owns `/auth`, keeps the session
+in a sealed cookie, and forwards the browser's `/k8s` requests and `/stream`
+watches to Kubernetes with the signed-in person's own token. Votes and edits are
+the browser's own writes; Kubernetes authentication, RBAC and admission
+(`voter/config/admission/`) decide what that person can do. Voter serves the Vue
+frontend, `/config.json` and a few `/public` endpoints behind krm-foyer's identity
+check. It holds no session and nobody's token.
 
 Being able to log in does not imply being allowed to edit. Room attendees receive
 explicit demo group grants. Other identities need their own matching grants.
@@ -23,7 +28,7 @@ Opening GitHub login to everyone is a proposed change, not the current configura
 
 ## Login url for room admin
 
-https://demo.koudijs.dev/auth/login?connector=github&return=%2Froom
+https://demo.koudijs.dev/login?connector=github&next=%2Froom
 
 ## Read next
 
@@ -32,15 +37,14 @@ https://demo.koudijs.dev/auth/login?connector=github&return=%2Froom
 - [What is left](PLAN.md): the single remaining-work list.
 - [Demo runbook](docs/demo-runbook.md): the talk as a stage copy — what to
   press, in order, the commands behind each step, and what to do when it breaks.
-- [krm-foyer adoption](docs/k8s-front-adoption.md): Voter-specific recommendation,
-  pilot prerequisites and the boundary between prototype work and deployment.
-- [krm-foyer feedback](docs/krm-foyer-feedback.md): what Voter still needs from
-  krm-foyer 0.2.0 before its own login, session and stream code can go.
+- [krm-foyer adoption](docs/k8s-front-adoption.md) and
+  [krm-foyer feedback](docs/krm-foyer-feedback.md): history, superseded by the
+  migration below. Kept for the reasoning, not as current state.
 - [Kubernetes as your backend](docs/kubernetes-as-a-bff.md): one vote through every stage of
   the API server (OIDC, RBAC, CRD validation, an admission policy that reads the round,
   the operator, GitOps), with YAML. Start here for the talk.
-- [krm-foyer migration](docs/krm-foyer-migration.md): the plan to drop Voter's own
-  auth, session and stream code for krm-foyer, its open decisions and the cutover.
+- [krm-foyer migration](docs/krm-foyer-migration.md): done, live since 2026-10-06 —
+  how Voter's own auth, session and stream code went to krm-foyer, and what is left over.
 - [Databases](docs/databases.md): the platform-team page — what it is built on,
   what has to exist in the cluster before it works, and where the intent goes.
 - [Databases cutover](docs/databases-cutover.md): the four steps that take the
@@ -65,7 +69,7 @@ system that no longer exists.
 task setup             # install dependencies
 task lint              # Go, Dockerfiles, workflows, frontend
 task test              # Go tests plus frontend type-check/build
-task e2e-up            # local k3d fixture: Traefik, Dex, released Room Pass, Voter
+task e2e-up            # local k3d fixture: Traefik, Dex, Room Pass, krm-foyer, Voter
 task test-browser      # Chromium against that fixture (CI runs both)
 task e2e-down
 ```

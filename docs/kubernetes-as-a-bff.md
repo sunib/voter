@@ -156,10 +156,10 @@ krm-foyer  POST https://<kube-apiserver>/apis/examples.configbutler.ai/v1alpha1/
 krm-foyer decides nothing about votes. Who, once, when and what are all answered by the
 API server, in the stages below.
 
-> Status, 2026-10-06: krm-foyer is a working prototype. It runs on this cluster at
-> `foyer.k8s.koudijs.dev` with its hello example. Voter still does this job in its own
-> backend today, the same way (the user's own token, no service account), and is moving
-> to krm-foyer ([krm-foyer-migration.md](krm-foyer-migration.md)).
+> Status: live since 2026-10-06. Voter 2.0.0 runs behind krm-foyer 0.3.0 on
+> `demo.koudijs.dev` ([krm-foyer-migration.md](krm-foyer-migration.md)). Voter itself
+> keeps no session and holds nobody's token: it serves the page, `/config.json`, and a
+> few `/public` endpoints that krm-foyer's identity check guards.
 
 ### Today: only the API server
 
@@ -178,10 +178,12 @@ time, before anything is stored. After the ballot is stored, an operator counts 
 GitOps writes it down.
 
 This page follows that one ballot through the API server's request pipeline. The
-configuration below is either running in Voter today or was tested against a real API
-server (k3s 1.31) on 2026-10-06. The example objects are shortened. The admission policy in [step 5](#5-validating-admission-the-rules-that-need-the-world)
-is the new part: it is planned as phase 2 of [quiz-admission.md](quiz-admission.md) and
-not deployed yet.
+configuration below is either running on `demo.koudijs.dev` today or was tested against
+a real API server (k3s 1.31) on 2026-10-06. The example objects are shortened. The
+admission policy in [step 5](#5-validating-admission-the-rules-that-need-the-world) is
+shown as it was tested; the deployed one, `voter-ballot` in
+[`voter/config/admission/`](../voter/config/admission/quizsubmission-policy.yaml), holds
+the same rules in its own wording.
 
 ---
 
@@ -306,13 +308,13 @@ rules:
     verbs: [get, list, watch]
   - apiGroups: [examples.configbutler.ai]
     resources: [quizsubmissions]
-    verbs: [get, list, watch, create]
+    verbs: [get, create]                # your own ballot by name; nobody else's
 ```
 
 RBAC answers "may a participant create a ballot?": yes. It cannot answer "only under
 **your own** name", "only while the round is **live**", or "only for the questions you
-**saw**". Those rules are why Voter kept a vote handler. The next stages remove that
-reason.
+**saw**". Those rules used to be why Voter had a vote handler. The next stages hold
+them, and since 2.0.0 the handler is gone.
 
 ## 3. Mutating admission
 

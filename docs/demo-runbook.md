@@ -41,7 +41,8 @@ keep those names.
       `spec.sessionRef`, so one with no round label still counts and a scoped
       delete would leave it for the next room. The tally follows within a second
       or two; `kubectl -n voter get quizsessions` should show VOTES 0.
-- [ ] If you changed the coffee menu, delete it too, then reconcile.
+- [ ] If you changed the coffee menu, delete it too, then reconcile. It is
+      seeded the same way, so deleting it is how Flux recreates it from Git.
 
       ```bash
       kubectl -n voter delete coffeeconfig demo-coffee
@@ -88,17 +89,18 @@ purpose is what this one does.
 
 ## Thirty minutes before
 
-- [ ] Pods ready, one replica each. One replica is load bearing: voucher counts
-      and the order feed are per process.
+- [ ] Pods ready: Voter, krm-foyer and Room Pass. Voter at one replica is load
+      bearing: voucher counts and the order feed are per process.
 
       ```bash
       kubectl -n voter get pods
       ```
 
-- [ ] Open the operator door on the presenter machine. It lands you on `/room`
-      with the rotating QR.
+- [ ] Open the operator door on the presenter machine. It signs you in through
+      GitHub and lands you on `/room` with the rotating QR, which points at
+      `/join-room`.
 
-      `https://demo.koudijs.dev/auth/login?connector=github&return=%2Froom`
+      `https://demo.koudijs.dev/login?connector=github&next=%2Froom`
 - [ ] Join from your own phone, vote in `demo1`, confirm the file arrived in
       both places:
       `clusters/k8s.koudijs.dev/demo1/submissions.yaml` and
@@ -116,7 +118,8 @@ purpose is what this one does.
       ```
 
 - [ ] Confirm the audience grant is off. Demo 1's coffee refusal depends on it,
-      and when it is wrongly on nothing warns you.
+      and when it is wrongly on nothing warns you. It has been left on since
+      2026-09-17: untick *Let the room edit the coffee menu* on `/room` first.
 
       ```bash
       kubectl -n voter get rolebinding voter-audience-coffee-admin   # want NotFound
@@ -162,7 +165,8 @@ purpose is what this one does.
 Git is not mentioned once.
 
 1. **Get them in.** Project `/room`. They scan, type a name, land on the quizzes
-      page. Say what happened: the QR carries a room code, not a credential;
+      page. Say what happened: the QR carries a room code, not a credential —
+      `/join-room` hands it to Room Pass and starts the login;
       Room Pass writes a `Participant` and is the only caller Dex's header
       trusting connector accepts; the API server derives the username from
       `federated_claims.connector_id`. Everyone is now `demo:<subject>` in group
@@ -171,8 +175,8 @@ Git is not mentioned once.
 2. **Let them vote.** Project the results screen. There is nothing to press: the
       tally is a field on the round, written by a controller watching the API,
       and the bars fill while you talk. If the "as of" timestamp stops moving
-      while people are still voting, the count is frozen, not zero. Reload and
-      the page falls back to reading on demand.
+      while people are still voting, the count is frozen, not zero: the tally
+      controller in the Voter pod has stopped, and there is no other source.
 
       Two callbacks to bank: whichever of Argo or Flux they picked, nothing here
       changes it; and remember Helm's number for the limits slide.
@@ -188,28 +192,31 @@ Git is not mentioned once.
       Every answer is a Kubernetes object named after the person who gave it.
       The coffee menu next to it is another one. Let that sit unresolved.
 
-3. **Show what they cannot do.** Every refusal is a real 403 rendered verbatim:
-      vote twice, open or close a round, edit the coffee menu, edit their own
-      vote. Send them to `/me`, where the missing `patch` on `coffeeconfigs` is
+3. **Show what they cannot do.** Every refusal is the API server's, rendered
+      verbatim: vote twice (a 409), open or close a round, edit the coffee menu,
+      edit their own vote. Send them to `/me`, where the missing `patch` on `coffeeconfigs` is
       a gap in the grid before anyone presses anything. Then from the terminal:
 
       ```bash
       A="--as=demo:some-subject --as-group=demo:voter-audience --as-group=system:authenticated"
 
       kubectl -n voter auth can-i create quizsubmissions $A   # yes
+      kubectl -n voter auth can-i list   quizsubmissions $A   # no: nobody reads the others' ballots
       kubectl -n voter auth can-i patch  quizsessions   $A    # no
       kubectl -n voter auth can-i patch  coffeeconfigs  $A    # no, not yet
       kubectl -n voter auth can-i delete coffeeconfigs  $A    # no, not ever
       ```
 
-      If line three says `yes`, a previous run left the grant bound and the best
-      refusal is gone.
+      If the `coffeeconfigs` patch line says `yes`, a previous run left the grant
+      bound and the best refusal is gone.
 
 4. **The interloper is cut.** If you walk on early and want it back: sign in
-      with GitHub, become `github:<email>`, try to vote, get refused. Say out
-      loud that this refusal is the app's, not RBAC's, and that the same write
-      with `kubectl` succeeds because you are cluster admin. There is no slide
-      for it, so decide before you go on.
+      with GitHub, become `github:<email>`, and the page offers you no ballot.
+      The refusal that counts is admission's: `voter-ballot` turns away a
+      ballot from anyone but a Room Pass participant unless it is labelled
+      `voter.configbutler.ai/cast-by: operator`. You are cluster admin, so RBAC
+      has no objection; admission makes you say so. There is no slide for it,
+      so decide before you go on.
 
 ## Demo 2: the same actions in Git
 
@@ -344,7 +351,8 @@ let them vote, say the sentence.
 
 Point at the projector, not the terminal. The tally controller watches the API,
 so a pasted ballot moves the bars exactly as a phone does, and nothing in the
-application knew it happened.
+application knew it happened. Each ballot needs `cast-by: operator`, or the
+`voter-ballot` admission policy refuses it.
 
 ```yaml
 apiVersion: examples.configbutler.ai/v1alpha1
@@ -357,11 +365,10 @@ metadata:
     # decide where gitops-reverser FILES it.
     voter.configbutler.ai/round: demo1
     voter.configbutler.ai/submitter: Ada-Lovelace
-    # Once the ballot policy is on the cluster (krm-foyer migration), this is
-    # what lets you vote at all: a ballot from anyone but a Room Pass
-    # participant has to say it was cast by the operator. Leave it out, and the
-    # refusal is the line: "I can still stuff the ballot box, I just cannot do
-    # it quietly."
+    # This one is what lets you vote at all: the voter-ballot admission
+    # policy refuses a ballot from anyone but a Room Pass participant unless
+    # it says it was cast by the operator. Leave it out, and the refusal is the
+    # line: "I can still stuff the ballot box, I just cannot do it quietly."
     voter.configbutler.ai/cast-by: operator
 spec:
   sessionRef:
@@ -444,8 +451,8 @@ The order feed needs no reset. Restarting the pod empties it.
 | Symptom | Do this |
 |---|---|
 | Nobody can join | `kubectl -n voter get rooms.room-pass.koudijs.dev demo -o yaml`, check `endsAt` and `enrollment` |
-| Join works, voting 403s | `kubectl -n voter get rolebinding voter-audience` |
-| Results bars do not move | Check the "as of" timestamp. If stuck, reload; the page falls back to reading on demand and a Refresh results button appears |
+| Join works, voting 403s | Read the message. "This round is not open for voting." or "The round changed…" is admission, working; a reload fixes the second. Otherwise `kubectl -n voter get rolebinding voter-audience` |
+| Results bars do not move | Check the "as of" timestamp. If stuck, the tally controller has stopped: `kubectl -n voter logs deploy/voter`. There is no fallback read |
 | Nothing reaching Git | `kubectl -n gitops-reverser logs deploy/gitops-reverser`, check the GitProvider secret. The reverser runs in its own namespace, not `voter` |
 | A commit names nobody | The name is in the Author header. `git show --format=fuller`. Do not debug on stage |
 | `evaluation` will not open | You are signed in as a participant. Reenter through the GitHub door |
@@ -459,7 +466,7 @@ The order feed needs no reset. Restarting the pod empties it.
 | No conflict appears in demo 2 step 4 | The second editor changed a different field, which is not a conflict and is the point of beat 2. If the banner says reconnecting, press Refresh from cluster and redo it |
 | "Live updates overtook the read" | Press Refresh from cluster again. Your draft is kept |
 
-If anything looks odd with authentication: nothing may reach Dex's `room`
+If anything looks odd with authentication: nothing may reach Dex's `room-pass`
 connector callback except Room Pass. Do not port forward to Dex on a conference
 network.
 

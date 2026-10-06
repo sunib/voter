@@ -38,12 +38,14 @@ get is already taken.
 
 Keying on `metadata.uid` prevented exactly that, and nothing else.
 
-Half of that is closed again without giving up the name. A ballot cast through the
-application also carries the round's UID in `spec.roundUID`, and the tally files
-but does not count a ballot whose UID is someone else's. So the old round's votes
-no longer move the new round's bars. The other half stays: their names are still
-taken, so those people still cannot vote again until the stale ballots are
-deleted. A ballot pasted by hand, without `spec.roundUID`, is counted as before.
+Half of that is closed again without giving up the name. A participant's ballot
+must carry the round's UID in `spec.roundUID` — the `voter-ballot` admission
+policy refuses one without it, or with a UID that is not the round's — and the
+tally files but does not count a ballot whose UID is someone else's. So the old
+round's votes no longer move the new round's bars. The other half stays: their
+names are still taken, so those people still cannot vote again until the stale
+ballots are deleted. An operator's declared ballot (`cast-by: operator`) may
+leave the pin out, and is counted as before.
 
 **What keeps it closed.** The convention stated in the first line of the round
 manifest: **a new `metadata.name` for every session, one per talk.** A round name
@@ -70,24 +72,28 @@ The tally follows the deletions down to zero on its own; `kubectl -n voter get
 quizsessions` shows it in the VOTES column.
 
 **Staleness is not part of this trade.** A browser voting into a round that
-changed under it is still refused, by the `uid` and `generation` comparison in
-the vote handler. `generation` moves when the questions are edited; `uid` moves
-when a round is deleted and recreated under the same name, which `generation`
-cannot see because the replacement starts at 1 again.
+changed under it is still refused, now by admission: `voter-ballot` compares the
+ballot's `spec.roundUID` and `spec.questionsDigest` with the round's `uid` and
+`status.questionsDigest`, and says "The round changed. Reload the questions
+before voting." The digest moves when the questions are edited; the `uid` moves
+when a round is deleted and recreated under the same name.
 
-That check used to be a `resourceVersion` comparison, which covered both cases in
-one field — and also refused every ballot that had been on screen while the tally
-controller wrote `status`, because status writes move `resourceVersion` and not
-`generation`. Most of the room lost its vote to that on 2026-09-17;
-[post-demo-2026-09-17.md](post-demo-2026-09-17.md) is the post-mortem.
+That check was once a `resourceVersion` comparison in the vote handler, which
+also refused every ballot that had been on screen while the tally controller
+wrote `status`, because status writes move `resourceVersion`. Most of the room
+lost its vote to that on 2026-09-17;
+[post-demo-2026-09-17.md](post-demo-2026-09-17.md) is the post-mortem. The
+digest covers only the questions, so a status write cannot move it.
 
 ---
 
 ## 2. A submission is named after the voter, not a hash
 
-**What we do.** `submissionName` returns `<round>-<lowercased display name>` —
+**What we do.** A ballot is named `<round>-<lowercased display name>` —
 `demo1-ada-lovelace`. It was a SHA-256 of the round UID and the
-opaque Kubernetes subject.
+opaque Kubernetes subject. The page builds the name; the `voter-ballot`
+admission policy refuses any other, reading the display name from the token's
+display-name extra, which no request can set for itself.
 
 **What we gave up.** Nothing, *as long as one display name is one person*. That
 is not a property of this repository.
@@ -110,10 +116,12 @@ as Ada votes, and everyone can pick out their own ballot. `vote-9f2a…` is a wa
 of hex.
 
 **What it makes visible.** Who voted is legible to anyone who can list
-submissions, which is every participant — they already hold `get, list, watch`,
-so they could always read every ballot; the hash only obscured whose it was. The
-mirrored audit trail files each vote under the same name, so this reveals nothing
-Git would not. It is still a choice, now made in two places.
+submissions — the operator, and anyone reading the mirrored audit trail, which
+files each vote under the same name, so this reveals nothing Git would not.
+Participants no longer can: since 2.0.0 they hold `get, create` on
+`quizsubmissions`, not `list` or `watch`. A participant can still `get` a ballot
+whose name they guess, and a readable name is easy to guess. It is still a
+choice, now made in two places.
 
 ---
 
@@ -143,35 +151,39 @@ reintroduce the problem.
 
 **The invariant to preserve.** `strings.ToLower(labelName(x)) == participantID(x)`
 — asserted in `TestLabelNameLowercasesToParticipantID`. The submission name is
-built by lowercasing the stored display name, so if those two folds ever diverge
-a ballot silently points at a participant who does not exist.
+built — and checked by `voter-ballot` — by lowercasing the stored display name,
+so if those two folds ever diverge a ballot points at a participant who does not
+exist.
 
 ---
 
-## 4. Voting is refused by the application, not by RBAC
+## 4. The operator may vote, but only by saying so
 
-**What we do.** The vote handler refuses any session whose Dex connector is not
-`room`. An operator signed in through the `github` connector gets a `403` with
-code `NotAParticipant`, while the same session can still open and close rounds
-and read results.
+**What we do.** Since 2.0.0 (2026-10-06) the rule is admission's, not the
+application's. The `voter-ballot` policy refuses a ballot from anyone but a
+`demo:` (Room Pass) user unless it carries the label
+`voter.configbutler.ai/cast-by: operator`. The page does not offer the operator
+a vote at all; that is courtesy, the policy is the control. The operator's
+interlude ballots in [demo1-b.yaml](../voter/config/demo1-b.yaml) carry the
+label.
 
-**What we gave up.** This is **not a security boundary.** The demo operator is
-bound to `cluster-admin`, so the API server has no objection whatsoever to that
-identity creating a `QuizSubmission` directly.
+**What we gave up.** This is **not a ban.** The demo operator is bound to
+`cluster-admin`; RBAC has no objection to that identity creating a
+`QuizSubmission`, and admission only requires it to declare itself. A declared
+ballot is also exempt from the name, label and pin rules a participant's ballot
+must meet — a pasted one has no reason to know a UID — though any pin it does
+carry must match. And cluster-admin can change the policy itself, through Git.
 
 **Why that is fine, and in fact the point.** The gap is a demo beat rather than a
-leak: the application has a rule, Kubernetes has a different one, and
-[demo1-b.yaml](../voter/config/demo1-b.yaml) walks through it on purpose with
-`kubectl`. Saying that out loud is a better story than either half alone. The
-participant-facing grant is the real boundary and is unchanged: the
-`voter-audience` Role grants `create` on `quizsubmissions` to
-`demo:voter-audience` and to nobody else.
+leak: "I can still stuff the ballot box, I just cannot do it quietly." The label
+lands in Git with the ballot's commit. The participant-facing grant is the real
+boundary and is unchanged: the `voter-audience` Role grants `create` on
+`quizsubmissions` to `demo:voter-audience` and to nobody else.
 
-**Why the rule exists at all.** An operator's `claims.name` is a GitHub profile
-name that Room Pass never folded, and it routinely contains a space. Without the
-gate it would be written as a label value and the API server would refuse the
-ballot with a `422` nobody in the room could read. Refusing the vote is less code
-than repairing the name, and it is a truer rule.
+**Why not refuse the operator outright.** A flat "only `demo:` users may vote"
+would also refuse the seeded interlude ballots, which are the demo. The old
+reason for a gate — an operator's unfolded GitHub name breaking a label value —
+no longer applies: a declared ballot is not named or labelled after its caster.
 
 ---
 
@@ -179,8 +191,8 @@ than repairing the name, and it is a truer rule.
 
 **What we do.** The `gitops-reverser-config` target mirrors `v1/secrets` from the
 `voter` namespace, which is every Secret there — not only ConfigButler's deploy
-key and signing key, but the app's cookie keys, the OIDC client secret, and the
-cert-manager TLS secret.
+key and signing key, but Room Pass's and krm-foyer's cookie and session keys, the
+OIDC client secret, and the cert-manager TLS secret.
 
 **What we gave up.** Narrow scope. A `WatchRule` selects by operation, group,
 version and resource; there is **no** name selector and no label selector, so
@@ -241,12 +253,12 @@ each carrying its own reasoning in comments.
 
 Worth stating, because they look like candidates and are not:
 
-- **The participant's own token does every write.** No impersonation, no shared
-  ServiceAccount, no application-side permission model. That is what makes the
-  audit event — and therefore the Git commit author — honest, and it is load
-  bearing rather than convenient.
+- **The participant's own token does every write.** The browser writes through
+  krm-foyer's `/k8s` as the person: no impersonation, no shared ServiceAccount,
+  no application-side permission model. That is what makes the audit event — and
+  therefore the Git commit author — honest, and it is load bearing rather than
+  convenient. Reads are shared (krm-foyer's one watch per scope), but every
+  subscriber is checked against their own RBAC before anything is disclosed.
 - **`prune: Always` on the demo targets.** A deleted object leaves Git. Chosen so
   the mirror cannot become a liar on a projector, accepting that a bad watch
   scope could delete manifests.
-- **The session cookie is versioned.** Adding a field bumps the version so stale
-  cookies become a clean re-login rather than a subtly wrong session.

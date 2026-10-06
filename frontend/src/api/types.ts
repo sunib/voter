@@ -58,7 +58,7 @@ export type QuizSessionStatus = {
     choices?: Record<string, number>
     sum?: number
     /** How many free-text answers were written, against the bounded sample in
-     *  `text`. The results endpoint still returns all of them. */
+     *  `text`. */
     textTotal?: number
     text?: string[]
   }>
