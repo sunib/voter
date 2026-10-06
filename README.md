@@ -36,6 +36,9 @@ https://demo.koudijs.dev/auth/login?connector=github&return=%2Froom
   pilot prerequisites and the boundary between prototype work and deployment.
 - [krm-foyer feedback](docs/krm-foyer-feedback.md): what Voter still needs from
   krm-foyer 0.2.0 before its own login, session and stream code can go.
+- [Kubernetes as your backend](docs/kubernetes-as-a-bff.md): one vote through every stage of
+  the API server (OIDC, RBAC, CRD validation, an admission policy that reads the round,
+  the operator, GitOps), with YAML. Start here for the talk.
 - [krm-foyer migration](docs/krm-foyer-migration.md): the plan to drop Voter's own
   auth, session and stream code for krm-foyer, its open decisions and the cutover.
 - [Databases](docs/databases.md): the platform-team page — what it is built on,
