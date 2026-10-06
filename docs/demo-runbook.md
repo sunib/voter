@@ -357,6 +357,12 @@ metadata:
     # decide where gitops-reverser FILES it.
     voter.configbutler.ai/round: demo1
     voter.configbutler.ai/submitter: Ada-Lovelace
+    # Once the ballot policy is on the cluster (krm-foyer migration), this is
+    # what lets you vote at all: a ballot from anyone but a Room Pass
+    # participant has to say it was cast by the operator. Leave it out, and the
+    # refusal is the line: "I can still stuff the ballot box, I just cannot do
+    # it quietly."
+    voter.configbutler.ai/cast-by: operator
 spec:
   sessionRef:
     group: examples.configbutler.ai

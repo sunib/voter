@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resultsFromRest, resultsFromStatus, type RoundResults } from './quiz'
+import { resultsFromStatus } from './quiz'
 import type { QuizSession, QuizSessionSpec } from './types'
 
 // The results screen renders whichever of these two returns something, so the
@@ -101,44 +101,5 @@ describe('resultsFromStatus', () => {
       'text',
     ])
     expect(shown.questions[1]!.count).toBe(0)
-  })
-})
-
-describe('resultsFromRest', () => {
-  const rest: RoundResults = {
-    round: round(),
-    total: 3,
-    filed: 4,
-    questions: [
-      {
-        question: choiceQuestion,
-        count: 3,
-        choices: { A: 2, B: 1 },
-        sum: 0,
-        text: [],
-      },
-      {
-        question: textQuestion,
-        count: 2,
-        choices: {},
-        sum: 0,
-        text: ['one', 'two'],
-      },
-    ],
-  }
-
-  it('carries no timestamp, because it is computed on demand', () => {
-    expect(resultsFromRest(rest)!.asOf).toBeUndefined()
-    expect(resultsFromRest(undefined)).toBeUndefined()
-  })
-
-  it('has the whole free-text list, so textTotal is its length', () => {
-    const text = resultsFromRest(rest)!.questions[1]!
-    expect(text.text).toEqual(['one', 'two'])
-    expect(text.textTotal).toBe(2)
-  })
-
-  it('falls back to total when an older backend sends no filed', () => {
-    expect(resultsFromRest({ ...rest, filed: undefined })!.filed).toBe(3)
   })
 })

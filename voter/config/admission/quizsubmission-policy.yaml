@@ -1,0 +1,119 @@
+# The rules of a ballot, held where every ballot passes: admission.
+#
+# Under krm-foyer a participant creates their QuizSubmission themselves,
+# through /k8s, with their own token -- which is what keeps the Git commit of a
+# vote in their name (docs/krm-foyer-migration.md, decision 1). Voter's vote
+# handler used to make these checks; anyone with direct API access could always
+# skip it. Now nobody can. docs/quiz-admission.md has the design.
+#
+# The policy reads the rounds as parameters: the binding selects every
+# QuizSession in the ballot's namespace, and the API server evaluates the
+# policy once per round, denying the request if any evaluation fails. Every rule
+# that needs the round is therefore written "not this ballot's round, or valid
+# for it". Two consequences:
+#   - with no rounds at all there are no ballots (parameterNotFoundAction: Deny);
+#   - a ballot naming a round that does not exist passes the round rules
+#     vacuously. Nothing counts it: the tally only counts ballots for a round it
+#     is tallying. Accepted, and documented in quiz-admission.md.
+#
+# People only, as voter-editable-spec: `system:` users and service accounts are
+# machinery, not voters.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: voter-ballot
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: examples.configbutler.ai/v1alpha1
+    kind: QuizSession
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [examples.configbutler.ai]
+        apiVersions: ['*']
+        resources: [quizsubmissions]
+        operations: [CREATE]
+  matchConditions:
+    - name: a-person
+      expression: >-
+        !request.userInfo.username.startsWith('system:')
+  variables:
+    # A Room Pass participant. Every other person -- the operator through
+    # GitHub, say -- may cast a ballot only by saying so (below).
+    - name: participant
+      expression: "request.userInfo.username.startsWith('demo:')"
+    # The name the participant chose at the join page, as the API server
+    # received it: the display-name extra (authentication-config), which no
+    # request can set for itself.
+    - name: displayName
+      expression: >-
+        has(request.userInfo.extra) && 'configbutler.ai/claims/display-name' in request.userInfo.extra
+          && size(request.userInfo.extra['configbutler.ai/claims/display-name']) == 1
+          ? request.userInfo.extra['configbutler.ai/claims/display-name'][0]
+          : ''
+    - name: labels
+      expression: "object.metadata.?labels.orValue({})"
+    - name: round
+      expression: "object.spec.sessionRef.name"
+    # "I can still stuff the ballot box, I just cannot do it quietly."
+    - name: declared
+      expression: >-
+        'voter.configbutler.ai/cast-by' in variables.labels
+          && variables.labels['voter.configbutler.ai/cast-by'] == 'operator'
+    # Whether this evaluation's parameter is the round the ballot names.
+    - name: thisRound
+      expression: "params.metadata.name == variables.round"
+  validations:
+    - expression: "variables.participant || variables.declared"
+      message: >-
+        Voting is for people who joined through Room Pass. Anyone else's ballot has to
+        say so: label it voter.configbutler.ai/cast-by=operator.
+      reason: Forbidden
+    - expression: >-
+        !variables.participant || (variables.displayName != ''
+          && object.metadata.name == variables.round + '-' + variables.displayName.lowerAscii())
+      messageExpression: >-
+        variables.displayName == ''
+          ? 'Your sign-in carries no display name, so this ballot cannot be named after you.'
+          : 'A ballot is named after its round and your display name: '
+            + variables.round + '-' + variables.displayName.lowerAscii() + '.'
+      reason: Forbidden
+    - expression: >-
+        !variables.participant || (
+          'voter.configbutler.ai/round' in variables.labels
+          && variables.labels['voter.configbutler.ai/round'] == variables.round
+          && 'voter.configbutler.ai/submitter' in variables.labels
+          && variables.labels['voter.configbutler.ai/submitter'] == variables.displayName)
+      message: >-
+        A ballot's voter.configbutler.ai/round and /submitter labels name its round
+        and you.
+      reason: Forbidden
+    - expression: "!variables.thisRound || params.spec.state == 'live'"
+      messageExpression: "'This round is not open for voting.'"
+      reason: Forbidden
+    # A participant's ballot pins the round it answered: its UID, so a round
+    # deleted and recreated under the same name does not take it, and the digest
+    # of its questions, so a ballot for since-edited questions is refused. A
+    # declared ballot may leave the pins out (a pasted one has no reason to know a
+    # UID); each pin present has to match.
+    - expression: >-
+        !variables.thisRound || (
+          (!variables.participant
+            || (has(object.spec.roundUID) && has(object.spec.questionsDigest)))
+          && (!has(object.spec.roundUID) || object.spec.roundUID == params.metadata.uid)
+          && (!has(object.spec.questionsDigest)
+            || object.spec.questionsDigest == params.?status.?questionsDigest.orValue('')))
+      messageExpression: "'The round changed. Reload the questions before voting.'"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: voter-ballot
+spec:
+  policyName: voter-ballot
+  validationActions: [Deny]
+  paramRef:
+    # Every round in the ballot's own namespace.
+    selector: {}
+    parameterNotFoundAction: Deny

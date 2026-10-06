@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -401,76 +399,6 @@ func TestAStatusWriteDoesNotTriggerAnother(t *testing.T) {
 	time.Sleep(600 * time.Millisecond)
 	if got := writes.Load(); got != settled {
 		t.Fatalf("%d status writes, up from %d and still going: the tally is triggering itself", got, settled)
-	}
-}
-
-// The property the whole design buys: one Go implementation writes status and
-// serves REST, so the projector and the Refresh button cannot disagree. Two
-// counters would have differed exactly on the ballot that fails validation.
-func TestStatusAndRESTAgree(t *testing.T) {
-	cfg := authorizationFixture(t)
-	round := tallyFixtureRound("demo")
-	ballots := []runtime.Object{
-		round,
-		ballot("demo-alice", "demo", "2026-09-17T13:00:00Z",
-			map[string]any{roundLabel: "demo"}, answer("choice", "A"), answer("text", "yes")),
-		ballot("demo-kubectl", "demo", "2026-09-17T13:01:00Z", nil, answer("choice", "B")),
-		ballot("demo-stale", "demo", "2026-09-17T13:02:00Z", nil,
-			map[string]any{"questionId": "missing", "freeText": "nope"}),
-		ballot("other-bob", "other", "2026-09-17T13:03:00Z", map[string]any{roundLabel: "demo"}, answer("choice", "A")),
-	}
-	client, awaitStatus := tallyReconcilerFixture(t, ballots...)
-	status := awaitStatus("demo", func(s quizStatus) bool { return s.Counted == 2 })
-
-	mux := http.NewServeMux()
-	registerParticipantQuizHandlers(mux, handlerDeps{cfg: cfg, defaultNS: "voter",
-		newClients: func(_ config, _ string) (participantClients, error) {
-			return participantClients{dynamic: client}, nil
-		}})
-	req := authorizedRequest(t, cfg, "GET", "alice")
-	req.URL.Path = "/public/rounds/demo/results"
-	req.Body = http.NoBody
-	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
-	if rec.Code != 200 {
-		t.Fatalf("results: %d %s", rec.Code, rec.Body)
-	}
-	var rest struct {
-		Total     int `json:"total"`
-		Filed     int `json:"filed"`
-		Questions []struct {
-			Question quizQuestion   `json:"question"`
-			Count    int            `json:"count"`
-			Choices  map[string]int `json:"choices"`
-			Text     []string       `json:"text"`
-		} `json:"questions"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &rest); err != nil {
-		t.Fatal(err)
-	}
-	if rest.Total != status.Counted || rest.Filed != status.Filed {
-		t.Fatalf("REST %d/%d disagrees with status %d/%d", rest.Total, rest.Filed, status.Counted, status.Filed)
-	}
-	for i, q := range rest.Questions {
-		if q.Question.ID != status.Questions[i].ID || q.Count != status.Questions[i].Count {
-			t.Fatalf("question %d: REST %s/%d, status %s/%d", i,
-				q.Question.ID, q.Count, status.Questions[i].ID, status.Questions[i].Count)
-		}
-		for choice, want := range status.Questions[i].Choices {
-			if q.Choices[choice] != want {
-				t.Fatalf("question %s choice %q: REST %d, status %d", q.Question.ID, choice, q.Choices[choice], want)
-			}
-		}
-	}
-	// Both counted the kubectl ballot, which carries no round label at all --
-	// so neither is selecting on it.
-	if status.Questions[0].Choices["B"] != 1 {
-		t.Fatalf("the unlabelled ballot was not counted: %+v", status.Questions[0])
-	}
-	// The endpoint stays the authority for the FULL free-text list, which is
-	// why status may bound its own.
-	if text := rest.Questions[2].Text; len(text) != 1 || !strings.Contains(text[0], "yes") {
-		t.Fatalf("REST text = %v", text)
 	}
 }
 

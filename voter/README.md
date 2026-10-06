@@ -18,18 +18,15 @@ See [architecture](../ARCHITECTURE.md) and
 | `/auth/login`, `/auth/callback`, `/auth/session`, `/auth/whoami`, `/auth/rules`, `/auth/logout` | Voter's own OIDC login, **no longer routed**: krm-foyer answers `/auth/` on the shared host. Deleted in step 5 |
 | `GET /public/storefront`, `POST /public/orders` | Coffee menu and order decisions |
 | `GET /public/vouchers` | Process-local voucher usage |
-| `GET /public/rounds` | List voting rounds |
-| `GET,POST /public/rounds/{name}` | Read questions plus this participant's `voted` flag, or submit a validated QuizSubmission |
-| `GET /public/rounds/{name}/results` | Aggregated counts, averages and shared text answers |
 
 Voting uses persisted QuizSession/QuizSubmission resources. See the
 [demo runbook](../docs/voting-demo.md) and [sample round](config/demo-round.yaml).
 
-Saving the coffee menu and Databases, opening and closing rounds and the audience
-grant are the browser's own writes through krm-foyer's `/k8s` now; what a person may
+Voting, saving the coffee menu and Databases, opening and closing rounds and the
+audience grant are the browser's own writes through krm-foyer's `/k8s` now; what a person may
 write is held by `config/admission/`. The remaining `/public/*` handlers still read
 Voter's own session cookie and use its Dex ID
-token, so behind krm-foyer they answer 401 until steps 4 and 5 replace them. Live
+token, so behind krm-foyer they answer 401 until step 5 replaces them. Live
 streams are krm-foyer's `/stream/v1`; Voter no longer serves a stream or `/metrics`.
 
 ## Configuration

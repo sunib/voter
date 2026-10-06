@@ -7,28 +7,19 @@
 // for participants, who could already read rounds. See
 // docs/live-results-design.md.
 //
-// The REST endpoint stays: it is the first paint, and the fallback for a
-// dropped stream or a deployment whose controller is not running. That is why
-// the refresh button is still here, shown only when there is nothing live to
-// show -- a page that is following the room should not invite the presenter to
-// press anything.
-import { computed, ref, watch } from 'vue'
+// There is no other source: Voter's REST results endpoint went with the move
+// to krm-foyer. A round with no tally yet says it is waiting, rather than
+// showing zeroes over real votes, and the stream's own state says when it is
+// not following the room.
+import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import AppShell from '../components/layout/AppShell.vue'
 import { useLiveResources } from '../api/liveResources'
 import { appConfig } from '../api/appConfig'
-import {
-  getRoundResults,
-  resultsFromRest,
-  resultsFromStatus,
-  type RoundResults,
-} from '../api/quiz'
+import { resultsFromStatus } from '../api/quiz'
 import type { QuizSession } from '../api/types'
 const props = defineProps<{ session: string }>()
 const route = useRoute()
-const rest = ref<RoundResults>()
-const busy = ref(false)
-const error = ref('')
 
 // The COLLECTION, exactly as AnswerScreen and HomeScreen watch it: the
 // component is reused when the route parameter changes, so a watch pinned to
@@ -47,13 +38,19 @@ const streamedRound = computed<QuizSession | undefined>(() => {
   ) as unknown as QuizSession | undefined
 })
 
-const liveResults = computed(() => resultsFromStatus(streamedRound.value))
-const results = computed(() => liveResults.value ?? resultsFromRest(rest.value))
-const title = computed(
-  () =>
-    streamedRound.value?.spec?.title ??
-    rest.value?.round.spec.title ??
-    'Voting results',
+const results = computed(() => resultsFromStatus(streamedRound.value))
+const title = computed(() => streamedRound.value?.spec?.title ?? 'Voting results')
+// Synced, the round is there, and it has never been tallied: the controller
+// has not got to it yet, or is not running.
+const waiting = computed(
+  () => live.synced() && streamedRound.value !== undefined && !results.value,
+)
+const missing = computed(() => live.synced() && streamedRound.value === undefined)
+// Just voted, and the tally has not caught up: the count lives in the round's
+// status, which the reconciler writes about a second after a ballot lands.
+// "0 votes recorded" under "Your vote is recorded" would contradict itself.
+const counting = computed(
+  () => route.query.submitted === '1' && results.value?.total === 0,
 )
 // "as of 13:22:41". A stale tally must not look live, and a controller that has
 // stopped looks exactly like a room that has stopped voting.
@@ -70,25 +67,6 @@ const refused = computed(() =>
   results.value ? Math.max(results.value.filed - results.value.total, 0) : 0,
 )
 
-async function refresh() {
-  busy.value = true
-  error.value = ''
-  try {
-    rest.value = await getRoundResults(props.session)
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Could not load results.'
-  } finally {
-    busy.value = false
-  }
-}
-watch(
-  () => props.session,
-  () => {
-    rest.value = undefined
-    void refresh()
-  },
-  { immediate: true },
-)
 </script>
 <template>
   <AppShell title="Results" width="narrow">
@@ -105,27 +83,31 @@ watch(
       <p class="eyebrow">Voting results</p>
       <h1 class="panel-title">{{ title }}</h1>
       <div class="results-meta">
-        <span v-if="results" class="pill pill--good" data-testid="vote-total"
+        <span v-if="counting" class="pill" data-testid="vote-counting"
+          >Counting your vote…</span
+        >
+        <span
+          v-else-if="results"
+          class="pill pill--good"
+          data-testid="vote-total"
           >{{ results.total }} votes recorded</span
         >
         <span v-if="asOf" class="pill" data-testid="vote-as-of"
           >as of {{ asOf }}</span
         >
-        <button
-          v-if="!liveResults"
-          class="text-link"
-          :disabled="busy"
-          @click="refresh"
-        >
-          {{ busy ? 'Loading…' : 'Refresh results' }}
-        </button>
       </div>
+      <p v-if="waiting" class="result-count" data-testid="vote-waiting">
+        Waiting for the first count of this round.
+      </p>
+      <p v-if="missing" role="alert" class="error-copy">
+        There is no round called {{ session }}.
+      </p>
+      <p v-if="live.error.value" role="alert" class="error-copy">
+        {{ live.error.value }} Results may be out of date.
+      </p>
       <p v-if="refused" class="result-count" data-testid="vote-refused">
         {{ refused }} more {{ refused === 1 ? 'ballot was' : 'ballots were' }}
         filed but did not pass validation.
-      </p>
-      <p v-if="error" role="alert" class="error-copy">
-        {{ error }} Results may be out of date.
       </p>
     </section>
 

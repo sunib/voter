@@ -1,11 +1,13 @@
 # demo1-b: three ballots cast with kubectl, landing in ONE commit.
 #
-# The app refuses to let an operator vote -- voting requires a Room Pass
-# session, and the operator arrived through the github connector. This file is
-# the answer to "then it is not fair that I cannot vote": the operator is
-# cluster-admin, so the API server has no objection at all. The refusal is the
-# application's rule, not Kubernetes', and going around it out in the open is
-# the honest way to show where that line sits.
+# Voting is for people who joined through Room Pass, and since the move to
+# krm-foyer that rule is the API server's own: an admission policy
+# (voter/config/admission/quizsubmission-policy.yaml) refuses a ballot from
+# anyone else. Anyone else, that is, who does not SAY so. Every ballot below
+# carries voter.configbutler.ai/cast-by: operator, and with it the operator --
+# cluster-admin -- may cast it while the round is live. "I can still stuff the
+# ballot box, I just cannot do it quietly." Drop the label and the create is
+# refused, with the policy's message.
 #
 # What it demonstrates beyond the votes themselves: the CommitRequest at the
 # bottom closes gitops-reverser's open window early, so all three documents
@@ -57,6 +59,9 @@ metadata:
     # commit AUTHOR is whoever ran kubectl. The mirror never claims Ada pushed
     # anything; it files her ballot under her name and records who submitted it.
     voter.configbutler.ai/submitter: Ada-Lovelace
+    # Says out loud that this ballot was not cast by its submitter. Without it,
+    # admission refuses a ballot from anyone but a Room Pass participant.
+    voter.configbutler.ai/cast-by: operator
 spec:
   sessionRef:
     group: examples.configbutler.ai
@@ -85,6 +90,7 @@ metadata:
   labels:
     voter.configbutler.ai/round: demo1
     voter.configbutler.ai/submitter: Grace-Hopper
+    voter.configbutler.ai/cast-by: operator
 spec:
   sessionRef:
     group: examples.configbutler.ai
@@ -111,6 +117,7 @@ metadata:
   labels:
     voter.configbutler.ai/round: demo1
     voter.configbutler.ai/submitter: Simon-Koudijs
+    voter.configbutler.ai/cast-by: operator
 spec:
   sessionRef:
     group: examples.configbutler.ai
