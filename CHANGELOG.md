@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.0](https://github.com/sunib/voter/compare/v1.2.0...v1.3.0) (2026-10-06)
+
+
+### Features
+
+* pin each ballot to its round's uid and questions ([#21](https://github.com/sunib/voter/issues/21)) ([be6a268](https://github.com/sunib/voter/commit/be6a268ee83862c09f1b6ae468390d071776acd6))
+
+
+### Documentation
+
+* plan the krm-foyer migration; run Room Pass 2.1.0 in e2e ([#20](https://github.com/sunib/voter/issues/20)) ([c0498ca](https://github.com/sunib/voter/commit/c0498ca8e573fbd7c5115397e9728cc55a33b49a))
+* record the 2026-09-17 demo in numbers and the Room Pass 2.0.0 field report ([51dbb1f](https://github.com/sunib/voter/commit/51dbb1f0928794bdd83339b3794bbba1755b2df2))
+
 ## [1.2.0](https://github.com/sunib/voter/compare/v1.1.0...v1.2.0) (2026-10-01)
 
 
