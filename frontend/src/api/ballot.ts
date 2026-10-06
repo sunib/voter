@@ -6,7 +6,7 @@
 // round and questions it pins, whether the round is live. This module builds a
 // ballot that meets them, and checks the answers first so the phone can say
 // "answer required" before anything is sent. The tally checks the answers
-// again (validateQuizAnswers in voter/participant_quiz.go), so this copy is
+// again (validateQuizAnswers in voter/quiz_rules.go), so this copy is
 // the courtesy, never the control.
 
 import type { QuizSession, QuizSessionSpec, QuizSubmission } from './types'
@@ -23,7 +23,7 @@ export type Answer = {
 }
 
 /** The same checks, in the same order and words, as validateQuizAnswers in
- *  voter/participant_quiz.go. Returns the first problem, or '' for none. */
+ *  voter/quiz_rules.go. Returns the first problem, or '' for none. */
 export function validateAnswers(
   questions: Question[],
   answers: Answer[],

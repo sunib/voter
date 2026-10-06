@@ -5,6 +5,9 @@ checkout, and the platform rows re-checked against the **live cluster on
 2026-09-11** with `kubectl auth can-i --as`. Impersonation establishes what a
 username/group combination may do; it does not prove a real provider token
 carries those claims. The application rows remain configuration findings.
+The Voter rows were rewritten for 2.0.0 (2026-10-06), when Voter moved behind
+[krm-foyer](krm-foyer-migration.md): the browser now writes to Kubernetes itself,
+as the person, and admission holds the rules Voter's handlers used to.
 
 ## Three separate questions
 
@@ -22,7 +25,7 @@ in the login URL. A successful Dex login can still produce a Kubernetes 403.
 
 | Identity | Login eligibility | Explicit application/platform grants |
 | --- | --- | --- |
-| No valid app cookie | No app session | CoffeeConfig handler returns 401 |
+| No krm-foyer session | No session | krm-foyer's 401 on `/k8s`, `/stream` and every `/public/` route; only the SPA files, `/config.json` and `/join-room` are served |
 | Room attendee, `demo:<sub>` in `demo:voter-audience` | Valid room code/enrollment and active Room at handoff | Demo Role in `voter` |
 | Ordinary `linkedin:<email>` | LinkedIn connector is open to any LinkedIn account | Verified live: nothing beyond `system:basic-user` and discovery. Secrets, pods, namespaces, Rooms and nodes all denied |
 | Ordinary `github:<email>` | Restricted to the `koudijs-dev` organization | Matching user/group grants only; no automatic demo membership |
@@ -65,8 +68,14 @@ operations throughout the `voter` namespace:
 | --- | --- |
 | CoffeeConfigs | get, list, watch |
 | CommitRequests | create, get, list, watch |
+| Databases | get, list, watch, create, patch, update |
 | QuizSessions | get, list, watch |
-| QuizSubmissions | create, get, list, watch |
+| QuizSubmissions | get, create |
+
+There is no list or watch on QuizSubmissions: no page needs them, and they would
+hand everyone everybody's answers. The vote page `get`s its own ballot's name to
+ask "have I voted?"; results are the round's `status`, which Voter's tally
+reconciler writes.
 
 **CoffeeConfigs became read-only here on 2026-09-15.** `patch` and `update` moved
 to a second Role, `voter-audience-coffee-admin`, which exists in Git but is
@@ -75,8 +84,9 @@ watch it change — and be refused by the API server on save. That refusal is th
 starting state of the demo, not a fault.
 
 The operator hands the grant out live from `/room`: a switch there creates a
-RoleBinding of that Role to the same group, with the operator's own token, and
-deletes it again on the way back. The binding is deliberately absent from the
+RoleBinding of that Role to the same group (named in `Room.spec.audienceGroup`),
+from the operator's browser through krm-foyer's `/k8s`, with the operator's own
+token, and deletes it again on the way back. The binding is deliberately absent from the
 Flux kustomization — Flux would recreate whatever the switch deletes — and
 `gitops-reverser` mirrors it into the audit trail, so the grant is recorded in
 Git as a commit authored by whoever pulled the switch.
@@ -89,10 +99,9 @@ Two consequences worth stating plainly:
   `create` or `delete` it: the object belongs to GitOps and they only amend it.
 
 Every identity may ask what it holds. `selfsubjectrulesreviews` is granted to
-`system:authenticated` by the stock `system:basic-user` ClusterRole, so
-`/auth/rules` works for a participant whose only other grant is reading one
-CoffeeConfig — no RBAC change was needed to render the permission table on
-`/me`. The table is the API server's answer about the caller's own token; the
+`system:authenticated` by the stock `system:basic-user` ClusterRole, so the
+browser can POST a SelfSubjectRulesReview through `/k8s` for any participant —
+no RBAC change was needed to render the permission table on `/me`. The table is the API server's answer about the caller's own token; the
 application does not compute it and cannot disagree with it.
 
 The CommitRequest CRD was absent when this was first written, leaving that row
@@ -101,23 +110,48 @@ is **live**: `create commitrequests.configbutler.ai -n voter` now returns `yes`
 for an audience identity.
 
 QuizSubmissions are create-only for participants: this Role grants neither update
-nor patch on them, and Voter exposes no editing endpoint. Broader additive grants or
-administrator access are separate; the CRD does not enforce immutable spec fields.
+nor patch on them. Broader additive grants or administrator access are separate;
+the CRD does not enforce immutable spec fields.
 
 Neither Role grants Secrets, RBAC changes, impersonation or deletion
 (`delete quizsubmissions` is denied). Participants cannot read RoleBindings
 either, which is why the grant switch simply does not appear on a participant's
 `/room` — Kubernetes withholds it, not the page. Neither Role is limited to one
-named CoffeeConfig, and reading other submissions is permitted.
+named CoffeeConfig. A participant can `get` another ballot whose name they guess,
+but cannot list them.
 
-**There is no bound on how much an audience token may write.** The `voter`
-namespace has no ResourceQuota and no LimitRange, and the cluster has no
-ValidatingAdmissionPolicy at all, so nothing limits QuizSubmission object count
-or checks that a submission refers to a real session. `simon` has a
+### Admission: the rules RBAC cannot say
+
+RBAC decides verbs on resources; it cannot say "only your own ballot" or "only
+the spec". Two ValidatingAdmissionPolicies in `voter/config/admission/` (copied to
+`2-gitops/voter-demo/admission/`) say it, for people only — `system:` users and
+service accounts (Flux, gitops-reverser, Voter's reconciler) are not matched:
+
+- **`voter-ballot`**, on every QuizSubmission create, with every QuizSession in
+  the namespace as a parameter. A ballot from anyone but a `demo:` (Room Pass)
+  user must carry the label `voter.configbutler.ai/cast-by: operator`. A
+  participant's ballot must be named `<round>-<display name, lower case>`, carry
+  the `voter.configbutler.ai/round` and `/submitter` labels, and pin the round's
+  `uid` and `status.questionsDigest`. The round must be `live`, and any pin must
+  match. The display name comes from the token's display-name extra, which no
+  request can set for itself, so the fixed name is also the one-ballot-per-person
+  rule: a second create is the API server's 409.
+- **`voter-editable-spec`**, on CoffeeConfig updates and Database creates and
+  updates: a person may change `spec` and nothing else — no labels,
+  annotations, finalizers or ownerReferences — except, on a Database, the
+  `platform.configbutler.ai/intent` annotation and `kubectl apply`'s
+  last-applied annotation. A person's `kubectl apply` of a CoffeeConfig is
+  therefore refused.
+
+**There is still no bound on how much an audience token may write.** The `voter`
+namespace has no ResourceQuota and no LimitRange. One ballot per person per round
+is enforced; Database requests are not counted. A ballot that names a round
+which does not exist passes `voter-ballot` vacuously — nothing counts it, since
+the tally only counts ballots for rounds it tallies. `simon` has a
 `participant-quota`; `voter` does not.
 
-Voter's current handler addresses one configured CoffeeConfig, but callers with
-tokens can call Kubernetes directly within their RBAC grants.
+The pages address one configured CoffeeConfig, but a person's session can send
+anything through `/k8s` within their RBAC grants and these policies.
 
 Opening GitHub login to everybody is compatible with granting only the owner
 extra rights. It is not implemented in this pass. It now depends only on the Dex
@@ -132,30 +166,32 @@ prefix resolves to.
 
 | Situation | Result |
 | --- | --- |
-| Missing, forged, legacy or expired app session | 401; no participant operation |
-| Valid app session, missing/wrong CSRF on mutation | 403 before contacting Kubernetes |
-| Valid CSRF, foreign Origin | 403 before contacting Kubernetes |
-| Valid CSRF, absent Origin | Voter permits the request to reach authorization |
-| Valid CSRF, `Origin: null` | Voter rejects; Room Pass's form accepts with matching signed-cookie proof |
-| Kubernetes rejects credentials | 401, no server-identity retry |
-| Kubernetes denies permission | 403, no server-identity retry |
-| Config patch succeeds, CommitRequest denied/expired | Saved config, `committed: false`, explicit partial-success message |
+| Missing, forged or expired krm-foyer session | krm-foyer's 401; nothing reaches Kubernetes or Voter's `/public/` routes |
+| Valid session, missing/wrong CSRF on a write | krm-foyer's 403 before contacting Kubernetes |
+| Forged `Krm-Foyer-Identity` header | Signed out: krm-foyer's 401. Signed in: replaced by krm-foyer's own at the ForwardAuth |
+| Room Pass form with `Origin: null` | Room Pass accepts with matching signed-cookie proof |
+| Kubernetes rejects credentials | 401, passed back to the page as the API server sent it |
+| RBAC or admission denies | 403 with the API server's reason, which for a policy is its own message ("This round is not open for voting.") |
+| Second ballot for the same round | 409 AlreadyExists; the page says "You have already voted" |
+| Config patch on a stale `resourceVersion` | 409; the editor re-sends non-overlapping edits up to three times |
+| Config patch succeeds, CommitRequest denied/expired | Saved config, explicit partial-success message |
 | Room stopped/expired or Participant invalid | Room Pass rejects new identity handoff |
 | Room stopped after a Dex token was issued | Token remains valid until expiry; Room stop is not token revocation |
-| App logout | Clears app cookie; does not revoke Dex token or Room Pass enrollment |
+| Logout | krm-foyer's `POST /auth/logout` ends its session; a participant is then sent to Room Pass's `/join` to end enrollment. Neither revokes the Dex token |
 
 Removing a RoleBinding removes that grant from existing tokens too; other
-matching bindings may still grant access. Existing app sessions do not recheck
-Room state on each operation. If immediate room-wide shutdown is required, design
+matching bindings may still grant access. Existing krm-foyer sessions do not
+recheck Room state on each operation. If immediate room-wide shutdown is required, design
 and test an authorization mechanism for that explicitly.
 
 ## Automated evidence
 
 | Test file | What it establishes |
 | --- | --- |
-| [Voter authorization](../voter/authorization_test.go) | Real handler gates, request-scoped credentials, ignored forged headers, upstream 401/403/409, partial save |
-| [Voter OIDC](../voter/oidc_test.go) | Cookie tampering/expiry/version, CSRF, return paths, callback browser binding/expiry/rejected-attempt replay |
-| [Voter in the browser](../test/browser/) | Real Chromium through Traefik, Dex and a released Room Pass: participants refused the operator page, RBAC withdrawal from one of two viewers, voting; CI retains video |
+| [Boundaries in the browser](../test/browser/boundaries.spec.js) | From a real participant session, through `/k8s`: a ballot in someone else's name and an unpinned ballot are refused with `voter-ballot`'s messages, the participant's own ballot lands once and the second is a 409, a label on the menu is refused by `voter-editable-spec` even while the menu grant is on |
+| [The operator in the browser](../test/browser/operator.spec.js) | A participant is refused the operator page and never sees a join code; the operator (Dex `github` id, cluster-admin) sees the code, opens and closes a round, and grants and revokes the menu |
+| [Voter in the browser](../test/browser/) | Real Chromium through Traefik, krm-foyer, Dex and a released Room Pass: QR join and logout, voting, live streams; CI retains video |
+| [Voter's identity check](../voter/participant_storefront_test.go) | `/public/` routes refuse a request without `Krm-Foyer-Identity` |
 
 Room Pass's own evidence lives with Room Pass, in
 [sunib/room-pass](https://github.com/sunib/room-pass), and runs in that
@@ -172,47 +208,43 @@ project's CI, not this one's:
 Here, run `task voter:test`, and `task e2e-up && task test-browser` for the browser layer.
 For concurrent credential checks run `cd voter && go test -race ./...`.
 
-The HTTP upstream in Voter tests is a controlled stand-in: it establishes that
-Voter preserves a decision, not that deployed RBAC makes the correct decision.
-The next layer is rendered platform CEL and real-token RBAC tests for all three
-connectors, followed by browser and audit-to-Git acceptance. The implementation
-plan tracks those remaining proofs.
+The browser specs run against the fixture's copy of the RBAC and admission
+policies, not against production. Still owed: an envtest suite for the admission
+policies in CI, real-token RBAC tests for all three connectors, and audit-to-Git
+acceptance on the cluster.
 
 See [network suite details](https://github.com/sunib/room-pass/blob/main/test/network/README.md) for testing the
 actual platform policy file and the distinction between local k3s and live Cilium.
 
 ## Shared streams
 
-CoffeeConfig streams use one service-account backend per process. Voter resolves the
-subscriber's full Kubernetes identity with their token at stream opening and applies
-`SubjectAccessReviewAuthorizer` before cache disclosure and every 30 seconds. Initial
-and periodic checks have five-second deadlines, as do individual SSE writes/flushes.
-Session/token expiry cancels only that subscription. Failed identity resolution,
-denied list/watch, and access-review errors fail closed.
+Live views read through krm-foyer's `/stream/v1`, not through Voter. krm-foyer
+holds one API-server watch per scope for the room, as its own shared identity
+(`krm-foyer-voter-shared`: list and watch on CoffeeConfigs, QuizSessions,
+Databases, CommitRequests and Rooms, plus SubjectAccessReview create). Before it
+discloses anything to a subscriber it asks a SubjectAccessReview for that
+person's own identity, and it asks again periodically while the stream is open;
+a denied or failed check closes that subscription. The load rehearsal held 197
+concurrent streams on one shared watch. The design before 2.0.0, with Voter as
+the gateway, is in [shared-streams.md](shared-streams.md).
 
-The service account gets named CoffeeConfig reads and SAR creation only. Direct REST
-reads, CoffeeConfig PATCH and CommitRequest creation retain participant credentials;
-audit watch events now identify the service account while writes identify the person.
-The fixture and platform manifests carry the same narrow grants. Deployed as `85de0c0`
-through GitOps `2d770a1`; on Kubernetes 1.36.1 the service account is allowed named
-`coffeeconfigs/demo-coffee` list and watch and denied everything else checked.
-See [verification](shared-streams.md).
+Writes never go through the shared identity: a vote, a menu save, a Database
+request and a CommitRequest are the person's own request through `/k8s`, so
+audit events — and gitops-reverser's commits — name the person. Voter's own
+ServiceAccount no longer streams anything; its grants are the tally reconciler's
+and `get` on `coffeeconfigs/demo-coffee` for the storefront.
 
 ### Revocation timing and the cached subject
 
-Voter now enforces cached stream disclosure using Kubernetes SAR verdicts; the API
-server authorizes the shared watch as the service account. This differs from a
-participant-token watch, where Kubernetes directly authorizes that person's watch.
-Scope checks, trusted identity resolution and SARs must precede every cache disclosure.
-
-Periodic checks reevaluate **RBAC for the subject captured when the stream opened**.
-A removed RoleBinding is detected on a subsequent check (30-second interval,
-five-second check timeout; the end-to-end target is 60 seconds including delivery
-and scheduling). The local rehearsal observed approximately 30 seconds.
+The shared watch is authorized as krm-foyer's identity; each subscriber is held
+to their own RBAC only by the SubjectAccessReviews. Periodic checks reevaluate
+**RBAC for the subject captured when the stream opened**, so a removed
+RoleBinding is detected on a later check. The interval is krm-foyer's setting;
+it has not been re-measured on this cluster since the cutover.
 
 An IdP group-membership change or account disablement does not rewrite already-issued
 token claims, and the periodic SAR does not re-resolve the subject or contact Dex.
-Such identity changes are therefore **not covered by the RBAC recheck bound**.
-Existing streams are bounded by the earlier application-session/token expiry. A new
+Such identity changes are therefore **not covered by the RBAC recheck**.
+Existing streams are bounded by the earlier session/token expiry. A new
 stream resolves identity again, but the same still-valid token may retain old claims.
-Do not describe a 30-second RBAC check as universal identity revocation.
+Do not describe a periodic RBAC check as universal identity revocation.

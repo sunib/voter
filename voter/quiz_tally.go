@@ -25,9 +25,10 @@ import (
 //
 // Counts stay exact however many people vote. Text cannot: 300 answers of up to
 // 2000 characters is ~600 KB in an object whose etcd ceiling is about 1.5 MB,
-// rewritten on every tally. The REST endpoint keeps returning all of them, so
-// nothing is lost -- and a projector showing 300 free-text answers was already
-// a wall the presenter reads two or three lines off.
+// rewritten on every tally. Every answer stays in its ballot, so nothing is
+// lost -- `kubectl get quizsubmissions` and the Git mirror have them all -- and
+// a projector showing 300 free-text answers was already a wall the presenter
+// reads two or three lines off.
 //
 // It is also maxItems on status.questions.text in config/crd/quizsessions.yaml.
 // Raise one and the API server rejects every tally until the other follows.

@@ -15,8 +15,10 @@ namespace: voter            (the demo's namespace; nothing looks elsewhere)
 
 The authoritative definitions are [`voter/config/crd/quizsessions.yaml`](../voter/config/crd/quizsessions.yaml)
 and [`voter/config/crd/quizsubmissions.yaml`](../voter/config/crd/quizsubmissions.yaml).
-Everything below is derived from those two plus the server-side validator in
-[`voter/participant_quiz.go`](../voter/participant_quiz.go) and the renderer in
+Everything below is derived from those two plus the tally's answer check in
+[`voter/quiz_rules.go`](../voter/quiz_rules.go), the ballot admission policy in
+[`voter/config/admission/quizsubmission-policy.yaml`](../voter/config/admission/quizsubmission-policy.yaml),
+and the renderer in
 [`frontend/src/components/questions/QuestionRenderer.vue`](../frontend/src/components/questions/QuestionRenderer.vue).
 Where this file and a CRD disagree, the CRD is right and this file is stale.
 
@@ -49,9 +51,9 @@ type.
 | `id`          | all                                      | Required. `^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`. **Keep it to 63 characters.** The QuizSession CRD does not cap it but `QuizSubmission.spec.answers[].questionId` does, so a longer id produces a round nobody can answer.                                   |
 | `type`        | all                                      | Required. One of the five above.                                                                                                                                                                                                                         |
 | `title`       | all                                      | Required, non-empty. This is the question as the room reads it.                                                                                                                                                                                          |
-| `required`    | all                                      | Boolean, default false. Enforced at submit time, and the phone shows a REQUIRED tag. A required `freeText` rejects whitespace-only; a required `multiChoice` rejects an empty selection.                                                                 |
+| `required`    | all                                      | Boolean, default false. Checked by the phone before submit and by the tally, and the phone shows a REQUIRED tag. A required `freeText` rejects whitespace-only; a required `multiChoice` rejects an empty selection.                                                                 |
 | `choices`     | `singleChoice`, `multiChoice`            | **Required for exactly these two and forbidden on the other three** — a CEL rule on the CRD enforces both halves. At least one, each non-empty. Keep each under 256 characters, which is the cap on the submission side.                                 |
-| `min`, `max`  | `number`, and mandatory for `scale0to10` | Numbers, `min <= max`. For `scale0to10` the CRD _requires_ `min: 0` and `max: 10` — omitting them is rejected. For `number` both are optional and are enforced server-side on submit. Legal but pointless elsewhere; only the number input renders them. |
+| `min`, `max`  | `number`, and mandatory for `scale0to10` | Numbers, `min <= max`. For `scale0to10` the CRD _requires_ `min: 0` and `max: 10` — omitting them is rejected. For `number` both are optional and are enforced by the phone and the tally. Legal but pointless elsewhere; only the number input renders them. |
 | `placeholder` | `freeText`                               | Grey hint text in the textarea. Ignored by every other type.                                                                                                                                                                                             |
 
 ## Rules that will get a round rejected
@@ -189,7 +191,8 @@ kubectl -n voter get quizsessions        # STATE and TITLE columns
 ## If you are also generating submissions
 
 Seeded votes — the invented voters in the demo runbook — have to agree with the
-round exactly:
+round exactly, and, cast by anyone but a Room Pass participant, have to say so
+with the `cast-by: operator` label or admission refuses them:
 
 ```yaml
 apiVersion: examples.configbutler.ai/v1alpha1
@@ -202,6 +205,9 @@ metadata:
     voter.configbutler.ai/round: example-round-2026-09-16
     # Original casing: this becomes results/Ada-Lovelace.yaml in the mirror.
     voter.configbutler.ai/submitter: Ada-Lovelace
+    # Required of every ballot not cast by a Room Pass participant
+    # (the voter-ballot admission policy).
+    voter.configbutler.ai/cast-by: operator
 spec:
   sessionRef:
     group: examples.configbutler.ai
@@ -225,9 +231,13 @@ spec:
 
 Three ways this goes wrong: an answer to a `questionId` the round does not
 define, two entries for one question, or a `singleChoice` value that is not in
-that question's `choices`. All three are refused, and the first two are refused
-by the CRD before the app sees them.
+that question's `choices`. The CRD checks only that each answer carries exactly
+one field, so the API server accepts all three, and the tally files the ballot
+without counting it — the results screen then shows it as refused, so it is
+never dropped silently.
 
-The round must be `state: live` for the application's own submit path to accept
-an answer. Applying a submission with `kubectl` bypasses that check, because it
-is the app that enforces it and you are talking to the API server directly.
+The round must be `state: live` for any ballot to be accepted, `kubectl` or
+phone alike: the `voter-ballot` admission policy reads the round on every
+create and says "This round is not open for voting." A declared ballot may leave
+out `spec.roundUID` and `spec.questionsDigest`; if it carries them, they must
+match the round.

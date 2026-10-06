@@ -1,10 +1,11 @@
 # Plan: ballot rules in admission, ahead of krm-foyer
 
-Status: **phase 1 merged (#21, `be6a268`, 2026-10-06) and on the cluster in 1.3.0;
-phase 2 built on the krm-foyer branch (step 4 of the migration), not yet on the
-cluster.** Preparation for step 4 of
-[krm-foyer-migration.md](krm-foyer-migration.md) that does not wait for krm-foyer's
-release. Every phase below ships on Voter 1.x and is useful on its own.
+Status: **phases 1 and 2 done and live (2026-10-06).** Phase 1 shipped in 1.3.0;
+phase 2, the `voter-ballot` policy, shipped with Voter 2.0.0 and krm-foyer (step 4 of
+[krm-foyer-migration.md](krm-foyer-migration.md)) and is on the cluster in
+ConfigButler/k8s `voter-demo/admission/`. Phase 3 is optional and not started; the
+envtest suite is still open. The phases below were planned to ship on Voter 1.x; in the
+end phase 2 shipped with 2.0.0.
 
 ## Why now
 
@@ -117,9 +118,11 @@ the cluster before a Voter that fills the new fields**, or every vote is refused
       `Forbidden`, `Invalid` or `RequestEntityTooLarge`, so every refusal is a 403;
       the message is what tells them apart.
 - [x] `test/e2e/up.sh` applies it after the CRDs.
-- [ ] The cluster copy goes to `external/k8s` `voter-demo/` (migration step 7.2).
-- [ ] Before `Deny`, run it once on the cluster with `validationActions: [Audit]`
-      and read the audit log during a test round.
+- [x] The cluster copy is in `external/k8s` `voter-demo/admission/` (`2ebda2e`).
+- [x] ~~Before `Deny`, run it once on the cluster with `validationActions: [Audit]`~~
+      Skipped: it went to the cluster with `Deny` directly, after thirteen cases by
+      impersonation on the fixture, `boundaries.spec.js` and `voting.spec.js` passing
+      against it, and a 200-ballot rehearsal through it with none refused.
 - [x] The operator's declared path: `voter.configbutler.ai/cast-by: operator` on
       `voter/config/demo1-b.yaml` and the runbook's interlude snippet.
 - [x] There is no handler any more: the browser creates the ballot, and

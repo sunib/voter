@@ -3,16 +3,18 @@
 This is the implementation plan, not a claim that the target design is deployed.
 [ARCHITECTURE.md](ARCHITECTURE.md) defines the boundaries and target data flow.
 
-Voter is on krm-stream **0.4.0**; the released primitives are integrated and
-deployed. Cluster facts were last verified **2026-09-15**, with three GitTargets
-(`demo1` 4/4 streams, `demo2` 2/2, `gitops-reverser-config` 5/5), voter on
-`sha-d9f3d93` and room-pass on `sha-359c09b`.
+Voter **2.0.0** runs behind krm-foyer 0.3.0 on `demo.koudijs.dev` since 2026-10-06:
+krm-foyer owns login, the session, `/k8s` and live streams, and the browser uses
+krm-stream **0.10.0** against krm-foyer's `/stream/v1`. Room Pass runs 2.2.0. Cluster
+facts were last verified **2026-10-06**, after the cutover
+([docs/krm-foyer-migration.md](docs/krm-foyer-migration.md)).
 
 **This file keeps only actionable work.** A section is deleted when its last item
 closes, and completed increments live in Git history rather than here -- which is
 why the numbering starts at 2. What was removed: the shared-streams, first
-implementation and earlier voting increments, the verified-release notes, and
-item 1, adopting the released integration primitives.
+implementation and earlier voting increments, the verified-release notes, item 1,
+adopting the released integration primitives, and item 2a, Voter's own shared
+streams, which 2.0.0 replaced with krm-foyer's.
 
 ## Outcome
 
@@ -22,14 +24,14 @@ its configuration while other browsers update live. Kubernetes sees the person's
 identity for writes; the UI distinguishes a Kubernetes save from an observed Git commit.
 The demo targets **200 concurrent attendees**: shared streaming is a required part
 of this refactor, delivered as a separate change from the editor replacement.
-The [k8s-front adoption recommendation](docs/k8s-front-adoption.md) keeps this capacity
-work ahead of a possible CoffeeConfig pilot and separates product prototyping from
-Voter deployment decisions.
+That capacity is now krm-foyer's shared watches, rehearsed at 200 participants
+(200/200, one shared watch; migration plan step 6).
 
 Generic resource streaming, reconciliation and editor state belong in krm-stream.
 Room Pass becomes an independently released room-enrollment service integrated with
-Dex. Voter keeps coffee and voting behavior, its application session, narrow authorized endpoints
-and presentation. Reducing code means deleting duplicate responsibilities, not moving
+Dex. krm-foyer owns login, the session and the browser's door to Kubernetes. Voter keeps
+coffee pricing and orders, the tally, the QR join endpoint and presentation; the rules
+of a vote and of an edit are admission policies. Reducing code means deleting duplicate responsibilities, not moving
 an entire demo into a general-purpose package.
 
 ## 2. Replace the editor and make writes conditional
@@ -114,47 +116,6 @@ an entire demo into a general-purpose package.
 Acceptance: no custom merge remains in Voter, no unconditional CoffeeConfig save is
 accepted, and failures preserve the user's draft while clearly reporting the state.
 
-## 2a. Share streams for the 200-attendee demo
-
-Adopt the existing documented [SharedBackend pattern](https://github.com/ConfigButler/krm-stream/blob/main/docs/auth.md#two-things-that-are-easy-to-confuse).
-This is required for the demo, not deferred optimization. Keep the integration in a
-separate reviewable change; reuse library fan-out, cache, queues and cleanup.
-
-- [x] Construct one long-lived `gateway.SharedBackend` per configured cluster/backend
-      in the Voter process, wrapping a service-account `kube.Backend`. Return that same
-      instance from `Clients`; constructing it per request would defeat sharing.
-      Scope is fixed to the demo CoffeeConfig. Same-scope subscribers share one watch;
-      different scopes and separate replicas do not share it.
-- [x] Use `kube.SubjectAccessReviewAuthorizer` before any cached snapshot is disclosed.
-      It creates SubjectAccessReviews for both list and watch. Map the session
-      to Kubernetes user/groups/UID/extras from trusted SelfSubjectReview identity,
-      never browser headers or guessed OIDC username prefixes. Denial or review failure
-      refuses the subscription. Replace the current token-presence-only authorizer.
-- [ ] Promote the prepared narrow service-account grants through platform GitOps.
-      The explicit local fixture already has named CoffeeConfig reads and permission
-      to create SubjectAccessReviews; the platform manifest is prepared locally. No impersonation or CoffeeConfig write grants. Keep
-      direct REST reads, PATCH and CommitRequest creation on the participant's token.
-      Audit documentation must distinguish service-account watches from personal writes.
-- [x] Enforce each subscriber's session deadline server-side and release its subscription
-      on expiry/disconnect. One attendee leaving must not cancel other attendees' watch;
-      the last subscriber leaving must cancel it. Keep browser drafts independent.
-- [x] Set `ReauthorizationInterval = 30s` and `ReauthorizationTimeout = 5s`.
-      Checks pause only that subscriber's object delivery and fail closed on denial,
-      timeout or projection-policy change. Session expiry remains an earlier host
-      deadline; the captured principal does not refresh itself. Target termination
-      within 60s of withdrawal, verifying interval + check/sink scheduling under load.
-      Host callbacks must honor context cancellation and sinks must have bounded writes.
-      Budget roughly 13.3 SAR requests/second for 200 subscribers, plus opening/cycle
-      bursts. No custom timer or second watch loop in Voter.
-- [x] Expose subscriber count, upstream watch count, resync/overflow and access-review
-      failures with bounded metric labels. Use library queue bounds and slow-consumer
-      recovery; do not create another Voter cache or per-user event queue.
-
-Acceptance: 200 authorized same-scope subscriptions on one Voter replica have **one
-steady-state upstream watch**. Subscriber authorization, expiry and recovery remain
-independent. Access reviews still create API traffic; shared streaming reduces watches,
-not browser connections or the need to authorize each person.
-
 ## 3. Prove the integration before shipping
 
 Keep generic test matrices upstream and a focused set of Voter boundary tests here.
@@ -163,14 +124,12 @@ Extend the existing disposable browser fixture rather than introducing another s
 - [ ] Library: scalar convergence/conflict; clean remote array append/delete; local
       array edits with unchanged server; reorder; deletion/type change; missing/duplicate
       list keys; snapshot gap; deletion/recreation; save/echo ordering.
-- [ ] Backend with a real disposable API server: missing/stale resourceVersion,
-      conflicting concurrent PATCH, scope denial, participant credentials, projection
-      and allowed fields. Assert a real 409; fake clients alone cannot prove it.
-      Open a stream with a short valid session, keep upstream events flowing through
-      expiry, and assert that the server closes that subscriber at the deadline and
-      denies reconnection. Other authorized subscribers must continue; the upstream
-      watch stops only after the last subscriber leaves. Also prove bounded grant
-      withdrawal and fail-closed access-review errors against an already-warm cache.
+- [x] ~~Backend with a real disposable API server~~ Moved, not dropped, by 2.0.0:
+      saves are the browser's own merge patches through krm-foyer, and the real 409
+      is asserted against the fixture's API server (`live-stream.spec.js`, "a real
+      Kubernetes 409"); allowed fields are `voter-editable-spec`'s, tested by
+      `boundaries.spec.js`. Stream expiry and warm-cache withdrawal are krm-foyer's,
+      and `live-stream.spec.js` still proves withdrawal against a warm shared watch.
 - [ ] Browser: a 409 without conflicting fields shows refreshed/review state; a
       refused GET overlapping a snapshot blocks writes until recovery; keep-local
       resolution preserves the reviewed choice; deletion offers the recovery copy
@@ -178,10 +137,16 @@ Extend the existing disposable browser fixture rather than introducing another s
       the server reorders products; lose a stream while typing; reconnect and resnapshot;
       session expiry/re-login; resource deletion; save rejection without losing the form.
       Delay a watch event deliberately to prove the save race is closed.
-- [ ] Retain the existing browser cases (12 before sharing; 13 with RBAC withdrawal), and fail relevant tests on unexpected
-      page errors. Include observable voucher refresh and protected-field patch tests,
+- [x] Browser suite on krm-foyer: 13 tests in five files pass (2026-10-06), failing on unexpected
+      page errors. Still to add from the line below: Include observable voucher refresh and protected-field patch tests,
       since caught failures need not surface as browser exceptions. Confirm current CI.
-- [ ] Run a 200-session SSE load rehearsal through the real gateway/ingress and
+- [x] **Done through krm-foyer (2026-10-06):** 200 participants each signed in, held
+      the CoffeeConfig stream and voted, through Traefik, krm-foyer and the API server
+      on the fixture; 200/200, 197 streams on one shared watch, p95 login 43 ms, stream
+      snapshot 4 ms, ballot 5 ms (`task voter:voteload`). Not yet measured from the list
+      below: CPU/memory under limits, reconnect bursts, slow clients, a real
+      browser's rendering at that load. The original item: run a 200-session SSE load
+      rehearsal through the real gateway/ingress and
       Kubernetes API with independently authenticated identities. Count actual upstream
       watches: one at steady state for the configured scope on one replica. Verify all
       viewers converge after updates; exercise reconnect bursts, slow clients and final
@@ -281,11 +246,10 @@ an unrelated OIDC application through Dex, and upgrade without changing identiti
       Actor attribution is verified end to end in both directions: a participant's
       vote and an operator's RoleBinding both commit with the human as **Author**
       and the bot as **Committer**.
-- [ ] Observe the commit, rather than only requesting it. The receipt still names
-      request acceptance `commitRequested`; there is no state that means the commit
-      landed, and no commit reference is shown back to the user. Kubernetes save,
-      CommitRequest acceptance and observed Git commit are three states and the UI
-      currently distinguishes two.
+- [x] Observe the commit, rather than only requesting it: the editors follow the
+      CommitRequest they created over the stream (`frontend/src/api/commitStatus.ts`)
+      and show the commit's sha, linked through `AUDIT_TRAIL_COMMIT_URL_TEMPLATE`, once
+      ConfigButler reports it Ready.
 - [ ] Use ConfigButler's public APIs for durable change history and commit observation;
       a krm-stream watch is current state, not an audit/history database. General
       commit-controller behavior belongs in that project, not Voter.
@@ -426,10 +390,9 @@ The audience numbers are in
 ## 5c. Move login, sessions and streams to krm-foyer
 
 The step-by-step plan, its three decisions and the cutover are in
-[docs/krm-foyer-migration.md](docs/krm-foyer-migration.md). It supersedes "Voter keeps
-… its application session" in the outcome above: after it, Voter keeps its domain
-handlers behind krm-foyer's identity check, the quiz reconciler, the QR join endpoint
-and its files.
+[docs/krm-foyer-migration.md](docs/krm-foyer-migration.md). **Done and live since
+2026-10-06.** Voter keeps its domain handlers behind krm-foyer's identity check, the
+quiz reconciler, the QR join endpoint and its files.
 
 - [x] Decided 2026-10-06: votes through `/k8s` with admission and the reconciler; the
       operator keeps cluster-admin in the browser for now; krm-foyer reuses the `voter`
@@ -437,9 +400,12 @@ and its files.
 - [x] Step 0: krm-foyer 0.3.0 has `/auth/check` (2026-10-06).
 - [x] Step 1, apart from the Vite loop: krm-foyer beside Voter in the fixture, on one
       shared host with Room Pass (#24).
-- [x] Step 2: the frontend on krm-foyer's contract, and Voter's own stream gateway
-      removed (draft PR #27, not merged).
-- [ ] Steps 3–7, and the items under "Found along the way" in the migration plan.
+- [x] Steps 2–6: the frontend on krm-foyer's contract, writes through `/k8s`, votes
+      held by admission, the domain backend behind the identity check, the browser
+      suite and a 200-participant rehearsal (PR #27, released as 2.0.0).
+- [x] Step 7: the cutover, ConfigButler/k8s `2ebda2e`, 2026-10-06. Live.
+- [ ] What is left over is listed at the end of the migration plan: three production
+      checks that need a person, the Vite loop, the admission policies' envtest suite.
 
 ## 6. Retained platform work
 

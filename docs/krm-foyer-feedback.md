@@ -9,10 +9,12 @@ includes entries where we concluded it should not.
 
 Against **krm-foyer 0.2.0** (`cfd290d`) and Voter at `51dbb1f`, 2026-10-05.
 
-> **2026-10-06: all four entries are answered on krm-foyer's `main` (`fae70b6`), not yet
-> released.** krm-foyer keeps this page, with its answers, as
+> **Finished, and kept as history.** All four entries were answered in krm-foyer
+> **0.3.0** (2026-10-06), and Voter 2.0.0 runs on it on `demo.koudijs.dev` since the same
+> day ([krm-foyer-migration.md](krm-foyer-migration.md)). krm-foyer keeps this page, with
+> its answers, as
 > [implementer-feedback.md](https://github.com/ConfigButler/krm-foyer/blob/main/docs/implementer-feedback.md).
-> What Voter does next is in [krm-foyer-migration.md](krm-foyer-migration.md).
+> New feedback from running it is under "Open points" at the end of the migration plan.
 
 [k8s-front-adoption.md](k8s-front-adoption.md) is the older recommendation. It still
 holds for the domain questions it raises; this page is about the transport.
@@ -207,8 +209,8 @@ So these can be ranked lower against Voter's use:
 
 ## What stays Voter's work
 
-None of these is an ask. They are listed so nobody expects them from krm-foyer. The
-first three are done (step 2 of [the migration](krm-foyer-migration.md), 2026-10-06):
+None of these is an ask. They are listed so nobody expects them from krm-foyer. All of
+them are done ([the migration](krm-foyer-migration.md), 2026-10-06):
 
 - **Done.** Move the browser client from krm-stream 0.4.0 to 0.7.0, and
   `/public/stream` to `/stream/v1`. It went to 0.10.0, which krm-foyer 0.3.0's gateway
@@ -220,18 +222,18 @@ first three are done (step 2 of [the migration](krm-foyer-migration.md), 2026-10
   served by Voter: `namespace`, `coffeeConfigName`, `roomName`, `commitURLTemplate`,
   and `participantConnector`, so `canVote` is computed in the browser, for display
   only, without a second copy of the rule.
-- **Review grants before exposing `/k8s`.** Participants hold `create` and `list` on
+- **Done (`voter-ballot`; participants keep only `get` and `create`).** **Review grants before exposing `/k8s`.** Participants hold `create` and `list` on
   `quizsubmissions`. Today only the vote handler uses `create`, and only the aggregate
   results come back. Through `/k8s` a participant could create a submission without
   the handler's rules, and list everyone's answers with the submitter's name in a
   label. Those grants need narrowing, or admission, before the switch. Results already
   live in `QuizSession.status` ([live-results-design.md](live-results-design.md)), so
   `list` is no longer needed for them.
-- **Keep a CoffeeConfig save to spec only.** The handler refuses anything outside
+- **Done (`voter-editable-spec`).** **Keep a CoffeeConfig save to spec only.** The handler refuses anything outside
   `spec`. Through `/k8s`, the editor's `patch` grant would also allow labels and
   annotations, which gitops-reverser would commit. That needs a
   ValidatingAdmissionPolicy.
-- **Keep a CoffeeConfig save together with its CommitRequest.** Today that is two
+- **Done (`api/kube.ts`, `requestCommit`).** **Keep a CoffeeConfig save together with its CommitRequest.** Today that is two
   writes on the server with partial success reported. It becomes two writes from the
   browser, with the same partial-success handling.
 - **Not needed.** ~~Give krm-foyer a client and audience in Dex on Voter's host.~~
