@@ -16,7 +16,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppShell from '../components/layout/AppShell.vue'
 import { useLiveResources } from '../api/liveResources'
-import { currentSession } from '../api/session'
+import { appConfig } from '../api/appConfig'
 import {
   getRoundResults,
   resultsFromRest,
@@ -37,7 +37,7 @@ const live = useLiveResources({
   group: 'examples.configbutler.ai',
   version: 'v1alpha1',
   resource: 'quizsessions',
-  namespace: currentSession()?.namespace ?? '',
+  namespace: appConfig().namespace,
 })
 
 const streamedRound = computed<QuizSession | undefined>(() => {

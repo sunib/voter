@@ -39,6 +39,42 @@ func TestBuildInfoEndpoint(t *testing.T) {
 	}
 }
 
+// The settings the frontend needs before anyone signs in, from the
+// environment, to anyone: no session is asked for.
+func TestConfigEndpoint(t *testing.T) {
+	mux := http.NewServeMux()
+	registerHandlers(mux, handlerDeps{defaultNS: "voter", cfg: config{
+		CoffeeConfigName:            "demo-coffee",
+		RoomName:                    "demo",
+		AuditTrailCommitURLTemplate: "https://example.test/commit/{sha}",
+	}})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/config.json", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", rec.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("not JSON: %v", err)
+	}
+	want := map[string]string{
+		"namespace":         "voter",
+		"coffeeConfigName":  "demo-coffee",
+		"roomName":          "demo",
+		"commitURLTemplate": "https://example.test/commit/{sha}",
+	}
+	for k, v := range want {
+		if body[k] != v {
+			t.Errorf("%s = %q, want %q", k, body[k], v)
+		}
+	}
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/config.json", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST got %d, want 405", rec.Code)
+	}
+}
+
 // The legacy authentication model is gone and must not come back by accident.
 // These endpoints let a browser assert its own identity, or handed Traefik an
 // impersonation decision derived from a cookie this service issued itself. A

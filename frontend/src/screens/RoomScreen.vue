@@ -26,17 +26,18 @@ import { useAuthorization } from '../api/useAuthorization'
 import PermissionRequirements from '../components/PermissionRequirements.vue'
 import { setRoundState } from '../api/quiz'
 import { currentSession } from '../api/session'
+import { appConfig } from '../api/appConfig'
 import type { KRMObject } from '@configbutler/krm-stream'
 
 const session = currentSession()
-const namespace = session?.namespace ?? ''
+const namespace = appConfig().namespace
 
 const roomScope = {
   group: 'room-pass.koudijs.dev',
   version: 'v1alpha1',
   resource: 'rooms',
   namespace,
-  name: session?.roomName ?? 'demo',
+  name: appConfig().roomName,
 }
 const room = useLiveResources(roomScope)
 

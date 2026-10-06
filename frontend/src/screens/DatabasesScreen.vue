@@ -21,9 +21,9 @@ import {
   type Database,
 } from '../api/databaseTypes'
 import { useLiveResources } from '../api/liveResources'
-import { currentSession } from '../api/session'
+import { appConfig } from '../api/appConfig'
 
-const session = currentSession()!
+const config = appConfig()
 const { authz, error: authzError, loading: authzLoading } = useAuthorization()
 
 const read = ref<Database[]>([])
@@ -34,7 +34,7 @@ const live = useLiveResources({
   group: 'platform.configbutler.ai',
   version: 'v1alpha1',
   resource: 'databases',
-  namespace: session.namespace,
+  namespace: config.namespace,
 })
 
 const databases = computed<Database[]>(() => {

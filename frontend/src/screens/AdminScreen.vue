@@ -5,7 +5,7 @@ import { leafChanges } from '../api/fieldChanges'
 import { formatConflictValue, humanizePath } from '../adminFormatters'
 import { formatMoney, getVoucherUsage } from '../api/coffee'
 import { useLiveCoffeeConfig } from '../api/liveCoffeeConfig'
-import { currentSession } from '../api/session'
+import { appConfig } from '../api/appConfig'
 import { commitURL, shortSha, useCommitStatus } from '../api/commitStatus'
 import { ADMIN_REQUIREMENTS } from '../api/authz'
 import { useAuthorization } from '../api/useAuthorization'
@@ -16,7 +16,7 @@ import FieldStateMarker from '../components/admin/FieldStateMarker.vue'
 
 type FieldState = 'clean' | 'dirty' | 'conflict'
 type FieldConflict = { previousServer?: unknown; incomingServer: unknown }
-const session = currentSession()!
+const config = appConfig()
 
 // Polled, so the operator granting the room access mid-demo turns this page
 // from read-only to editable without a reload. What it is compared against is
@@ -24,8 +24,8 @@ const session = currentSession()!
 const { authz, error: authzError, loading: authzLoading } = useAuthorization()
 
 const live = useLiveCoffeeConfig(
-  session.namespace,
-  session.coffeeConfigName,
+  config.namespace,
+  config.coffeeConfigName,
   true,
 )
 const {
@@ -45,14 +45,14 @@ const {
 // Follows the receipt the save just handed back until ConfigButler reports the
 // commit pushed, so the line under the form is the state of Git rather than the
 // state of Git at the instant of the save.
-const commit = useCommitStatus(session.namespace)
+const commit = useCommitStatus(config.namespace)
 const { state: commitState, sha: commitSha, detail: commitDetail } = commit
 const failedCommitCopy =
   'Your change is saved in Kubernetes. ConfigButler stopped trying to commit it.'
 // Empty unless the deployment names where its audit trail can be read, in which
 // case the sha stays plain text rather than becoming a link to nowhere.
 const commitLink = computed(() =>
-  commitURL(session.commitURLTemplate, commitSha.value),
+  commitURL(config.commitURLTemplate, commitSha.value),
 )
 watch(commitRequest, (name) => {
   if (name) commit.follow(name)

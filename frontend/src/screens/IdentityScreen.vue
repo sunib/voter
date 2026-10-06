@@ -74,9 +74,6 @@ const technicalFacts = computed(() => {
     },
     { label: 'csrfToken', value: abbreviate(s.csrfToken) },
     { label: 'expiresAt', value: formatExpiry(s.expiresAt) },
-    { label: 'namespace', value: s.namespace },
-    { label: 'coffeeConfigName', value: s.coffeeConfigName },
-    { label: 'roomName', value: s.roomName },
   ]
 })
 
