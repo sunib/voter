@@ -93,7 +93,6 @@ func main() {
 	registerJoinRoomHandler(mux)
 	registerParticipantStorefrontHandlers(mux, deps)
 	registerParticipantOrderFeedHandlers(mux, deps)
-	registerParticipantQuizHandlers(mux, deps)
 	registerParticipantAuthzHandlers(mux, deps)
 	// Last: it owns "/" and therefore everything unclaimed above.
 	registerHandlers(mux, deps)

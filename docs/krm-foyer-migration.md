@@ -301,11 +301,26 @@ see [quiz-admission.md](quiz-admission.md).
 
 - [x] CRD fields, digest and pins: [quiz-admission.md](quiz-admission.md) phase 1
       (#21, released as 1.3.0 and on the cluster).
-- [ ] The ValidatingAdmissionPolicy described under decision 1:
-      [quiz-admission.md](quiz-admission.md) phase 2, with its tests.
-- [ ] The browser creates the submission at `/k8s/.../quizsubmissions`. "Already voted"
-      is a `GET` of its own deterministic name, or the 409 on create.
-- [ ] Delete the vote, round and results handlers from `participant_quiz.go`.
+- [x] The ValidatingAdmissionPolicy described under decision 1:
+      [quiz-admission.md](quiz-admission.md) phase 2, checked by impersonation on the
+      fixture. Its envtest suite is still open there.
+- [x] The browser creates the ballot at `/k8s/.../quizsubmissions` (`api/ballot.ts`,
+      `api/quiz.ts`): checked answers (`validateAnswers`, a port of
+      `validateQuizAnswers` with the same cases), the name and labels admission
+      expects, both pins, from the round it read. "Already voted" is a `GET` of its own
+      name, and a second create's 409 reads as AlreadyVoted.
+- [x] Rounds are read through `/k8s` too, and results come from the round's status
+      alone: the REST results endpoint is gone. Right after a vote the count lags by
+      about a second (measured: 0 at 77 ms, 1 at 1.1 s), so the results page says
+      "Counting your vote…" rather than "0 votes recorded".
+- [x] Deleted the round list, vote and results handlers. What the reconciler needs
+      (types, `validateQuizAnswers`, `decodeQuizSpec`) is `quiz_rules.go`.
+- [x] Checked in Chromium on the fixture: an empty submit says "answer required"; a
+      vote lands with labels and pins; a second visit knows it voted. A late voter
+      never reaches admission: the page disables Submit as soon as the stream says
+      the round closed.
+- [ ] `voting.spec.js` asserts "1 votes recorded" straight after a vote; with the
+      count from status it has to wait for it (step 6).
 
 ### 5. The domain backend behind the identity check
 
@@ -440,7 +455,15 @@ Things the work so far turned up that are not one of the steps above.
       - `docs/shared-streams.md`: Voter's gateway is gone, and shared watches are
         krm-foyer's (`sharedWatches`); keep it as history;
       - `PLAN.md` 2a and 3: the 200-session rehearsal runs through krm-foyer;
-      - `test/browser/README.md`: metrics through the pod proxy.
+      - `test/browser/README.md`: metrics through the pod proxy;
+      - `docs/talk-checklist.md`: "this cluster runs no policy or webhook", and the
+        ballot policy described as not built; it is built, and so is
+        `voter-editable-spec`;
+      - `docs/deliberate-simplifications.md` entry 4: an operator's vote is refused
+        by admission now, not by the application, unless it is declared;
+      - `docs/voting-demo.md`: voting through Voter's endpoints;
+      - `ARCHITECTURE.md`'s ownership table says the cluster runs no admission
+        policy.
 - [x] **The fixture had never exercised the QR handoff.** Room Pass's join page was
       on `join.voter.test`, so Voter's host-only join cookie never reached it there.
       It shares `app.voter.test` now (step 1), and the step 2 browser check followed

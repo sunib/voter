@@ -1,6 +1,8 @@
 # Plan: ballot rules in admission, ahead of krm-foyer
 
-Status: **phase 1 merged (#21, `be6a268`, 2026-10-06), phase 2 not started.** Preparation for step 4 of
+Status: **phase 1 merged (#21, `be6a268`, 2026-10-06) and on the cluster in 1.3.0;
+phase 2 built on the krm-foyer branch (step 4 of the migration), not yet on the
+cluster.** Preparation for step 4 of
 [krm-foyer-migration.md](krm-foyer-migration.md) that does not wait for krm-foyer's
 release. Every phase below ships on Voter 1.x and is useful on its own.
 
@@ -109,17 +111,33 @@ the cluster before a Voter that fills the new fields**, or every vote is refused
 
 ### 2. The policy, identity and round rules (`feat:`)
 
-- [ ] `voter/config/admission/quizsubmission-policy.yaml`: the policy and binding,
-      next to the CRDs. `failurePolicy: Fail`, `validationActions: [Deny]`.
-- [ ] `test/e2e/up.sh` applies it after the CRDs. The cluster copy goes to
-      `external/k8s` `voter-demo/`, pulled first, after phase 1 is deployed.
+- [x] `voter/config/admission/quizsubmission-policy.yaml`: the policy and binding.
+      `failurePolicy: Fail`, `validationActions: [Deny]`. It matches people only
+      (`!startsWith('system:')`), like `voter-editable-spec`. `reason` can only be
+      `Forbidden`, `Invalid` or `RequestEntityTooLarge`, so every refusal is a 403;
+      the message is what tells them apart.
+- [x] `test/e2e/up.sh` applies it after the CRDs.
+- [ ] The cluster copy goes to `external/k8s` `voter-demo/` (migration step 7.2).
 - [ ] Before `Deny`, run it once on the cluster with `validationActions: [Audit]`
       and read the audit log during a test round.
-- [ ] The operator's declared path: `voter.configbutler.ai/cast-by: operator` on
-      `voter/config/demo1-b.yaml` and the runbook's interlude snippet, in the same
-      PR as the policy.
-- [ ] The handler maps a policy refusal (403 `Forbidden`, reason in the message) to
-      the message shown on the phone.
+- [x] The operator's declared path: `voter.configbutler.ai/cast-by: operator` on
+      `voter/config/demo1-b.yaml` and the runbook's interlude snippet.
+- [x] There is no handler any more: the browser creates the ballot, and
+      `admissionReason` (`frontend/src/api/http.ts`) keeps only the policy's own
+      sentence of the API server's 403 for the phone.
+- [x] Checked on the fixture by impersonation, 2026-10-06. Accepted: a participant's
+      pinned first ballot; a declared operator ballot without pins on a live round;
+      `system:admin`. Refused, each with its own message: the same ballot again (409
+      AlreadyExists), someone else's name, a wrong submitter label, no pins, a stale
+      UID, a stale digest, no display-name extra, an undeclared operator, a
+      participant after close, a declared operator after close.
+- [ ] The envtest suite below, so CI holds these cases.
+
+**A known gap.** The binding selects every round, and the API server evaluates the
+policy once per round, so each round rule reads "not this ballot's round, or valid for
+it". A ballot naming a round that **does not exist** passes them all. Nothing counts it:
+the tally only counts ballots for rounds it is tallying. With no rounds at all,
+`parameterNotFoundAction: Deny` refuses every ballot.
 
 ### 3. Answers in CEL (optional)
 

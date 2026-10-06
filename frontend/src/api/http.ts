@@ -37,12 +37,26 @@ export function createApiError(status: number, body: unknown): ApiError {
         : typeof details?.error === 'string'
           ? details.error
           : `Request failed (${status})`
-  const err = new Error(message) as ApiError
+  const err = new Error(admissionReason(message)) as ApiError
   err.status = status
   if (typeof details?.code === 'string') err.code = details.code
   else if (typeof details?.reason === 'string') err.code = details.reason
   err.body = body
   return err
+}
+
+/** A refusal by one of Voter's admission policies, as the person should read
+ *  it. The API server wraps the policy's message in its own: 'quizsubmissions
+ *  ... is forbidden: ValidatingAdmissionPolicy 'voter-ballot' with binding
+ *  'voter-ballot' denied request: This round is not open for voting.' Only the
+ *  part after "denied request: " is written for a person; everything else
+ *  passes through unchanged. */
+export function admissionReason(message: string): string {
+  const marker = 'denied request: '
+  const at = message.indexOf(marker)
+  return at === -1 || !message.includes('ValidatingAdmissionPolicy')
+    ? message
+    : message.slice(at + marker.length)
 }
 
 async function readJsonOrText(res: Response): Promise<unknown> {

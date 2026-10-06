@@ -4,8 +4,7 @@ export type KubeObjectMeta = {
   namespace?: string
   uid?: string
   resourceVersion?: string
-  /** Moves when the spec moves, and not when a controller writes status. What a
-   *  ballot pins -- see createQuizSubmission in api/quiz.ts. */
+  /** Moves when the spec moves, and not when a controller writes status. */
   generation?: number
   creationTimestamp?: string
   labels?: Record<string, string>
@@ -43,6 +42,12 @@ export type QuizSessionSpec = {
 export type QuizSessionStatus = {
   /** The metadata.generation this tally was computed against. */
   observedGeneration?: number
+  /** The digest of spec.questions, which a ballot copies to say which
+   *  questions it answered. Written by Voter's reconciler. */
+  questionsDigest?: string
+  /** When Voter observed the round open and close. For reading only. */
+  openedAt?: string
+  closedAt?: string
   lastTallyTime?: string
   /** Ballots carrying this round's name, against how many passed validation. */
   filed?: number
@@ -76,6 +81,10 @@ export type QuizSubmissionSpec = {
     kind?: 'QuizSession'
     name: string
   }
+  /** The round's metadata.uid and status.questionsDigest when the ballot was
+   *  cast. Admission requires both on a participant's ballot. */
+  roundUID?: string
+  questionsDigest?: string
   submittedAt: string
   answers: Array<
     | { questionId: string; singleChoice: string }

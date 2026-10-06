@@ -1,81 +1,98 @@
-import type { QuizSession, QuizSessionSpec, QuizSubmission } from './types'
-import { requestJson } from './http'
-import { QUIZSESSIONS, mergePatch } from './kube'
+import type { QuizSession, QuizSessionSpec } from './types'
+import { ballotName, buildBallot, validateAnswers, type Answer } from './ballot'
+import { createApiError, type ApiError } from './http'
+import {
+  QUIZSESSIONS,
+  QUIZSUBMISSIONS,
+  createObject,
+  getObject,
+  listObjects,
+  mergePatch,
+} from './kube'
+import { currentSession } from './session'
 
-const request = <T>(path: string, body?: unknown) =>
-  requestJson<T>(
-    `/public/rounds${path}`,
-    body === undefined
-      ? undefined
-      : { method: 'POST', body: JSON.stringify(body) },
-  )
-export const listRounds = () => request<{ items: QuizSession[] }>('')
+/** Every round in the namespace, read through /k8s as this person. */
+export const listRounds = async () => ({
+  items: await listObjects<QuizSession>(QUIZSESSIONS),
+})
+
 export interface RoundView {
   round: QuizSession
-  /** This participant already has a QuizSubmission for this round UID. */
+  /** This participant already has a ballot for this round. */
   voted: boolean
 }
-export const getQuizSession = (name: string) =>
-  request<RoundView>(`/${encodeURIComponent(name)}`)
-/** The backend sets DisallowUnknownFields, so this body and the handler's struct
- *  have to change together: sending a `resourceVersion` it no longer reads is a
- *  flat 400.
+
+/** The round, and whether this participant has voted in it: a GET of the one
+ *  name their ballot would have. Only an early warning -- the create is what
+ *  decides, with a 409 -- so a failed lookup reads as "not yet". */
+export async function getQuizSession(name: string): Promise<RoundView> {
+  const round = await getObject<QuizSession>(QUIZSESSIONS, name)
+  const displayName = currentSession()?.displayName ?? ''
+  let voted = false
+  if (displayName !== '') {
+    voted = await getObject(QUIZSUBMISSIONS, ballotName(name, displayName)).then(
+      () => true,
+      () => false,
+    )
+  }
+  return { round, voted }
+}
+
+/** Casts this participant's ballot: a QuizSubmission they create themselves,
+ *  through /k8s, so the API server's audit event -- and the Git commit that
+ *  follows it -- names them.
  *
- *  `generation` and not `resourceVersion`, because the round's status carries the
- *  live tally and a controller rewrites it on every ballot -- which moves
- *  resourceVersion and not generation. Pinning the wrong one cost a large part of
- *  the room its vote on 2026-09-17; docs/post-demo-2026-09-17.md. `uid` comes
- *  along because generation restarts at 1 on a round recreated under the same
- *  name. */
-export const createQuizSubmission = (
+ *  The answers are checked here first, for an immediate "answer required".
+ *  Everything else is admission's to refuse (a closed round, changed questions,
+ *  someone else's name), with its own message. A second ballot is the API
+ *  server's 409 AlreadyExists, reported as AlreadyVoted. */
+export async function createQuizSubmission(
   round: QuizSession,
-  answers: QuizSubmission['spec']['answers'],
-) =>
-  request<{ name: string }>(`/${encodeURIComponent(round.metadata.name!)}`, {
-    uid: round.metadata.uid,
-    generation: round.metadata.generation,
-    answers,
-  })
-export interface RoundResults {
-  round: QuizSession
-  /** Ballots that passed validation -- the same number as status.counted. */
-  total: number
-  /** Ballots carrying the round's name, counted or not. */
-  filed?: number
-  questions: {
-    question: NonNullable<QuizSessionSpec['questions']>[number]
-    count: number
-    choices: Record<string, number>
-    sum: number
-    text: string[]
-  }[]
+  answers: Answer[],
+): Promise<{ name: string }> {
+  const problem = validateAnswers(round.spec.questions ?? [], answers)
+  if (problem !== '') throw createApiError(400, { error: problem })
+  if (!round.status?.questionsDigest) {
+    // The reconciler publishes the digest within a moment of a round opening.
+    throw createApiError(409, {
+      error: 'This round is still being prepared. Try again in a moment.',
+    })
+  }
+  const ballot = buildBallot(round, currentSession()?.displayName ?? '', answers)
+  try {
+    await createObject(QUIZSUBMISSIONS, ballot)
+  } catch (cause) {
+    const error = cause as ApiError
+    if (error.status === 409 && error.code === 'AlreadyExists') {
+      error.code = 'AlreadyVoted'
+      error.message = 'You have already voted in this round.'
+    }
+    throw error
+  }
+  return { name: ballot.metadata.name ?? '' }
 }
 
 type Question = NonNullable<QuizSessionSpec['questions']>[number]
 
-/** One shape for the results screen, whichever of the two paths fed it.
- *
- *  The round's own status is the live one and arrives on the `quizsessions`
- *  stream the screen opens anyway; the REST endpoint is the first paint and the
- *  fallback. Both mean the same thing, so the screen should not have to know
- *  which it got -- except for `asOf`, which it must show, because a controller
- *  that has stopped looks exactly like a room that has stopped voting. */
+/** The results screen's shape, from the tally Voter's reconciler writes into
+ *  the round's status. It arrives on the `quizsessions` stream the screen opens
+ *  anyway. `asOf` must be shown, because a controller that has stopped looks
+ *  exactly like a room that has stopped voting. */
 export interface ShownResult {
   question: Question
   count: number
   choices: Record<string, number>
   sum: number
   text: string[]
-  /** How many free-text answers were written. Larger than `text.length` when
-   *  the tally came from status, which keeps a bounded sample. */
+  /** How many free-text answers were written. Larger than `text.length`,
+   *  because status keeps a bounded sample. */
   textTotal: number
 }
 export interface ShownResults {
   total: number
   filed: number
   questions: ShownResult[]
-  /** When this tally was computed, or undefined for a REST read -- which is
-   *  computed on demand and is therefore always now. */
+  /** When this tally was computed. */
   asOf?: string
 }
 
@@ -83,7 +100,7 @@ export interface ShownResults {
  *
  *  Undefined is not an error: a round created a moment ago, or one served by a
  *  deployment whose controller is not running, simply has no status, and the
- *  caller falls back to REST rather than rendering zeroes over real votes. */
+ *  screen says it is waiting rather than rendering zeroes over real votes. */
 export function resultsFromStatus(
   round: QuizSession | undefined,
 ): ShownResults | undefined {
@@ -113,24 +130,8 @@ export function resultsFromStatus(
   }
 }
 
-export function resultsFromRest(
-  results: RoundResults | undefined,
-): ShownResults | undefined {
-  if (!results) return undefined
-  return {
-    total: results.total,
-    filed: results.filed ?? results.total,
-    questions: results.questions.map((r) => ({
-      ...r,
-      textTotal: r.text.length,
-    })),
-  }
-}
 /** Open or close a round: a merge patch of spec.state through /k8s. There is no
  *  client-side permission check on purpose: the patch carries the caller's own
  *  token, so a participant gets the API server's own 403 and the page shows it. */
 export const setRoundState = (name: string, state: 'live' | 'closed') =>
   mergePatch<QuizSession>(QUIZSESSIONS, name, { spec: { state } })
-
-export const getRoundResults = (name: string) =>
-  request<RoundResults>(`/${encodeURIComponent(name)}/results`)

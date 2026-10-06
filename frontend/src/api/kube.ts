@@ -31,6 +31,11 @@ export const QUIZSESSIONS: ResourceRef = {
   version: 'v1alpha1',
   resource: 'quizsessions',
 }
+export const QUIZSUBMISSIONS: ResourceRef = {
+  group: 'examples.configbutler.ai',
+  version: 'v1alpha1',
+  resource: 'quizsubmissions',
+}
 export const DATABASES: ResourceRef = {
   group: 'platform.configbutler.ai',
   version: 'v1alpha1',
