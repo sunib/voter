@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.1.1](https://github.com/sunib/voter/compare/v2.1.0...v2.1.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* merge concurrent price edits per product, not per menu ([0251445](https://github.com/sunib/voter/commit/0251445cfec35391a6b7a6b21969bcccc160632b))
+
+
+### Documentation
+
+* the production plan as it was built ([77b9990](https://github.com/sunib/voter/commit/77b9990ae9d5602605e53184ea6f1ec1f0c848f5))
+
 ## [2.1.0](https://github.com/sunib/voter/compare/v2.0.1...v2.1.0) (2026-10-06)
 
 
