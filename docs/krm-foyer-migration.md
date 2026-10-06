@@ -1,25 +1,29 @@
 # Plan: move Voter's login, sessions and streams to krm-foyer
 
-Status: **plan, decisions taken, not started (2026-10-06).** Nothing here is implemented
-or deployed. Work starts once krm-foyer releases `/auth/check` (step 0).
+Status: **in progress (2026-10-06).** Step 0 is done: krm-foyer 0.3.0 ships
+`/auth/check`. Nothing of steps 1 to 7 is deployed yet; the cluster still runs
+Voter 1.x with its own login, and krm-foyer only as the hello example on
+`foyer.k8s.koudijs.dev`.
 It replaces the "not yet" in [k8s-front-adoption.md](k8s-front-adoption.md). The asks in
 [krm-foyer-feedback.md](krm-foyer-feedback.md) are all answered on krm-foyer's `main`.
 
 ## Is krm-foyer complete enough?
 
-**Yes, once the release after 0.2.0 is cut.** Everything Voter asked for is on `main` at
-`fae70b6`, but not yet in a tagged release. 0.2.0 does not have `/auth/check`.
+**Yes, from 0.3.0.** Everything Voter asked for is in
+[0.3.0](https://github.com/ConfigButler/krm-foyer/releases/tag/v0.3.0) (2026-10-06),
+which contains `fae70b6`. 0.2.0, which the cluster runs for the hello example, does not
+have `/auth/check`.
 
-| Voter needed | On krm-foyer `main` | Evidence |
+| Voter needed | Since | Evidence |
 | --- | --- | --- |
 | OIDC login, sealed cookie sessions that survive a restart | 0.2.0 | e2e against Dex |
 | `connector_id` chosen by the login link, `connector` in the session | 0.2.0 | e2e |
 | `/k8s` as the user, `/stream/v1` with shared watches and SubjectAccessReview rechecks | 0.2.0 | e2e, 200-identity rehearsal |
-| Identity for a domain backend (`/auth/check?identity=true`, `Krm-Foyer-Identity`) | `fae70b6` | e2e through real Traefik, forged header refused |
-| The Room Pass QR login, end to end | `fae70b6` | Chromium spec against Room Pass 2.0.0 and its Dex ([room-pass.md](https://github.com/ConfigButler/krm-foyer/blob/main/docs/room-pass.md)) |
-| A Traefik `IngressRoute` recipe for one shared host | `fae70b6` | Run by the fixture |
-| A narrow browser identity for the cluster-admin operator | `fae70b6` (docs) | e2e spec, `foyer_scope_test.go`; not used for now ([decision 2](#decision-2-cluster-admin-in-the-browser-accepted-for-now)) |
-| A Vite dev-server proxy | `fae70b6` (docs) | Written, **not run** by their suite |
+| Identity for a domain backend (`/auth/check?identity=true`, `Krm-Foyer-Identity`) | 0.3.0 | e2e through real Traefik, forged header refused |
+| The Room Pass QR login, end to end | 0.3.0 | Chromium spec against Room Pass 2.0.0 and its Dex ([room-pass.md](https://github.com/ConfigButler/krm-foyer/blob/main/docs/room-pass.md)) |
+| A Traefik `IngressRoute` recipe for one shared host | 0.3.0 | Run by the fixture |
+| A narrow browser identity for the cluster-admin operator | 0.3.0 (docs) | e2e spec, `foyer_scope_test.go`; not used for now ([decision 2](#decision-2-cluster-admin-in-the-browser-accepted-for-now)) |
+| A Vite dev-server proxy | 0.3.0 (docs) | Written, **not run** by their suite |
 
 Known limits we accept, because downtime is acceptable:
 
@@ -167,10 +171,14 @@ already moved the cluster to it (`9b54a57` in `external/k8s`). For this migratio
 Each step ends green on its own checks. Steps 1 to 6 happen in this repository and its
 e2e. Step 7 is the only cluster change.
 
-### 0. Wait for the krm-foyer release
+### 0. The krm-foyer release
 
-- [ ] A krm-foyer release containing `fae70b6` (`/auth/check`). Pin image and chart by
-      digest, as `2-gitops/krm-foyer/release.yaml` does.
+- [x] krm-foyer **0.3.0** (2026-10-06) contains `fae70b6` (`/auth/check`). Pin image and
+      chart by digest, as `2-gitops/krm-foyer/release.yaml` does:
+      - chart `oci://ghcr.io/configbutler/charts/krm-foyer:0.3.0@sha256:40f68f1ba1477e09a9813d304991518f600310b1f31e3a600634ba3a0c1ad0d2`
+      - image `ghcr.io/configbutler/krm-foyer:0.3.0@sha256:6b620d658fdc3ff2fad394d2df27142ff706e8a4d20496ef810e6d45136ff6cf`
+      It also moves krm-stream to 0.10.0, past the 0.7.0 that step 2 names; check the
+      browser client's version against the gateway it pins.
 
 ### 1. Local loop and e2e on krm-foyer
 
