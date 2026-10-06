@@ -85,7 +85,7 @@ func TestTallyRound(t *testing.T) {
 			map[string]any{roundLabel: "demo"}, answer("choice", "B")),
 	}
 
-	tally := tallyRound("demo", spec.Questions, ballots)
+	tally := tallyRound(round, spec.Questions, ballots)
 	if tally.Filed != 3 || tally.Counted != 2 {
 		t.Fatalf("filed/counted = %d/%d, want 3/2", tally.Filed, tally.Counted)
 	}
@@ -105,7 +105,7 @@ func TestTallyRound(t *testing.T) {
 	}
 
 	t.Run("deleting every ballot returns the tally to zero", func(t *testing.T) {
-		empty := tallyRound("demo", spec.Questions, nil)
+		empty := tallyRound(round, spec.Questions, nil)
 		if empty.Filed != 0 || empty.Counted != 0 || len(empty.Questions) != 3 {
 			t.Fatalf("empty tally = %+v", empty)
 		}
@@ -120,7 +120,7 @@ func TestTallyRound(t *testing.T) {
 			many = append(many, ballot(fmt.Sprintf("demo-%02d", i), "demo",
 				fmt.Sprintf("2026-09-17T14:%02d:00Z", i), nil, answer("text", fmt.Sprintf("answer %02d", i))))
 		}
-		status := tallyRound("demo", spec.Questions, many).status(round.GetGeneration(), time.Unix(0, 0))
+		status := tallyRound(round, spec.Questions, many).status(round.GetGeneration(), time.Unix(0, 0))
 		text := status.Questions[2]
 		if text.TextTotal != 40 {
 			t.Fatalf("textTotal = %d, want 40", text.TextTotal)
@@ -141,6 +141,151 @@ func TestTallyRound(t *testing.T) {
 			t.Fatalf("sample exceeds the CRD's maxItems")
 		}
 	})
+}
+
+// pinnedBallot is a ballot as the vote handler writes it: carrying the round's
+// uid and the digest of the questions it answered.
+func pinnedBallot(name, round, uid, digest string, answers ...any) *unstructured.Unstructured {
+	b := ballot(name, round, "2026-09-17T13:00:00Z", nil, answers...)
+	_ = unstructured.SetNestedField(b.Object, uid, "spec", "roundUID")
+	_ = unstructured.SetNestedField(b.Object, digest, "spec", "questionsDigest")
+	return b
+}
+
+func TestQuestionsDigest(t *testing.T) {
+	round := tallyFixtureRound("demo")
+	spec, _ := decodeQuizSpec(round)
+	digest := questionsDigest(spec.Questions)
+	if !strings.HasPrefix(digest, "sha256:") || len(digest) != len("sha256:")+64 {
+		t.Fatalf("digest = %q", digest)
+	}
+
+	// Opening and closing a round moves its generation. They must not move the
+	// digest: that is the whole reason a ballot pins this and not the generation.
+	_ = unstructured.SetNestedField(round.Object, "closed", "spec", "state")
+	closed, _ := decodeQuizSpec(round)
+	if got := questionsDigest(closed.Questions); got != digest {
+		t.Fatalf("closing the round changed the digest: %s -> %s", digest, got)
+	}
+
+	// Editing a question must.
+	questions, _, _ := unstructured.NestedSlice(round.Object, "spec", "questions")
+	questions[0].(map[string]any)["choices"] = []any{"A", "B", "C"}
+	_ = unstructured.SetNestedSlice(round.Object, questions, "spec", "questions")
+	edited, _ := decodeQuizSpec(round)
+	if questionsDigest(edited.Questions) == digest {
+		t.Fatal("editing a question's choices kept the digest")
+	}
+}
+
+func TestTallyChecksPins(t *testing.T) {
+	round := tallyFixtureRound("demo")
+	round.SetUID("round-uid")
+	spec, _ := decodeQuizSpec(round)
+	digest := questionsDigest(spec.Questions)
+
+	partial := ballot("demo-uid-only", "demo", "2026-09-17T13:00:00Z", nil, answer("choice", "A"))
+	_ = unstructured.SetNestedField(partial.Object, "round-uid", "spec", "roundUID")
+
+	ballots := []*unstructured.Unstructured{
+		pinnedBallot("demo-alice", "demo", "round-uid", digest, answer("choice", "A")),
+		// Pasted by hand, pinning nothing: the interlude. Counted as before.
+		ballot("demo-ada", "demo", "2026-09-17T13:00:00Z", nil, answer("choice", "A")),
+		// A pin that is present and right is enough on its own.
+		partial,
+		// Cast in a round deleted and recreated under the same name.
+		pinnedBallot("demo-bob", "demo", "old-round-uid", digest, answer("choice", "B")),
+		// Cast against questions that have since been edited.
+		pinnedBallot("demo-carol", "demo", "round-uid", "sha256:stale", answer("choice", "B")),
+	}
+	tally := tallyRound(round, spec.Questions, ballots)
+	if tally.Filed != 5 || tally.Counted != 3 {
+		t.Fatalf("filed/counted = %d/%d, want 5/3", tally.Filed, tally.Counted)
+	}
+	if tally.Questions[0].Choices["B"] != 0 {
+		t.Fatalf("a mis-pinned ballot was counted: %v", tally.Questions[0].Choices)
+	}
+	if tally.QuestionsDigest != digest {
+		t.Fatalf("tally digest = %q, want %q", tally.QuestionsDigest, digest)
+	}
+}
+
+func TestRoundTimes(t *testing.T) {
+	at := time.Date(2026, 10, 6, 13, 0, 0, 0, time.UTC)
+	now, earlier, earliest := "2026-10-06T13:00:00Z", "2026-10-06T12:30:00Z", "2026-10-06T12:00:00Z"
+	stored := func(status map[string]any) *unstructured.Unstructured {
+		obj := tallyFixtureRound("demo")
+		if status != nil {
+			obj.Object["status"] = status
+		}
+		return obj
+	}
+	str := func(p *string) string {
+		if p == nil {
+			return "<nil>"
+		}
+		return *p
+	}
+	for _, tc := range []struct {
+		name, state          string
+		status               map[string]any
+		wantOpened, wantShut string
+	}{
+		{"a draft is neither", "draft", nil, "<nil>", "<nil>"},
+		{"first seen live", "live", nil, now, "<nil>"},
+		{"live again keeps the first opening", "live", map[string]any{"openedAt": earliest}, earliest, "<nil>"},
+		{"closed", "closed", map[string]any{"openedAt": earliest}, earliest, now},
+		{"closed again keeps the close", "closed", map[string]any{"openedAt": earliest, "closedAt": earlier}, earliest, earlier},
+		// Reopening keeps the votes already cast, so it keeps openedAt too.
+		{"reopened", "live", map[string]any{"openedAt": earliest, "closedAt": earlier}, earliest, "<nil>"},
+		// Seen closed with no opening on record: Voter was down for all of it.
+		{"closed while Voter was down", "closed", nil, "<nil>", now},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opened, closed := roundTimes(tc.state, stored(tc.status), at)
+			if str(opened) != tc.wantOpened || str(closed) != tc.wantShut {
+				t.Fatalf("openedAt=%s closedAt=%s, want %s %s", str(opened), str(closed), tc.wantOpened, tc.wantShut)
+			}
+		})
+	}
+}
+
+// The case that ruled out pinning the generation: a ballot cast while the round
+// was live must still count after the round is closed, although closing moved
+// the generation.
+func TestAPinnedBallotStillCountsAfterTheRoundCloses(t *testing.T) {
+	round := tallyFixtureRound("demo")
+	round.SetUID("round-uid")
+	client, awaitStatus := tallyReconcilerFixture(t, round)
+	ctx := context.Background()
+
+	opened := awaitStatus("demo", func(s quizStatus) bool { return s.QuestionsDigest != "" && s.OpenedAt != nil })
+	if opened.ClosedAt != nil {
+		t.Fatalf("a live round has a closedAt: %v", *opened.ClosedAt)
+	}
+	// The ballot copies the digest from status, as the browser will.
+	if _, err := client.Resource(quizSubmissions).Namespace("voter").Create(ctx,
+		pinnedBallot("demo-alice", "demo", "round-uid", opened.QuestionsDigest, answer("choice", "A")), metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	awaitStatus("demo", func(s quizStatus) bool { return s.Counted == 1 })
+
+	current, err := client.Resource(quizSessions).Namespace("voter").Get(ctx, "demo", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = unstructured.SetNestedField(current.Object, "closed", "spec", "state")
+	current.SetGeneration(current.GetGeneration() + 1)
+	if _, err := client.Resource(quizSessions).Namespace("voter").Update(ctx, current, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	closed := awaitStatus("demo", func(s quizStatus) bool { return s.ClosedAt != nil })
+	if closed.Counted != 1 || closed.QuestionsDigest != opened.QuestionsDigest {
+		t.Fatalf("after the close: counted=%d digest %s -> %s", closed.Counted, opened.QuestionsDigest, closed.QuestionsDigest)
+	}
+	if closed.OpenedAt == nil || *closed.OpenedAt != *opened.OpenedAt {
+		t.Fatalf("closing moved openedAt: %v", closed.OpenedAt)
+	}
 }
 
 // tallyReconcilerFixture wires a reconciler to a fake API server holding

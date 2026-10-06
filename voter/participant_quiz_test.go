@@ -114,6 +114,14 @@ func TestVotingRound(t *testing.T) {
 	if got := submissions.Items[0].GetLabels(); got[roundLabel] != "demo" || got[submitterLabel] != "alice" {
 		t.Errorf("submission labels = %v, want round=demo submitter=alice", got)
 	}
+	// The pins the tally checks later, after the round has moved on.
+	roundSpec, _ := decodeQuizSpec(round)
+	if got, _, _ := unstructured.NestedString(submissions.Items[0].Object, "spec", "roundUID"); got != "round-uid" {
+		t.Errorf("spec.roundUID = %q, want the round's uid", got)
+	}
+	if got, _, _ := unstructured.NestedString(submissions.Items[0].Object, "spec", "questionsDigest"); got != questionsDigest(roundSpec.Questions) {
+		t.Errorf("spec.questionsDigest = %q, want the digest of the round's questions", got)
+	}
 	before := calls
 	if rec := request("POST", "/public/rounds/demo", "bob", valid, false); rec.Code != 403 || calls != before {
 		t.Fatal("missing CSRF reached Kubernetes")
