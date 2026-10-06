@@ -47,6 +47,20 @@ keep those names.
       kubectl -n voter delete coffeeconfig demo-coffee
       ```
 
+- [ ] **Wait 15 minutes after the last reset delete before anyone saves**, then
+      make one test save from `/admin` and check it reads `Committed`, not
+      `WindowMismatch`:
+
+      ```bash
+      kubectl -n voter get commitrequests --sort-by=.metadata.creationTimestamp | tail -3
+      ```
+
+      gitops-reverser 0.49.1 credits every write to a just-deleted name to
+      whoever ran the `kubectl delete`, for ten minutes. The commit goes out as
+      `admin`, with the typed message dropped. The same goes for an operator's
+      round switch after the `quizsession` delete. See
+      [gitops-reverser-bug-delete-poisons-author.md](gitops-reverser-bug-delete-poisons-author.md).
+
 - [ ] Check the audit trail repo is reachable and last talk's folders are clean.
       `prune: Always` means the deletes above reach Git, so expect commits.
 - [ ] **Rehearse the close, then reset.** It is the least rehearsed part of the
@@ -427,6 +441,11 @@ kubectl -n voter get quizsessions   # demo1 live, evaluation closed
 # 4. Revoke the coffee grant.
 kubectl -n voter delete rolebinding voter-audience-coffee-admin
 ```
+
+Step 2 (and any `delete coffeeconfig demo-coffee`) starts a ten-minute window
+in which writes to those names are credited to `admin`. Leave 15 minutes before
+the next run, and check one save reads `Committed`. See
+[gitops-reverser-bug-delete-poisons-author.md](gitops-reverser-bug-delete-poisons-author.md).
 
 Smaller version of step 2 if you would rather not delete the sessions, though it
 leaves question edits unapplied:

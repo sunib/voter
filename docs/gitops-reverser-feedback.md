@@ -25,6 +25,12 @@ that the fix did not close, and one new entry that is mostly measurement: where
 a save's four-to-seven seconds actually go now that 0.49.0 removed the round
 trips it could. The second item is a suggestion we expect may be declined.
 
+**Bug, 2026-10-06:** a `kubectl delete` names the author of the next writes to
+the same name for the fact TTL, and a person's `CommitRequest` then resolves
+`WindowMismatch`. The trigger is fixed in 0.50.0; the matcher weakness behind it
+is still on `main`. Written up separately, with evidence and a proposed fix:
+[gitops-reverser-bug-delete-poisons-author.md](gitops-reverser-bug-delete-poisons-author.md).
+
 ---
 
 ## 1. `NoWindowInGrace` still does not distinguish "too early" from "nothing pending"
