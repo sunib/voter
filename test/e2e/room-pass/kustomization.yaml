@@ -20,8 +20,9 @@ images:
     digest: sha256:346b4422278dc7b2f6f2f20d52bee59874916e3021fb477321c0aacca19e58de
 patches:
   # deploy/base carries Room Pass's own fixture origins (*.room-pass.test).
-  # These are this fixture's: the join page and the issuer each get a host,
-  # and the only return URL is the Voter application.
+  # These are this fixture's, shaped like the demo cluster: the join page is on
+  # the application's own host (edge.yaml routes /join, /bind and /logout there),
+  # the issuer has a host of its own, and the only return URL is the application.
   - target:
       kind: Deployment
       name: room-pass
@@ -36,7 +37,7 @@ patches:
               fieldRef:
                 fieldPath: metadata.namespace
           - name: JOIN_ORIGIN
-            value: https://join.voter.test:19443
+            value: https://app.voter.test:19443
           - name: ISSUER_ORIGIN
             value: https://login.voter.test:19443
           - name: DEX_UPSTREAM

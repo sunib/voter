@@ -1,3 +1,16 @@
+# The fixture's edge, shaped like the demo cluster's (external/k8s,
+# 2-gitops/voter-demo/ingress.yaml): IngressRoutes with explicit priorities,
+# because these splits are security boundaries and should not depend on
+# Traefik's rule-length heuristic. Higher number wins.
+#
+#   app.voter.test    shared between Room Pass and the application. Room Pass
+#                     owns exactly /bind, /join and /logout (exact paths, not
+#                     prefixes); the application owns the rest. Room Pass's
+#                     join cookie (__Host-room-pass-joincode) only reaches /join
+#                     because it is on this same host.
+#   login.voter.test  the issuer: Room Pass entirely, which proxies every Dex
+#                     path it does not own itself. Nothing routes to Dex.
+#
 # A generous per-source edge bucket tolerates the shared conference NAT; the
 # service separately limits code attempts and handoff creation across all sources.
 apiVersion: traefik.io/v1alpha1
@@ -10,40 +23,76 @@ spec:
     average: 200
     burst: 500
 ---
-# K3s supplies Traefik. The join and issuer hosts go only to Room Pass, which
-# proxies every Dex path it does not own itself. The application's own host is
-# routed in voter.yaml.
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+# The header boundary, as in the demo cluster. Dex's authproxy connector turns
+# X-Remote-* into an identity, so nothing arriving from a browser may carry
+# them. An empty value makes Traefik remove the header.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
 metadata:
-  name: room-pass
+  name: strip-identity-headers
   namespace: voter
-  annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    traefik.ingress.kubernetes.io/router.middlewares: voter-room-pass-edge-limit@kubernetescrd
 spec:
-  ingressClassName: traefik
+  headers:
+    customRequestHeaders:
+      X-Remote-User: ""
+      X-Remote-User-Id: ""
+      X-Remote-User-Name: ""
+      X-Remote-User-Email: ""
+      X-Remote-Group: ""
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: room-pass-issuer
+  namespace: voter
+spec:
+  entryPoints: [websecure]
+  routes:
+    - match: Host(`login.voter.test`)
+      kind: Rule
+      priority: 100
+      middlewares:
+        - name: strip-identity-headers
+        - name: room-pass-edge-limit
+      services:
+        - name: room-pass
+          port: 8080
   tls:
-    - secretName: local-tls
-      hosts: [join.voter.test, login.voter.test]
-  rules:
-    - host: join.voter.test
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: room-pass
-                port:
-                  number: 8080
-    - host: login.voter.test
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: room-pass
-                port:
-                  number: 8080
+    secretName: local-tls
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: voter-app
+  namespace: voter
+spec:
+  entryPoints: [websecure]
+  routes:
+    # Room Pass's three endpoints on the shared application host.
+    - match: Host(`app.voter.test`) && (Path(`/bind`) || Path(`/join`) || Path(`/logout`))
+      kind: Rule
+      priority: 300
+      middlewares:
+        - name: strip-identity-headers
+        - name: room-pass-edge-limit
+      services:
+        - name: room-pass
+          port: 8080
+    # krm-foyer's prefixes (krm-foyer-values.yaml), whole segments only. /auth/
+    # joins them when the frontend speaks krm-foyer's contract; until then it is
+    # Voter's, and these answer 401 to everyone.
+    - match: Host(`app.voter.test`) && (PathPrefix(`/k8s/`) || PathPrefix(`/stream/`) || PathPrefix(`/_foyer/`))
+      kind: Rule
+      priority: 200
+      services:
+        - name: krm-foyer
+          port: http
+    # Everything else -- the SPA, /auth/* and /public/* -- is Voter.
+    - match: Host(`app.voter.test`)
+      kind: Rule
+      priority: 100
+      services:
+        - name: voter
+          port: 8080
+  tls:
+    secretName: local-tls

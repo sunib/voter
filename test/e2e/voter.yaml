@@ -233,28 +233,4 @@ spec:
         - name: issuer-ca
           configMap:
             name: issuer-ca
----
-
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: voter
-  namespace: voter
-  annotations:
-    traefik.ingress.kubernetes.io/router.entrypoints: websecure
-spec:
-  ingressClassName: traefik
-  tls:
-    - secretName: local-tls
-      hosts: [app.voter.test]
-  rules:
-    - host: app.voter.test
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: voter
-                port:
-                  number: 8080
+# The application's host is routed in edge.yaml, beside Room Pass's paths on it.
