@@ -225,6 +225,9 @@ e2e. Step 7 is the only cluster change.
 
 ### 4. Votes (decision 1)
 
+The admission half of this step can ship before krm-foyer, on Voter 1.x:
+see [quiz-admission.md](quiz-admission.md).
+
 - [ ] CRD: `spec.roundUID` and `spec.questionsDigest` on QuizSubmission;
       `status.openedAt`, `status.closedAt` and `status.questionsDigest` on QuizSession. The reconciler sets
       `openedAt` on the first transition to `live` only, sets `closedAt` on each
