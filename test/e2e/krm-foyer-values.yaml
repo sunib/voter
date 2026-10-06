@@ -4,9 +4,8 @@
 # with the application's own Dex client (decision 3): the redirect URI Dex already
 # allows, https://app.voter.test:19443/auth/callback, is the one krm-foyer serves.
 #
-# For now edge.yaml routes it /k8s/, /stream/ and /_foyer/ only. /auth/ is still
-# Voter's, so nobody has a krm-foyer session yet; that moves with step 2, when the
-# frontend speaks krm-foyer's contract.
+# edge.yaml routes it /auth/, /k8s/, /stream/ and /_foyer/: the frontend speaks
+# krm-foyer's contract (step 2).
 #
 # up.sh installs the chart and image pinned below, and creates the two Secrets.
 publicURL: https://app.voter.test:19443
@@ -23,11 +22,22 @@ oidc:
     name: issuer-ca
 login:
   authorizationParameters:
-    connector_id: {allowFromRequest: true, allowedValues: [room-pass, github]}
+    # Room Pass unless a link asks for GitHub (the operator's "sign in as
+    # operator"), so a room full of strangers is never shown the other door.
+    connector_id: {default: room-pass, allowFromRequest: true, allowedValues: [room-pass, github]}
   sessionClaims:
     connector: /federated_claims/connector_id
 sessionKeys:
   secretName: krm-foyer-session-keys
+# One watch per scope for the whole room, each subscriber checked with a
+# SubjectAccessReview before anything is disclosed (krm-foyer docs/watches.md).
+# These are the resources Voter's pages follow live.
+sharedWatches:
+  resources:
+    - coffeeconfigs.examples.configbutler.ai
+    - quizsessions.examples.configbutler.ai
+    - databases.platform.configbutler.ai
+    - rooms.room-pass.koudijs.dev
 # Plain HTTP behind Traefik, which terminates TLS for the host. That hop carries
 # session cookies, so only Traefik's pods may reach the port.
 networkPolicy:

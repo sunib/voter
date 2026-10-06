@@ -191,8 +191,6 @@ spec:
             - name: http
               containerPort: 8080
           env:
-            - name: METRICS_ADDRESS
-              value: '0.0.0.0:9090'
             - name: OIDC_ISSUER_URL
               value: https://login.voter.test:19443
             - name: OIDC_CLIENT_ID
