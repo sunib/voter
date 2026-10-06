@@ -65,13 +65,13 @@ const live = useLiveResources({
 const streamedRound = computed(() => {
   if (!live.synced()) return undefined
   return live.items.value.find((o) => o.metadata?.name === props.session) as
-    | { spec?: { state?: QuizSession['spec']['state'] } }
+    | QuizSession
     | undefined
 })
 
 // Only the STATE follows the stream. The questions deliberately do not: swapping
-// them under someone mid-answer is the thing the round rules forbid, and the
-// submit path already refuses answers built against an older resourceVersion.
+// them under someone mid-answer is the thing the round rules forbid, and
+// admission refuses a ballot whose questions digest is not the round's.
 // A closed round simply stops accepting; it does not rewrite what is on screen.
 const state = computed(
   () => streamedRound.value?.spec?.state ?? round.value?.spec?.state,
