@@ -207,18 +207,19 @@ So these can be ranked lower against Voter's use:
 
 ## What stays Voter's work
 
-None of these is an ask. They are listed so nobody expects them from krm-foyer:
+None of these is an ask. They are listed so nobody expects them from krm-foyer. The
+first three are done (step 2 of [the migration](krm-foyer-migration.md), 2026-10-06):
 
-- Move the browser client from krm-stream 0.4.0 to 0.7.0, and `/public/stream` to
-  `/stream/v1`.
-- Change login links (`return=` → `return_to=`, `connector=` → `oidc.connector_id=`).
-  The hard-coded ones are in `AdminScreen.vue`, `DatabaseEditScreen.vue`,
-  `RoomScreen.vue` and `OrderScreen.vue`. The QR code (`RoomScreen.vue:118`) points
-  at `/auth/login?code=` today. Once krm-foyer owns `/auth/login`, it has to point at
-  Voter's own QR endpoint instead.
-- Move application settings out of `/auth/session` into a static `config.json`:
-  `namespace`, `coffeeConfigName`, `roomName`, `commitURLTemplate`. Compute `canVote`
-  from `connector` in the browser for display only; the domain backend enforces it.
+- **Done.** Move the browser client from krm-stream 0.4.0 to 0.7.0, and
+  `/public/stream` to `/stream/v1`. It went to 0.10.0, which krm-foyer 0.3.0's gateway
+  runs.
+- **Done.** Change login links (`return=` → `return_to=`, `connector=` →
+  `oidc.connector_id=`), now built in one place (`loginURL` in `api/session.ts`). The
+  QR code points at Voter's own `/join-room`.
+- **Done.** Move application settings out of `/auth/session` into `/config.json`,
+  served by Voter: `namespace`, `coffeeConfigName`, `roomName`, `commitURLTemplate`,
+  and `participantConnector`, so `canVote` is computed in the browser, for display
+  only, without a second copy of the rule.
 - **Review grants before exposing `/k8s`.** Participants hold `create` and `list` on
   `quizsubmissions`. Today only the vote handler uses `create`, and only the aggregate
   results come back. Through `/k8s` a participant could create a submission without
@@ -233,8 +234,9 @@ None of these is an ask. They are listed so nobody expects them from krm-foyer:
 - **Keep a CoffeeConfig save together with its CommitRequest.** Today that is two
   writes on the server with partial success reported. It becomes two writes from the
   browser, with the same partial-success handling.
-- **Give krm-foyer a client and audience in Dex on Voter's host.** Follow the
-  cross-client-scope pattern `foyer.k8s.koudijs.dev` already uses.
+- **Not needed.** ~~Give krm-foyer a client and audience in Dex on Voter's host.~~
+  Decision 3 of the migration: krm-foyer reuses the `voter` client, whose redirect URI
+  is already krm-foyer's callback. The fixture does the same with `voter-fixture`.
 
 ## Something we could give back
 

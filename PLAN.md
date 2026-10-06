@@ -434,7 +434,12 @@ and its files.
 - [x] Decided 2026-10-06: votes through `/k8s` with admission and the reconciler; the
       operator keeps cluster-admin in the browser for now; krm-foyer reuses the `voter`
       Dex client.
-- [ ] Steps 0–7 of the migration plan, starting once krm-foyer releases `/auth/check`.
+- [x] Step 0: krm-foyer 0.3.0 has `/auth/check` (2026-10-06).
+- [x] Step 1, apart from the Vite loop: krm-foyer beside Voter in the fixture, on one
+      shared host with Room Pass (#24).
+- [x] Step 2: the frontend on krm-foyer's contract, and Voter's own stream gateway
+      removed (draft PR #27, not merged).
+- [ ] Steps 3–7, and the items under "Found along the way" in the migration plan.
 
 ## 6. Retained platform work
 

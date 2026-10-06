@@ -1,5 +1,11 @@
 # Shared CoffeeConfig streams
 
+> **Being retired.** Voter's own stream gateway, which this page describes, is removed
+> on the krm-foyer migration branch (step 2 of
+> [krm-foyer-migration.md](krm-foyer-migration.md)): krm-foyer's `/stream/v1` and its
+> `sharedWatches` take over, and the `voter_stream_*` metrics go with it. This page
+> stays true for Voter 1.x, which the cluster runs until the cutover.
+
 Status: deployed to production on 2026-09-11 as `85de0c0`, promoted through GitOps
 `2d770a1`. Verified first in the disposable fixture, then on the cluster: the narrowed
 service-account grants authorize named list/watch on Kubernetes 1.36.1, public

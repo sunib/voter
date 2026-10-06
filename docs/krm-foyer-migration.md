@@ -1,9 +1,12 @@
 # Plan: move Voter's login, sessions and streams to krm-foyer
 
-Status: **in progress (2026-10-06).** Step 0 is done: krm-foyer 0.3.0 ships
-`/auth/check`. Nothing of steps 1 to 7 is deployed yet; the cluster still runs
-Voter 1.x with its own login, and krm-foyer only as the hello example on
-`foyer.k8s.koudijs.dev`.
+Status: **in progress (2026-10-06).** Steps 0 and 2 are done, and step 1 apart from
+the Vite loop. Steps 2 to 6 are built on one branch, `krm-foyer-frontend-contract`
+(draft PR #27), which must not merge before step 6: from step 2 on, `/public/*` needs
+Voter's old session and the browser suite is red. Nothing is deployed yet; the cluster
+runs Voter 1.3.0 with its own login, and krm-foyer only as the hello example on
+`foyer.k8s.koudijs.dev`. Work found along the way is under
+[Found along the way](#found-along-the-way).
 It replaces the "not yet" in [k8s-front-adoption.md](k8s-front-adoption.md). The asks in
 [krm-foyer-feedback.md](krm-foyer-feedback.md) are all answered on krm-foyer's `main`.
 
@@ -182,7 +185,8 @@ e2e. Step 7 is the only cluster change.
 
 ### 1. Local loop and e2e on krm-foyer
 
-- [ ] Vite: follow krm-foyer's dev-server proxy recipe (`/auth/`, `/k8s/`, `/stream/`,
+- [ ] Vite (unblocked now that step 2 gives a krm-foyer session to develop against):
+      follow krm-foyer's dev-server proxy recipe (`/auth/`, `/k8s/`, `/stream/`,
       `/_foyer/` to a `task demo` krm-foyer, on `https://foyer.localhost:8443`). Proxy
       `/public/` to a local Voter with a fixed `Krm-Foyer-Identity` header. Their
       suite does not run this recipe, so report anything that breaks back to them.
@@ -285,13 +289,24 @@ see [quiz-admission.md](quiz-admission.md).
       `?identity=true`, and the NetworkPolicy below enforces that.
 - [ ] Storefront and orders read CoffeeConfig with Voter's ServiceAccount: add `get` on
       `coffeeconfigs` to the `voter` Role. Order and voucher logic is unchanged.
-- [ ] `/join-room?code=`: the cookie part of today's `setJoinCodeHandoff`, then a `302`
+- [x] `/join-room?code=`: the cookie part of today's `setJoinCodeHandoff`, then a `302`
       to `/auth/login?return_to=%2F&oidc.connector_id=room-pass`. The QR code in
-      `RoomScreen.vue:118` points here. Turn the access log off for this route, because
-      the code is in the query.
-- [ ] Delete what krm-foyer replaced (see [What Voter becomes](#what-voter-becomes)) and
-      its config (`OIDC_*`, cookie keys, `APP_ORIGIN`, `STREAM_KUBECONFIG`). Delete the
-      dead `normalizeJoinCodeHeader` and `clientIP` while there.
+      `RoomScreen.vue` points here. Done in step 2 (`join_room.go`); the access log for
+      this route is a cluster matter, see 7.4.
+- [x] Delete Voter's stream gateway (`stream_runtime.go`, `participant_stream.go`,
+      `/public/stream`, `/metrics`). Done in step 2.
+- [ ] Delete the rest of what krm-foyer replaced (see
+      [What Voter becomes](#what-voter-becomes)) and its config (`OIDC_*`, cookie
+      keys, `APP_ORIGIN`). Delete the dead `normalizeJoinCodeHeader` and `clientIP`
+      while there. **Keep `STREAM_KUBECONFIG`:** it is now Voter's own credential
+      outside a cluster, which the reconciler needs; in a pod it is unset anyway.
+- [ ] The `voter` Role (fixture `test/e2e/voter.yaml`, cluster `app.yaml`) still
+      carries the stream gateway's grants: `list`/`watch` on the CoffeeConfig and the
+      Room, and the `voter-stream-access-review` ClusterRole for SubjectAccessReviews.
+      Drop them; keep the reconciler's (`quizsessions` get/list/watch,
+      `quizsubmissions` list/watch, `quizsessions/status` get/patch) and add the
+      storefront's `get coffeeconfigs` above. Rewrite the Role's comment, which still
+      explains the shared watch.
 
 ### 6. Prove it before the cluster
 
@@ -305,6 +320,14 @@ see [quiz-admission.md](quiz-admission.md).
       a raw submission with someone else's name, a CoffeeConfig label patch.
 - [ ] A load rehearsal at 200 sessions through krm-foyer's shared watches, as
       PLAN.md 3 asks for Voter's own gateway today.
+- [ ] Rewrite the browser specs for the new contract. `live-stream.spec.js` asserts
+      Voter's `voter_stream_*` metrics through the pod proxy and that `/metrics` is a
+      404; both are gone, and the shared-watch evidence is krm-foyer's metrics now.
+      `voting.spec.js` and `operator.spec.js` sign in through Voter's login.
+- [ ] Rewrite `voter/test/loadtest` (`voteload`), which signs in through Voter's
+      `/auth/login`, reads `/auth/session` and votes through `/public/rounds`.
+- [ ] Check `test/browser/rehearse-production.mjs` against the new flow before it is
+      next run against the demo.
 
 ### 7. Cutover in `external/k8s` (pull first, see AGENTS.md)
 
@@ -316,6 +339,7 @@ change (decision 2), so everything goes through Flux.
 2. **RBAC** (`participant-rbac.yaml`, `app.yaml`):
    - Participants: `quizsubmissions` loses `list` and `watch` if the results screen no
      longer needs them; keep `get` and `create` (decision 1).
+   - Voter's ServiceAccount loses the stream gateway's grants (step 5's Role item).
    - Add `get coffeeconfigs` for Voter's ServiceAccount.
    - Add the two ValidatingAdmissionPolicies and their bindings.
    - The `voter-audience-coffee-admin` RoleBinding stays out of Git, as today.
@@ -337,7 +361,10 @@ change (decision 2), so everything goes through Flux.
 4. **Edge** (`ingress.yaml`), on `demo.koudijs.dev`:
    - `/auth/`, `/k8s/`, `/stream/`, `/_foyer/` → krm-foyer;
    - `/join`, `/bind`, `/logout` → Room Pass, as today;
-   - `/join-room` → Voter, access log off;
+   - `/join-room` → Voter, access log off. The room code is in its query. Per-route
+     `observability: {accessLogs: false}` needs Traefik 3.1 or later; check the
+     cluster's version, or confirm its access log is off. The fixture's k3s Traefik is
+     2.11 with no access log;
    - `/public/` → Voter with the `foyer-identity` ForwardAuth and `no-cookie`
      middlewares;
    - everything else → Voter with `no-cookie`, ungated, which also serves any Room
@@ -348,7 +375,9 @@ change (decision 2), so everything goes through Flux.
 5. **Voter 2.0.0.** The cutover commit in this repository is `feat!:`, so its major
    release does not reach the cluster on its own (AGENTS.md). Bump `app.yaml` by hand
    in the same change set, and remove the env vars Voter no longer reads (`OIDC_*`,
-   cookie keys, `APP_ORIGIN`, `STREAM_KUBECONFIG`).
+   cookie keys, `APP_ORIGIN`, `METRICS_ADDRESS`), and the pod's `9090` port if
+   `app.yaml` declares one. Check nothing scrapes Voter's `:9090` (a PodMonitor,
+   ServiceMonitor or scrape annotation); scrape krm-foyer's metrics Service instead.
 6. **Check:**
    - a QR login from a phone, which is the first time Safari is tried, against
      Room Pass 2.1.0;
@@ -360,6 +389,35 @@ change (decision 2), so everything goes through Flux.
 
 Rollback: revert the `external/k8s` change set and pin `app.yaml` to the last 1.x. Dex
 and the API server are untouched, so the old Voter works again as soon as it is back.
+
+## Found along the way
+
+Things the work so far turned up that are not one of the steps above.
+
+- [ ] **The stream-expiry fix is not released.** `TestSharedStreamExpiryAndDisconnectIsolation`
+      was flaky because krm-stream 0.4.0 clamps each write's deadline to the context's;
+      the fix (cancel at expiry instead) is on `main` since #24, but #24 was
+      squash-merged under its `test:` title, so no release carries it. The next `fix:`
+      or `feat:` release on `main` does. It matters only until the cutover, which
+      deletes that code.
+- [ ] **Room Pass's `room-qr` tool** points QR codes at `LOGIN_PATH`, `/auth/login` by
+      default, which becomes krm-foyer's and ignores `code=`. Set
+      `LOGIN_PATH=/join-room` wherever the runbook or `task room-pass:present` runs it.
+- [ ] **Docs to rewrite at the cutover.** They describe Voter 1.x as deployed, which
+      stays true until step 7, so they change with it rather than before:
+      - `ARCHITECTURE.md`: the ownership table (Voter no longer owns the session or a
+        stream engine), the routes table (`/auth/*`, `/auth/rules`, `/public/stream`,
+        `/metrics`), the two stream locks, the QR flow
+        (`/auth/login?code=` → `/join-room`);
+      - `docs/authorization.md`: `/auth/rules` becomes a review through `/k8s`;
+      - `docs/shared-streams.md`: Voter's gateway is gone, and shared watches are
+        krm-foyer's (`sharedWatches`); keep it as history;
+      - `PLAN.md` 2a and 3: the 200-session rehearsal runs through krm-foyer;
+      - `test/browser/README.md`: metrics through the pod proxy.
+- [x] **The fixture had never exercised the QR handoff.** Room Pass's join page was
+      on `join.voter.test`, so Voter's host-only join cookie never reached it there.
+      It shares `app.voter.test` now (step 1), and the step 2 browser check followed
+      the QR link from another site to a join page with the code filled in.
 
 ## Open points to take back to krm-foyer
 
