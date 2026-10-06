@@ -4,6 +4,7 @@ import { useTestAppConfig } from './testAppConfig'
 import {
   ballotBindingName,
   ballotGroups,
+  ballotGroupsMarker,
   participantUsername,
   personGrant,
   pickParticipant,
@@ -170,5 +171,17 @@ describe('pickParticipant', () => {
 
   it('is null in an empty room', () => {
     expect(pickParticipant([], null)).toBeNull()
+  })
+})
+
+describe('ballotGroupsMarker', () => {
+  it('reads the same for the same set, whatever the order', () => {
+    expect(
+      ballotGroupsMarker(new Set(['demo:frontend-vue', 'demo:frontend-svelte'])),
+    ).toBe('demo:frontend-svelte,demo:frontend-vue')
+  })
+
+  it('says none rather than nothing, so closing the last switch still moves it', () => {
+    expect(ballotGroupsMarker(new Set())).toBe('none')
   })
 })

@@ -10,7 +10,14 @@
 
 import { appConfig } from './appConfig'
 import type { ApiError } from './http'
-import { ROLEBINDINGS, createObject, deleteObject, listObjects } from './kube'
+import {
+  QUIZSESSIONS,
+  ROLEBINDINGS,
+  createObject,
+  deleteObject,
+  listObjects,
+  mergePatch,
+} from './kube'
 
 const RBAC = 'rbac.authorization.k8s.io'
 
@@ -120,6 +127,40 @@ export async function setBallotGrant(
     if (subjects.length === 0) continue
     if (!subjects.every((s) => s.kind === 'Group' && s.name === group)) continue
     await deleteQuietly(binding.metadata.name)
+  }
+}
+
+/** The marker the vote page follows. RBAC changes cannot be watched by a
+ *  participant -- they may not read RoleBindings, and a SelfSubjectRulesReview
+ *  is asked, not watched -- but every phone already streams the rounds. So the
+ *  operator page writes which groups may vote onto each round, and a phone
+ *  asks the API server again only when that moves. It is a doorbell, not the
+ *  decision: the page still renders RBAC's answer, and admission and RBAC
+ *  still decide every ballot. */
+export const BALLOT_GROUPS_ANNOTATION = 'voter.configbutler.ai/ballot-groups'
+
+/** The marker's value for a set of groups: sorted, so the same set always
+ *  reads the same and a poll that finds nothing new writes nothing. */
+export function ballotGroupsMarker(groups: Set<string>): string {
+  return groups.size === 0 ? 'none' : [...groups].sort().join(',')
+}
+
+interface Round {
+  metadata: { name: string; annotations?: Record<string, string> }
+}
+
+/** Write the marker onto every round that does not carry it yet. Only rounds
+ *  that differ are patched, so calling this from a poll costs a list. */
+export async function announceBallotGroups(groups: Set<string>): Promise<void> {
+  const marker = ballotGroupsMarker(groups)
+  const rounds = await listObjects<Round>(QUIZSESSIONS)
+  for (const round of rounds) {
+    if (round.metadata.annotations?.[BALLOT_GROUPS_ANNOTATION] === marker) {
+      continue
+    }
+    await mergePatch(QUIZSESSIONS, round.metadata.name, {
+      metadata: { annotations: { [BALLOT_GROUPS_ANNOTATION]: marker } },
+    })
   }
 }
 

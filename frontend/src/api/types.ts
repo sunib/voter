@@ -8,6 +8,7 @@ export type KubeObjectMeta = {
   generation?: number
   creationTimestamp?: string
   labels?: Record<string, string>
+  annotations?: Record<string, string>
 }
 
 export type KubeTypeMeta = {

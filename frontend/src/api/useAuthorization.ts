@@ -38,7 +38,9 @@ export interface LiveAuthorization {
  * empties itself on one dropped request reads as "your permissions were taken
  * away" — the opposite of what happened.
  */
-export function useAuthorization(): LiveAuthorization {
+export function useAuthorization(
+  options: { poll?: boolean } = {},
+): LiveAuthorization {
   const authz: ShallowRef<Authorization | null> = shallowRef(null)
   const error = ref('')
   const loading = ref(true)
@@ -62,7 +64,11 @@ export function useAuthorization(): LiveAuthorization {
   }
 
   void refresh()
-  timer = setInterval(() => void refresh(), POLL_INTERVAL_MS)
+  // A page that knows when its answer may have changed asks then instead: the
+  // vote page re-asks when the round's ballot-groups marker moves.
+  if (options.poll ?? true) {
+    timer = setInterval(() => void refresh(), POLL_INTERVAL_MS)
+  }
 
   onScopeDispose(() => {
     disposed = true

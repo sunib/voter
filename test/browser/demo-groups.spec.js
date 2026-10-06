@@ -98,6 +98,11 @@ test('the operator opens a round to one answer group, and only that group may vo
     await expect.poll(() => JSON.parse(kube('get', 'rolebinding', 'voter-audience-ballot-frontend-svelte', '-o', 'json')).subjects)
       .toEqual([{ kind: 'Group', apiGroup: 'rbac.authorization.k8s.io', name: 'demo:frontend-svelte' }]);
 
+    // The doorbell: the operator page wrote who may vote onto the round, which
+    // every phone already streams.
+    await expect.poll(() => JSON.parse(kube('get', 'quizsession', round, '-o', 'json')).metadata.annotations?.['voter.configbutler.ai/ballot-groups'])
+      .toBe('demo:frontend-svelte');
+
     // No reload: the refusal becomes the ballot on its own.
     await expect(svelte.getByRole('heading', { name: 'Which approach?' })).toBeVisible();
     await svelte.getByRole('button', { name: 'GitOps', exact: true }).click();
@@ -113,6 +118,17 @@ test('the operator opens a round to one answer group, and only that group may vo
     // Everyone in: the Vue participant's page opens too.
     await everyone.check();
     await expect(vue.getByRole('heading', { name: 'Which approach?' })).toBeVisible();
+
+    // And it closes again, the same way: taking a right away reaches an open page.
+    await everyone.uncheck();
+    await expect(vue.getByTestId('ballot-refused')).toBeVisible();
+
+    // Nothing polls. With no switch moving, an open vote page asks the API
+    // server nothing at all.
+    let reviews = 0;
+    vue.on('request', request => { if (request.url().includes('selfsubjectrulesreviews')) reviews++; });
+    await vue.waitForTimeout(10000);
+    expect(reviews).toBe(0);
   } finally {
     for (const c of contexts) await c.close();
     kube('delete', 'rolebinding', 'voter-audience-ballot-frontend-svelte', '--ignore-not-found');
