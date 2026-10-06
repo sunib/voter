@@ -40,7 +40,7 @@ The rules, in the order the migration plan lists them:
 
 | Rule | Needs the round |
 | --- | --- |
-| Only `demo:` users create (`request.userInfo.username.startsWith('demo:')`) | no |
+| A `demo:` user, or a ballot that declares itself an operator's (below) | no |
 | Name is `<sessionRef.name>-<lowerAscii(display-name extra)>`; extra present | no |
 | Labels `voter.configbutler.ai/round` and `/submitter` match `spec` and the extra | no |
 | The round is `live` | yes |
@@ -49,6 +49,16 @@ The rules, in the order the migration plan lists them:
 
 The display-name extra is `configbutler.ai/claims/display-name`
 (`1-talos/files/authentication-config.yaml`).
+
+**The operator's path.** A flat "only `demo:` users" rule would refuse the "Casting
+your own answers" interlude, where the operator applies Ada Lovelace's and Grace
+Hopper's ballots with kubectl. `talk-checklist.md` already names that trap and the
+better version: the operator may cast a ballot, but it has to say so. A non-`demo:`
+user's ballot must carry a label such as `voter.configbutler.ai/cast-by: operator`,
+and the name and label rules above apply only to `demo:` users. The round rules apply
+to everyone, so a pasted ballot also needs a live round. `voter/config/demo1-b.yaml`
+and the runbook snippet get the label. The line for the talk: "I can still stuff the
+ballot box, I just cannot do it quietly." 
 
 ## Does it make counting cheaper?
 
@@ -60,10 +70,11 @@ measurable difference to it.
 What admission changes is **what the tally has to trust**. A ballot that got stored
 was valid against the live round at that moment, so:
 
-- the `openedAt`/`closedAt` window check becomes defence in depth, not the main control.
-  The policy reads its rounds from an informer, so a ballot can still land
-  milliseconds after a close. Keep the window check for that edge. Keep both
-  timestamps as status, as decided;
+- the live window is enforced when a ballot is created, which a tally can never do
+  reliably. Voter stamps `openedAt` and `closedAt` when it observes a change, so a
+  round that changes state while Voter is restarting is stamped late. They stay
+  status for people to read. The policy reads rounds from an informer, so a ballot
+  can still land milliseconds after a close; that edge is accepted;
 - re-running `validateQuizAnswers` in the tally stays cheap, and stays as the belt.
 
 The real gains are: refusals at the moment of voting, today's bypass closed, and the
@@ -85,11 +96,14 @@ the cluster before a Voter that fills the new fields**, or every vote is refused
       `live` and `closedAt` on each close, clearing it on reopen.
 - [ ] The vote handler fills `roundUID` and `questionsDigest` from the round it already
       loads. The browser does not change yet.
-- [ ] The tally counts a ballot with both fields only when they match. Ballots
-      without them are counted as today.
+- [ ] The tally checks each pin that is present. Ballots without pins (the pasted
+      interlude) are counted as today. `openedAt`/`closedAt` are not a counting rule.
+- [ ] `sameTally` treats a null status field as absent, or a closed round's
+      `closedAt: null` would make every resync rewrite it.
 - [ ] Unit tests (`quiz_tally_test.go`, `participant_quiz_test.go`): digest stable
-      across key order, changed questions change it, early, late, recreated-round and
-      changed-questions ballots, a reopened round keeping its first window's votes.
+      across a state change, changed questions change it; recreated-round,
+      changed-questions and unpinned ballots; `roundTimes` through open, close and
+      reopen; a pinned ballot still counting after its round closes.
 - [ ] Copy the CRDs to `external/k8s` `voter-demo/crds` in the same change set as
       the release (image automation bumps only the image).
 
@@ -101,6 +115,9 @@ the cluster before a Voter that fills the new fields**, or every vote is refused
       `external/k8s` `voter-demo/`, pulled first, after phase 1 is deployed.
 - [ ] Before `Deny`, run it once on the cluster with `validationActions: [Audit]`
       and read the audit log during a test round.
+- [ ] The operator's declared path: `voter.configbutler.ai/cast-by: operator` on
+      `voter/config/demo1-b.yaml` and the runbook's interlude snippet, in the same
+      PR as the policy.
 - [ ] The handler maps a policy refusal (403 `Forbidden`, reason in the message) to
       the message shown on the phone.
 
@@ -124,6 +141,8 @@ hard part to fake. Two layers:
   - refused, each with its message: another participant's name, a GitHub user, a
     missing extra, a second ballot (409 from the name), a `ready` round, a closed
     round, a stale UID, a stale digest, and wrong labels;
+  - the operator: refused without the `cast-by` label, accepted with it on a live
+    round, refused with it on a closed one;
   - a round deleted and recreated under the same name.
 - **e2e**: one Playwright case already votes. Add a vote after close that is refused
   with the policy's message on screen, to show the refusal reaches the phone.

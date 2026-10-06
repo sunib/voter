@@ -69,23 +69,29 @@ backend no token. So the participant creates the ballot through `/k8s`:
     `submissionName`, and Room Pass display names are unique per room and already
     folded to `[A-Za-z0-9-]`. A second vote stays a 409 AlreadyExists.
   - The `submitter` and `round` labels match the display-name extra and `spec`.
-  - Only `demo:` usernames, which means only the `room-pass` connector, may create.
+  - Only `demo:` usernames, which means only the `room-pass` connector, may create
+    a ballot like this. The operator keeps a path for the "Casting your own answers"
+    interlude, but must declare it (see [quiz-admission.md](quiz-admission.md)).
+  - The round is `live`, and the ballot's `roundUID` and `questionsDigest` match it.
+    The policy reads the round as a parameter, so this is checked when the ballot is
+    created and the refusal is synchronous.
 - The reconciler counts a ballot only if all of these hold:
-  - its `spec.roundUID` equals the round's `uid`, so a ballot for a deleted round
-    never counts for a new one under the same name;
-  - its `spec.questionsDigest` equals the round's `status.questionsDigest`. Not
+  - its `spec.roundUID`, when present, equals the round's `uid`, so a ballot for a
+    deleted round never counts for a new one under the same name;
+  - its `spec.questionsDigest`, when present, equals the digest of the round's
+    current questions. Not
     `generation`: `state` is in the round's `spec`, so opening and closing each move
     the generation, and a ballot checked at count time would stop matching the moment
     the round closes. Today's handler gets away with it because it checks at vote
     time. The reconciler computes the digest from `spec.questions` and the browser
     copies it into the ballot, so nothing has to canonicalise JSON in two languages;
-  - it was created at or after the round opened and before it closed, which needs
-    `status.openedAt` and `status.closedAt`. The UID and the digest are both readable while
-    the round is still `ready`, so only `openedAt` stops a ballot cast before the round
-    goes live;
   - it passes `validateQuizAnswers`, which it already applies.
-- The browser keeps `validateQuizAnswers`' checks for immediate feedback. The server
-  answer becomes "not counted" rather than a synchronous 422.
+- `status.openedAt` and `status.closedAt` are for reading, not a counting rule. Voter
+  stamps them when it observes the change, so a round that changes state while Voter
+  is down, as on any image bump, is stamped late. A rule of "created after
+  `openedAt`" would then drop every vote cast before the restart. The live window is
+  enforced when the ballot is created: by the handler today, by the policy next.
+- The browser keeps `validateQuizAnswers`' checks for immediate feedback.
 
 The rejected option B kept the vote handler behind `/auth/check?identity=true`, writing
 as Voter's ServiceAccount. Every ballot commit would then be authored by
@@ -228,20 +234,9 @@ e2e. Step 7 is the only cluster change.
 The admission half of this step can ship before krm-foyer, on Voter 1.x:
 see [quiz-admission.md](quiz-admission.md).
 
-- [ ] CRD: `spec.roundUID` and `spec.questionsDigest` on QuizSubmission;
-      `status.openedAt`, `status.closedAt` and `status.questionsDigest` on QuizSession. The reconciler sets
-      `openedAt` on the first transition to `live` only, sets `closedAt` on each
-      transition to `closed`, and clears it on a reopen. Reopening keeps the votes
-      already cast, as today.
-- [ ] The ValidatingAdmissionPolicy described under decision 1, with tests for:
-      - another participant's name;
-      - a GitHub user;
-      - a second vote;
-      - a missing display-name extra.
-- [ ] The reconciler counts only ballots that match the round's UID and questions digest,
-      were created between `openedAt` and `closedAt`, and pass validation. Tests for
-      early, late, changed-questions and recreated-round ballots, and
-      a reopened round keeping its first window's votes.
+- [ ] CRD fields, digest and pins: [quiz-admission.md](quiz-admission.md) phase 1.
+- [ ] The ValidatingAdmissionPolicy described under decision 1:
+      [quiz-admission.md](quiz-admission.md) phase 2, with its tests.
 - [ ] The browser creates the submission at `/k8s/.../quizsubmissions`. "Already voted"
       is a `GET` of its own deterministic name, or the 409 on create.
 - [ ] Delete the vote, round and results handlers from `participant_quiz.go`.
