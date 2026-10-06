@@ -22,6 +22,15 @@ data:
         redirectURIs:
           - https://app.voter.test:19443/auth/callback
     connectors:
+      # The operator. The cluster's operator signs in through GitHub; the
+      # fixture has no GitHub, so Dex's mockCallback connector stands in under
+      # the same id: it signs in one fixed user, Kilgore Trout
+      # <kilgore@kilgore.trout>, with no page of its own. authentication-config
+      # maps the github connector to `github:` + email, as the cluster does, and
+      # voter.yaml makes that user cluster-admin, as the cluster's operator is.
+      - type: mockCallback
+        id: github
+        name: GitHub (fixture operator)
       - type: authproxy
         id: room-pass
         name: Join the room
@@ -98,3 +107,30 @@ spec:
       ports:
         - protocol: TCP
           port: 5556
+---
+# Room Pass's reference policy (dex-only-from-room-pass, from its deploy/base)
+# admits only Room Pass to Dex, because the authproxy connector believes the
+# X-Remote-* headers it is sent. The fixture operator's connector needs Dex's
+# own /callback from the browser too, so Traefik may reach Dex as well -- and
+# edge.yaml routes it exactly that one path, with those headers stripped. Room
+# Pass's callback is /callback/room-pass, which Traefik never sends to Dex.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dex-callback-from-traefik
+  namespace: voter
+spec:
+  podSelector:
+    matchLabels:
+      app: dex
+  policyTypes: [Ingress]
+  ingress:
+    - ports:
+        - port: 5556
+      from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik

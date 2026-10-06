@@ -108,30 +108,38 @@ test('two participants vote, see durable results, and cannot vote twice or after
     await expect(carol.getByText('This round has just been closed.')).toBeVisible();
     await expect(carol.getByRole('button', { name: 'Submit', exact: true })).toBeDisabled();
 
-    // The disabled button is not the guard -- it is the courtesy. The server
-    // refuses a closed round on its own, which is what actually protects the
-    // result, so ask it directly rather than through a button that is now
+    // The disabled button is not the guard -- it is the courtesy. Admission
+    // refuses a ballot for a closed round on its own, which is what actually
+    // protects the result, so send Carol's ballot straight to the API server,
+    // exactly as the page would have, rather than through a button that is now
     // deliberately unclickable.
     const refusedAfterClose = await carol.evaluate(async (roundName) => {
-      const session = await (await fetch('/auth/session', { credentials: 'include' })).json();
-      const round = await (await fetch(`/public/rounds/${roundName}`, { credentials: 'include' })).json();
-      const res = await fetch(`/public/rounds/${roundName}`, {
+      const session = await (await fetch('/auth/session')).json();
+      const base = '/k8s/apis/examples.configbutler.ai/v1alpha1/namespaces/voter';
+      const round = await (await fetch(`${base}/quizsessions/${roundName}`)).json();
+      const res = await fetch(`${base}/quizsubmissions`, {
         method: 'POST',
-        credentials: 'include',
-        headers: { 'content-type': 'application/json', 'x-csrf-token': session.csrfToken },
+        headers: { 'content-type': 'application/json', [session.csrfHeader]: session.csrfToken },
         body: JSON.stringify({
-          // uid and generation, and no resourceVersion: the handler sets
-          // DisallowUnknownFields, so sending one it no longer reads is a 400
-          // and would hide the 409 this is actually testing for.
-          uid: round.round.metadata.uid,
-          generation: round.round.metadata.generation,
-          answers: [{ questionId: 'choice', singleChoice: 'GitOps' }],
+          apiVersion: 'examples.configbutler.ai/v1alpha1',
+          kind: 'QuizSubmission',
+          metadata: {
+            name: `${roundName}-${session.displayName.toLowerCase()}`,
+            labels: { 'voter.configbutler.ai/round': roundName, 'voter.configbutler.ai/submitter': session.displayName },
+          },
+          spec: {
+            sessionRef: { group: 'examples.configbutler.ai', kind: 'QuizSession', name: roundName },
+            roundUID: round.metadata.uid,
+            questionsDigest: round.status.questionsDigest,
+            submittedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
+            answers: [{ questionId: 'choice', singleChoice: 'GitOps' }],
+          },
         }),
       });
-      return { status: res.status, body: await res.text() };
+      return { status: res.status, body: await res.json() };
     }, name);
-    expect(refusedAfterClose.status, refusedAfterClose.body).toBe(409);
-    expect(refusedAfterClose.body).toContain('not open for voting');
+    expect(refusedAfterClose.status, JSON.stringify(refusedAfterClose.body)).toBe(403);
+    expect(refusedAfterClose.body.message).toContain('This round is not open for voting.');
 
     // A reload must not resurrect the form either.
     await carol.reload();
