@@ -20,25 +20,24 @@ import (
 // creationTimestamps of the objects that were NOT refused.
 // docs/post-demo-2026-09-17.md.
 func TestEveryRefusalIsLogged(t *testing.T) {
-	cfg := authorizationFixture(t)
+	cfg := testConfig()
 	var logged bytes.Buffer
 	log.SetOutput(&logged)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 
 	mux := http.NewServeMux()
 	// A handler that refuses and says nothing about it, like all thirty-two.
-	mux.HandleFunc("/public/refuses", requireParticipant(cfg, func(w http.ResponseWriter, _ *http.Request, _ participantSession) {
+	mux.HandleFunc("/public/refuses", requireIdentity(func(w http.ResponseWriter, _ *http.Request, _ foyerIdentity) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "The round changed. Reload the questions before voting."})
 	}))
-	mux.HandleFunc("/public/allows", requireParticipant(cfg, func(w http.ResponseWriter, _ *http.Request, _ participantSession) {
+	mux.HandleFunc("/public/allows", requireIdentity(func(w http.ResponseWriter, _ *http.Request, _ foyerIdentity) {
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "yes"})
 	}))
-	mux.HandleFunc("/public/rambles", requireParticipant(cfg, func(w http.ResponseWriter, _ *http.Request, _ participantSession) {
+	mux.HandleFunc("/public/rambles", requireIdentity(func(w http.ResponseWriter, _ *http.Request, _ foyerIdentity) {
 		http.Error(w, strings.Repeat("verbose ", 400), http.StatusBadRequest)
 	}))
 	serve := func(path string) {
-		req := authorizedRequest(t, cfg, http.MethodPost, "alice")
-		req.URL.Path = path
+		req := signedInRequest(t, cfg, http.MethodPost, path, "")
 		mux.ServeHTTP(httptest.NewRecorder(), req)
 	}
 

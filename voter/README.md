@@ -1,69 +1,72 @@
 # Voter
 
-The Go application backend. Its image also serves the compiled Vue frontend. Room Pass
-owns room enrollment, krm-foyer owns login, sessions, `/k8s` and live streams on the
-same host, and Kubernetes owns authorization. Voter is partway through moving onto
-krm-foyer: see [the migration plan](../docs/krm-foyer-migration.md).
-See [architecture](../ARCHITECTURE.md) and
+The demo's domain backend. Its image also serves the compiled Vue frontend. On the one
+host it shares:
+
+- **krm-foyer** owns login, sessions, `/k8s` and live streams (`/stream/v1`);
+- **Room Pass** owns room enrollment (`/join`, `/bind`, `/logout`);
+- **Kubernetes** owns authorization, and admission (`config/admission/`) holds what a
+  person may write: a ballot's rules, and spec-only edits;
+- **Voter** keeps what is not a Kubernetes object, or not one a person writes: coffee
+  pricing and orders, the QR join endpoint, the tally reconciler, and its files.
+
+See [the migration plan](../docs/krm-foyer-migration.md),
+[architecture](../ARCHITECTURE.md) (Voter 1.x, until the cutover) and
 [authorization and tests](../docs/authorization.md).
 
-## Current HTTP surface
+## HTTP surface
 
 | Route | Purpose |
 | --- | --- |
 | `GET /healthz` | Process health |
-| `GET /public/build-info` | Build revision metadata |
 | `GET /config.json` | The deployment's settings, without a session: namespace, object names, commit link template, participant connector, the GitTargets and CommitRequest namespace a save asks to commit to, and the audience grant's Role |
 | `GET /join-room?code=` | The QR code's target: Room Pass's join cookie, then a redirect to krm-foyer's login through Room Pass |
-| `/auth/login`, `/auth/callback`, `/auth/session`, `/auth/whoami`, `/auth/rules`, `/auth/logout` | Voter's own OIDC login, **no longer routed**: krm-foyer answers `/auth/` on the shared host. Deleted in step 5 |
 | `GET /public/storefront`, `POST /public/orders` | Coffee menu and order decisions |
+| `GET /public/orders`, `GET /public/orders/stream` | The room's order feed, as JSON and as SSE |
 | `GET /public/vouchers` | Process-local voucher usage |
+| `GET /public/build-info` | Build revision metadata |
+| `/` | The built frontend, with an SPA fallback |
 
-Voting uses persisted QuizSession/QuizSubmission resources. See the
-[demo runbook](../docs/voting-demo.md) and [sample round](config/demo-round.yaml).
+**`/public/` must only be reachable behind krm-foyer's identity check.** The edge
+sends every `/public/` request through `/auth/check?identity=true` (Traefik
+ForwardAuth), which answers for the browser's krm-foyer session, CSRF proof included,
+and adds `Krm-Foyer-Identity`: the API server's `userInfo` for that person, with their
+display name and connector. Voter trusts that header (`foyer_identity.go`) only
+because the edge replaces a browser's copy and a NetworkPolicy admits nothing but the
+edge to Voter's port. Without the header, a `/public/` handler answers 401 and logs
+that the route is wrong.
 
 Voting, saving the coffee menu and Databases, opening and closing rounds and the
-audience grant are the browser's own writes through krm-foyer's `/k8s` now; what a person may
-write is held by `config/admission/`. The remaining `/public/*` handlers still read
-Voter's own session cookie and use its Dex ID
-token, so behind krm-foyer they answer 401 until step 5 replaces them. Live
-streams are krm-foyer's `/stream/v1`; Voter no longer serves a stream or `/metrics`.
+audience grant are the browser's own writes through krm-foyer's `/k8s`. Voting uses
+persisted QuizSession/QuizSubmission resources: see the
+[demo runbook](../docs/voting-demo.md) and [sample round](config/demo-round.yaml).
 
 ## Configuration
 
-The full contract is in [config.go](config.go). Supply these OIDC settings:
-
-- `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`
-- `OIDC_REDIRECT_URL`: exact callback URI registered with Dex
-- `APP_ORIGIN`: public application origin for CSRF validation
-- `APP_COOKIE_HASH_KEY`, `APP_COOKIE_BLOCK_KEY`: independent base64-encoded
-  32-byte keys, persisted by the deployment
-
-Other settings:
+The full contract is in [config.go](config.go). Voter has no login of its own, so
+there is no issuer, client, cookie key or origin to configure.
 
 | Variable | Default / behavior |
 | --- | --- |
 | `HOST`, `PORT` | `0.0.0.0`, `8080` |
 | `STREAM_KUBECONFIG` | Empty uses in-cluster credentials; an explicit file is Voter's own credential outside a cluster (named for the stream gateway it used to serve) |
-| `PARTICIPANT_CONNECTOR_ID` | `room-pass`; the logins that may vote, published in `/config.json` |
-| `ROOM_NAME` | `demo`; the Room whose join code the operator page shows |
-| `AUDIT_TRAIL_COMMIT_URL_TEMPLATE` | Empty; turns a commit sha into a link, with `{sha}` substituted |
-| `OIDC_CONNECTOR_ID` | Empty lets Dex choose; use `room-pass` to preselect the room form |
-| `OIDC_CONNECTOR_CHOICES` | Comma-separated allowlist for explicit login choices, e.g. `github,linkedin` |
-| `PARTICIPANT_COOKIE_NAME` | `__Host-voter-session`; Secure and HttpOnly |
-| `SESSION_COOKIE_MAX_AGE_SECONDS` | `43200`, capped by the ID token's expiry |
-| `KUBERNETES_API_SERVER` | In-cluster server, or the explicit stream kubeconfig server; an override must match a local kubeconfig |
+| `KUBERNETES_API_SERVER` | The in-cluster server, or the explicit kubeconfig's; an override must match the kubeconfig |
 | `KUBERNETES_NAMESPACE` | Pod's mounted namespace, otherwise `voter`; explicit value overrides both |
 | `COFFEE_CONFIG_NAME` | `testnet-coffee` |
-| `CONFIGBUTLER_GIT_TARGET_NAME` | `voter-demo`; empty disables CommitRequest creation |
+| `ROOM_NAME` | `demo`; the Room whose join code the operator page shows |
+| `PARTICIPANT_CONNECTOR_ID` | `room-pass`; the logins that may vote, published in `/config.json` |
+| `AUDIENCE_COFFEE_ADMIN_ROLE` | `voter-audience-coffee-admin`; the Role, and RoleBinding, of the operator's audience grant |
+| `CONFIGBUTLER_GIT_TARGET_NAME` | `voter-demo`; empty asks no commit after a menu save |
+| `CONFIGBUTLER_DATABASE_GIT_TARGET_NAME` | Empty; the same for a Database save |
 | `CONFIGBUTLER_COMMITREQUEST_NAMESPACE` | Application namespace unless overridden |
+| `CONFIGBUTLER_CLOSE_DELAY_SECONDS` | `2`; how long a commit window may wait for the write it publishes |
+| `AUDIT_TRAIL_COMMIT_URL_TEMPLATE` | Empty; turns a commit sha into a link, with `{sha}` substituted |
 | `STATIC_DIR` | Empty locally; image sets `/srv/www` |
 
-TLS trust is taken from the selected cluster configuration; TLS verification is required.
-Participant REST clients load no service-account credentials. Voter's own credential
-(`service_account.go`) is used by the tally reconciler alone, to read rounds and
-ballots and write a round's status. Writes keep the participant token; there is no
-impersonation or write fallback.
+Voter acts in Kubernetes only as itself (`service_account.go`), for two things: the
+storefront reads the one CoffeeConfig, and the tally reconciler reads rounds and
+ballots and writes a round's status. It holds nobody's token. TLS verification is
+required.
 
 ## Development and verification
 
@@ -74,21 +77,19 @@ task voter:build
 task image-voter
 ```
 
-With the settings above supplied, select an explicit kubeconfig for Voter's own
-identity before running outside a pod:
+Outside a pod, select an explicit kubeconfig for Voter's own identity:
 
 ```bash
 cd voter
 STREAM_KUBECONFIG=/absolute/path/to/voter-stream.kubeconfig go run .
 ```
 
-Use a dedicated credential with the reconciler's grants shown in the fixture. The file's server and CA trust also configure participant
-clients, but its token, client certificate, exec plugin and impersonation settings
-are never copied into those clients. Omit `KUBERNETES_API_SERVER` or set it to the
-same server as the file. There is no fallback to `$KUBECONFIG` or `~/.kube/config`.
-The issuer must be reachable for startup discovery.
-Use HTTPS at the browser-facing origin because session cookies are always Secure.
-Vite can serve the frontend separately; see [frontend development](../frontend/README.md).
+Use a dedicated credential with the voter Role's grants, as in the fixture
+(`test/e2e/voter.yaml`). Omit `KUBERNETES_API_SERVER` or set it to the same server as
+the file. There is no fallback to `$KUBECONFIG` or `~/.kube/config`. Without krm-foyer
+in front, the `/public/` endpoints answer 401: run it behind the e2e fixture's edge
+(`task e2e-up`) to use them. Vite can serve the frontend separately; see
+[frontend development](../frontend/README.md).
 
 The image build context is the repository root because it includes both Go and
 Vue sources. Root Task tasks replace the retired Makefile. To publish to a custom

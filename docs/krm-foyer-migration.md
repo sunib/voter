@@ -324,30 +324,42 @@ see [quiz-admission.md](quiz-admission.md).
 
 ### 5. The domain backend behind the identity check
 
-- [ ] One middleware reads `Krm-Foyer-Identity` (base64url JSON: `userInfo`,
-      `displayName`, `connector`) in place of `requireParticipant`. It refuses requests
-      without it. The header can only be trusted behind the route that asks
-      `?identity=true`, and the NetworkPolicy below enforces that.
-- [ ] Storefront and orders read CoffeeConfig with Voter's ServiceAccount: add `get` on
-      `coffeeconfigs` to the `voter` Role. Order and voucher logic is unchanged.
-- [x] `/join-room?code=`: the cookie part of today's `setJoinCodeHandoff`, then a `302`
-      to `/auth/login?return_to=%2F&oidc.connector_id=room-pass`. The QR code in
-      `RoomScreen.vue` points here. Done in step 2 (`join_room.go`); the access log for
-      this route is a cluster matter, see 7.4.
-- [x] Delete Voter's stream gateway (`stream_runtime.go`, `participant_stream.go`,
-      `/public/stream`, `/metrics`). Done in step 2.
-- [ ] Delete the rest of what krm-foyer replaced (see
-      [What Voter becomes](#what-voter-becomes)) and its config (`OIDC_*`, cookie
-      keys, `APP_ORIGIN`). Delete the dead `normalizeJoinCodeHeader` and `clientIP`
-      while there. **Keep `STREAM_KUBECONFIG`:** it is now Voter's own credential
-      outside a cluster, which the reconciler needs; in a pod it is unset anyway.
-- [ ] The `voter` Role (fixture `test/e2e/voter.yaml`, cluster `app.yaml`) still
-      carries the stream gateway's grants: `list`/`watch` on the CoffeeConfig and the
-      Room, and the `voter-stream-access-review` ClusterRole for SubjectAccessReviews.
-      Drop them; keep the reconciler's (`quizsessions` get/list/watch,
-      `quizsubmissions` list/watch, `quizsessions/status` get/patch) and add the
-      storefront's `get coffeeconfigs` above. Rewrite the Role's comment, which still
-      explains the shared watch.
+Done 2026-10-06 on the same branch. Checked on the fixture: an order with the
+`TESTNET` voucher is placed through the identity check (total 0) and the feed shows
+the participant's name; signed out, a forged `Krm-Foyer-Identity` gets krm-foyer's
+401; signed in, a forged one is replaced by krm-foyer's, so the feed still shows the
+real name; a write without CSRF proof is krm-foyer's 403; a pod other than Traefik
+cannot reach Voter. Voter logs an order under the API server's `demo:` name.
+
+- [x] One middleware, `requireIdentity` (`foyer_identity.go`), reads
+      `Krm-Foyer-Identity` in place of `requireParticipant` and refuses requests
+      without it, logging that the route is wrong. Every refusal it passes on is still
+      logged (the refusal recorder from the 2026-09-17 post-mortem moved with it).
+- [x] Storefront and orders read the CoffeeConfig with Voter's ServiceAccount; the
+      `voter` Role has `get` on `demo-coffee`. **Behaviour change:** anyone signed in
+      sees the storefront, where before a person outside the audience group got the
+      API server's 403. Who may *edit* the menu is unchanged, decided on the `/k8s`
+      write. A 401 or 403 from the API server is now Voter's own credential failing,
+      reported as a 502 and logged.
+- [x] `/join-room?code=`: done in step 2.
+- [x] Deleted what krm-foyer replaced: Voter's OIDC client, session cookie, CSRF check,
+      participant clients and `/auth/*` (`oidc.go`, `oidc_handlers.go`,
+      `participant_session.go`, `session_cookie.go`, `participant_kube.go`,
+      `participant_authz.go`), their config (`OIDC_*`, cookie keys, `APP_ORIGIN`,
+      `PARTICIPANT_COOKIE_NAME`, `SESSION_COOKIE_MAX_AGE_SECONDS`), and the dead
+      `normalizeJoinCodeHeader` and `clientIP`. `go mod tidy` dropped the OIDC, oauth2
+      and secure-cookie modules. `STREAM_KUBECONFIG` stays (Voter's own credential).
+- [x] The fixture's `voter` Role is the reconciler's grants plus `get` on the
+      CoffeeConfig; the stream gateway's grants and its SubjectAccessReview
+      ClusterRole are gone. The audience Role has the cluster's `databases` grants.
+- [x] Fixture edge: `/public/` → Voter through `foyer-identity` (ForwardAuth to
+      `http://krm-foyer.voter.svc/auth/check?identity=true`) and `no-cookie`; every
+      other Voter route `no-cookie`, ungated. A NetworkPolicy admits only Traefik to
+      Voter's port. `up.sh` waits for krm-foyer's 401 on `/public/storefront`.
+- [x] Found while doing this: the talk has a person `kubectl apply` their own Database
+      request (`participant-rbac.yaml` grants `update` for it), which step 3's policy
+      refused because of `apply`'s last-applied annotation. `voter-editable-spec` now
+      allows that annotation on Databases; still not on CoffeeConfigs.
 
 ### 6. Prove it before the cluster
 

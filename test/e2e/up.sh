@@ -110,7 +110,7 @@ kubectl -n voter rollout restart deployment/room-pass
 kubectl -n voter rollout status deployment/room-pass --timeout=180s
 kubectl -n voter rollout status deployment/dex --timeout=180s
 
-# The application trusts the fixture CA to reach the issuer over the published port.
+# krm-foyer trusts the fixture CA to reach the issuer over the published port.
 kubectl -n voter create configmap issuer-ca --from-file=ca.crt=.local/tls.crt --dry-run=client -o yaml | kubectl apply -f -
 
 # Built from the repository root because the image contains both the Go backend
@@ -175,6 +175,11 @@ probe() {
   # its own interruption header, so it is krm-foyer answering and not Voter.
   status=$(curl -sk -D - -o /dev/null --resolve "app.voter.test:19443:$gateway" \
     https://app.voter.test:19443/k8s/api || true)
+  grep -q '^HTTP/[0-9.]* 401' <<<"$status" && grep -qi '^krm-foyer-interruption:' <<<"$status" || return 1
+  # And Voter's /public/ behind krm-foyer's identity check: the check's own 401,
+  # never Voter's answer to a request without a session.
+  status=$(curl -sk -D - -o /dev/null --resolve "app.voter.test:19443:$gateway" \
+    https://app.voter.test:19443/public/storefront || true)
   grep -q '^HTTP/[0-9.]* 401' <<<"$status" && grep -qi '^krm-foyer-interruption:' <<<"$status"
 }
 streak=0

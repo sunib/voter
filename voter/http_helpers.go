@@ -1,34 +1,17 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
-	"net"
+	"fmt"
 	"net/http"
-	"strings"
 )
 
-func normalizeJoinCodeHeader(code string) string {
-	return strings.ToLower(strings.TrimSpace(code))
-}
-
-func clientIP(r *http.Request) string {
-	// Traefik typically sets X-Forwarded-For. trustForwardHeader is configured on Traefik,
-	// not here, but logging it is still helpful.
-	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
-		// Take first hop.
-		if i := strings.IndexByte(xff, ','); i >= 0 {
-			return strings.TrimSpace(xff[:i])
-		}
-		return xff
-	}
-	if xrip := strings.TrimSpace(r.Header.Get("X-Real-Ip")); xrip != "" {
-		return xrip
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil {
-		return host
-	}
-	return r.RemoteAddr
+// noStore keeps a response out of every cache and its URL out of Referer.
+func noStore(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
 }
 
 // writeJSON is the one place responses are encoded, so a handler cannot
@@ -37,4 +20,13 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+// randomToken returns 256 bits of URL-safe randomness, for order IDs.
+func randomToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("randomness unavailable: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
