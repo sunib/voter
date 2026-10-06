@@ -36,11 +36,15 @@ test('a scanned code signs a participant in, and logout ends both sessions', asy
     expect(page.url()).not.toContain(code);
 
     await page.getByLabel('Display name').fill(displayName);
+    // The Room asks one question at the door; any answer will do here.
+    await page.getByRole('radio', { name: 'Vue' }).check();
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.waitForURL(`${APP}/`);
     const session = await page.evaluate(async () => (await fetch('/auth/session')).json());
     expect(session.connector).toBe('room-pass');
     expect(session.displayName).toBe(displayName);
+    // The answer's group arrives beside the room's: Dex split Room Pass's header.
+    expect(session.groups).toEqual(expect.arrayContaining(['demo:voter-audience', 'demo:frontend-vue']));
 
     // Sign out from the identity page: krm-foyer's session ends, and the
     // participant lands on Room Pass's page with its own button.

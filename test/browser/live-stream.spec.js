@@ -92,6 +92,8 @@ async function signIn(browser, label, prepare = async () => {}) {
   await expect(page.getByLabel("Room code")).toBeVisible();
   await page.getByLabel("Room code").fill(room().status.joinCode.code);
   await page.getByLabel("Display name").fill(displayName);
+  // The Room asks one question at the door; any answer will do here.
+  await page.getByRole("radio", { name: "Vue" }).check();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
 
   // Wait for the round trip to finish and assert we actually arrived. Without

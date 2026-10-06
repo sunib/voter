@@ -35,6 +35,8 @@ test('two participants vote, see durable results, and cannot vote twice or after
     names.push(displayName);
     await page.getByLabel('Room code').fill(JSON.parse(kube('get', 'room', 'demo', '-o', 'json')).status.joinCode.code);
     await page.getByLabel('Display name').fill(displayName);
+    // The Room asks one question at the door; any answer will do here.
+    await page.getByRole('radio', { name: 'Vue' }).check();
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.waitForURL(`${APP}/`);
     // The round list is a section of the home page now, not a /vote page of its own.

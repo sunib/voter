@@ -51,6 +51,7 @@ func TestConfigEndpoint(t *testing.T) {
 		ConfigButlerGitTargetName:     " voter-demo ",
 		ConfigButlerCloseDelaySeconds: 2,
 		AudienceCoffeeAdminRole:       "voter-audience-coffee-admin",
+		AudienceBallotRole:            "voter-audience-ballot",
 	}})
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/config.json", nil))
@@ -74,6 +75,7 @@ func TestConfigEndpoint(t *testing.T) {
 		"commitRequestNamespace":  "",
 		"commitCloseDelaySeconds": float64(2),
 		"audienceCoffeeAdminRole": "voter-audience-coffee-admin",
+		"audienceBallotRole":      "voter-audience-ballot",
 	}
 	for k, v := range want {
 		if body[k] != v {

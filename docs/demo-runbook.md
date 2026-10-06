@@ -139,6 +139,16 @@ purpose is what this one does.
       kubectl -n voter get rolebinding voter-audience-coffee-admin   # want NotFound
       ```
 
+- [ ] Confirm nobody may vote yet and nobody holds the menu alone. The first
+      round is opened to one group from `/room` (**Who may vote**), on stage.
+
+      ```bash
+      kubectl -n voter get rolebindings -o wide | grep -E 'voter-audience-(ballot|coffee-admin-person)'   # want nothing
+      ```
+
+- [ ] Every participant joined after the door question existed: anyone who
+      enrolled before it has no answer group. Clear rehearsal participants
+      (`kubectl -n voter delete participants --all`) before the room opens.
 - [ ] Open `/me` on your phone and confirm the permission grid renders.
 - [ ] Nothing the audience can read may mention Git. The CoffeeConfig is seeded
       and not reconciled, so a fix in the platform repo does not reach the live
@@ -429,7 +439,7 @@ Voting never creates one.
 
 ## Reset between runs
 
-Run all four between every run, including between a rehearsal and the real talk.
+Run all five between every run, including between a rehearsal and the real talk.
 Nothing resets itself.
 
 ```bash
@@ -445,8 +455,11 @@ flux reconcile kustomization voter-demo
 # 3. Confirm.
 kubectl -n voter get quizsessions   # demo1 live, evaluation closed
 
-# 4. Revoke the coffee grant.
-kubectl -n voter delete rolebinding voter-audience-coffee-admin
+# 4. Revoke the coffee grants: the room's and the one person's.
+kubectl -n voter delete rolebinding voter-audience-coffee-admin voter-audience-coffee-admin-person --ignore-not-found
+
+# 5. Nobody votes until /room says so.
+kubectl -n voter get rolebindings -o name | grep voter-audience-ballot- | xargs -r kubectl -n voter delete
 ```
 
 Step 2 (and any `delete coffeeconfig demo-coffee`) starts a ten-minute window
@@ -470,7 +483,10 @@ The order feed needs no reset. Restarting the pod empties it.
 | Symptom | Do this |
 |---|---|
 | Nobody can join | `kubectl -n voter get rooms.room-pass.koudijs.dev demo -o yaml`, check `endsAt` and `enrollment` |
-| Join works, voting 403s | Read the message. "This round is not open for voting." or "The round changed…" is admission, working; a reload fixes the second. Otherwise `kubectl -n voter get rolebinding voter-audience` |
+| A phone says "This round isn't open to you. Yet." | Working as intended: flip their group (or Everyone) under **Who may vote** on `/room`. It opens within about five seconds |
+| Who-may-vote switches do nothing | `kubectl -n voter get role voter-audience-ballot`. Last resort: `kubectl -n voter create rolebinding voter-audience-ballot-voter-audience --role=voter-audience-ballot --group=demo:voter-audience` |
+| Join works, voting 403s with no card | Read the message. "This round is not open for voting." or "The round changed…" is admission, working; a reload fixes the second. Otherwise `kubectl -n voter get rolebinding voter-audience` |
+| The picked person still cannot save the menu | They joined in an earlier Room (new UID, new name). Pick again; `/room` shows the username it bound |
 | Results bars do not move | Check the "as of" timestamp. If stuck, the tally controller has stopped: `kubectl -n voter logs deploy/voter`. There is no fallback read |
 | Nothing reaching Git | `kubectl -n gitops-reverser logs deploy/gitops-reverser`, check the GitProvider secret. The reverser runs in its own namespace, not `voter` |
 | A commit names nobody | The name is in the Author header. `git show --format=fuller`. Do not debug on stage |

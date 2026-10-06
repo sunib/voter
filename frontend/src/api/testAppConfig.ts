@@ -13,6 +13,7 @@ export const TEST_CONFIG: AppConfig = {
   commitRequestNamespace: '',
   commitCloseDelaySeconds: 2,
   audienceCoffeeAdminRole: 'voter-audience-coffee-admin',
+  audienceBallotRole: 'voter-audience-ballot',
 }
 
 export async function useTestAppConfig(
