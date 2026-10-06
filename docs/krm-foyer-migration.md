@@ -363,24 +363,47 @@ cannot reach Voter. Voter logs an order under the API server's `demo:` name.
 
 ### 6. Prove it before the cluster
 
-- [ ] Voter's browser e2e, through krm-foyer:
-      - QR → join → vote;
-      - order with a voucher;
-      - the operator grants coffee-admin and an audience member saves the menu, which
-        produces a commit;
-      - logout of both programs.
-- [ ] One check that a participant cannot list or create what they could not before:
-      a raw submission with someone else's name, a CoffeeConfig label patch.
-- [ ] A load rehearsal at 200 sessions through krm-foyer's shared watches, as
-      PLAN.md 3 asks for Voter's own gateway today.
-- [ ] Rewrite the browser specs for the new contract. `live-stream.spec.js` asserts
-      Voter's `voter_stream_*` metrics through the pod proxy and that `/metrics` is a
-      404; both are gone, and the shared-watch evidence is krm-foyer's metrics now.
-      `voting.spec.js` and `operator.spec.js` sign in through Voter's login.
-- [ ] Rewrite `voter/test/loadtest` (`voteload`), which signs in through Voter's
-      `/auth/login`, reads `/auth/session` and votes through `/public/rounds`.
-- [ ] Check `test/browser/rehearse-production.mjs` against the new flow before it is
-      next run against the demo.
+Done 2026-10-06 on the same branch, against the fixture.
+
+- [x] Voter's browser e2e through krm-foyer: **11 specs, all passing.**
+      - QR → join → vote: `join-and-logout.spec.js` follows the QR link from another
+        origin to a join page with the code filled in; `voting.spec.js` votes, sees
+        results update, is refused a second vote and a vote after close (admission's
+        message).
+      - Order with a voucher: checked by hand in step 5; the live-stream specs cover
+        the menu the order reads.
+      - The operator: `operator.spec.js` signs in as the fixture's operator, sees the
+        QR code, opens and closes a round, and grants and revokes the menu. The
+        live-stream specs edit the menu under that grant. No ConfigButler in the
+        fixture, so "produces a commit" is left to 7.6.
+      - Logout of both programs: `join-and-logout.spec.js`.
+- [x] A participant cannot do what they could not before: `boundaries.spec.js` sends a
+      ballot in someone else's name, one without pins, a second one, and a label patch
+      on the menu, each refused by the API server in the policy's words.
+- [x] **The load rehearsal, 200 participants over 60 s** (`task voter:voteload`, now
+      on krm-foyer): each signs in through krm-foyer, Dex and Room Pass, holds the
+      CoffeeConfig's stream open, and votes through `/k8s`. **200/200** completed;
+      the tally counted 200/200. At the peak, 197 streams open, all on krm-foyer's
+      one shared watch (`krm_foyer_upstream_watches_open{identity="shared"} 1`,
+      `{identity="user"} 0`); the API server's CoffeeConfig watches stayed at 2.
+      p95: login 43 ms, stream snapshot 4 ms, ballot 5 ms; end to end p99 95 ms.
+      One shared transport, one source IP and a local fixture: an optimistic floor,
+      not a room of 200 phones on conference Wi-Fi.
+- [x] The fixture gained an operator: Dex's `mockCallback` connector under the
+      `github` id signs in `github:kilgore@kilgore.trout`, cluster-admin as the
+      cluster's operator is. Dex's own `/callback` is routed to Dex, and a second
+      NetworkPolicy admits Traefik to Dex for it; Room Pass keeps
+      `/callback/room-pass`.
+- [x] The fixture's audience may only read the menu, as on the cluster; editing is
+      the `voter-audience-coffee-admin` grant.
+- [x] Found by the suite: a ballot cast in the first seconds of a round had no
+      questions digest to pin and could never be sent. The page now waits for it
+      (up to 8 s), and so does the harness.
+- [ ] The harness leaves its participants enrolled, and the fixture Room takes 300: a
+      second run of 200 found the room full. Clean up between runs
+      (`kubectl -n voter delete participants` by display-name prefix), or teach
+      `voteload` to.
+- [ ] The Vite loop (step 1).
 
 ### 7. Cutover in `external/k8s` (pull first, see AGENTS.md)
 

@@ -38,19 +38,14 @@ tasks:
     cmds:
       - golangci-lint run --fix ./...
 
-  test-stream-rehearsal:
-    desc: Rehearse 200 independent stream identities in the disposable e2e fixture (task e2e-up)
-    env:
-      VOTER_STREAM_REHEARSAL: '1'
-    cmds:
-      - go test -run '^TestFixtureSharedStreamRehearsal$' -v -count=1 -timeout=4m
-
   voteload:
     desc: >-
-      Rehearse a whole room voting for real: N participants each log in through
-      Dex/Room Pass and cast a ballot with their own token. Writes to whatever
-      cluster KUBECONFIG points at and produces two commits per ballot -- read
-      docs/demo-day-readiness.ignore.md before pointing it at the demo cluster.
+      Rehearse a whole room for real: N participants each sign in through
+      krm-foyer and Dex/Room Pass, hold the coffee menu's live stream open
+      through krm-foyer's shared watch, and cast a ballot with their own token
+      through /k8s. Writes to whatever cluster KUBECONFIG points at and produces
+      two commits per ballot -- read docs/demo-day-readiness.ignore.md before
+      pointing it at the demo cluster.
     cmds:
       - go run ./test/loadtest -round "{{.ROUND}}" -users "{{.USERS}}" -window "{{.WINDOW}}" {{.CLI_ARGS}}
     vars:
