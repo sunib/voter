@@ -1,0 +1,50 @@
+# A rule about the data, not about who writes it: nobody pays more than €10 for
+# a coffee. RBAC decides whether you may change the menu at all, and
+# voter-editable-spec that you change only its spec; this one asks whether the
+# change itself makes sense, before anything is stored.
+#
+# CEL in the API server, so no webhook and no server to run. A save from the
+# coffee editor that breaks it comes back as the API server's 422, and the editor
+# shows this policy's message in its "Admin request failed" panel
+# (frontend/src/api/http.ts, admissionReason).
+#
+# Everyone, unlike the other two policies: a price is no more sensible for
+# coming from Git. A €12 coffee committed to the GitOps repository is refused
+# when Flux applies it, with this same message in the Kustomization's status.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: voter-coffee-price
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [examples.configbutler.ai]
+        apiVersions: ['*']
+        resources: [coffeeconfigs]
+        operations: [CREATE, UPDATE]
+  variables:
+    # The change, not the menu: a price over €10 is refused when this request
+    # sets it. One already stored stays until somebody changes it, so it does
+    # not block every other edit -- the menu is seeded once and never
+    # reconciled (ssa: IfNotPresent), and it held a €12 espresso when this
+    # policy arrived.
+    - name: overpriced
+      expression: >-
+        object.spec.products.filter(p, p.priceCents > 1000
+          && (oldObject == null || !oldObject.spec.products.exists(o,
+                o.sku == p.sku && o.priceCents == p.priceCents)))
+  validations:
+    - expression: "variables.overpriced.size() == 0"
+      messageExpression: >-
+        'Nobody pays more than €10 for a coffee: ' +
+        variables.overpriced.map(p, p.name).join(', ') + '.'
+      reason: Invalid
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: voter-coffee-price
+spec:
+  policyName: voter-coffee-price
+  validationActions: [Deny]

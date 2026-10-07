@@ -143,6 +143,12 @@ service accounts (Flux, gitops-reverser, Voter's reconciler) are not matched:
   last-applied annotation. A person's `kubectl apply` of a CoffeeConfig is
   therefore refused.
 
+A third policy is not about who: **`voter-coffee-price`** refuses any
+CoffeeConfig create or update that sets a product over €10 (`priceCents` above
+1000; a price already stored stays until changed), from anyone, Flux included, as a 422 with "Nobody pays more than €10 for
+a coffee: <product>." Whether a person may change the menu is RBAC's question;
+whether the change makes sense is this one's.
+
 **There is still no bound on how much an audience token may write.** The `voter`
 namespace has no ResourceQuota and no LimitRange. One ballot per person per round
 is enforced; Database requests are not counted. A ballot that names a round
@@ -189,6 +195,7 @@ and test an authorization mechanism for that explicitly.
 | Test file | What it establishes |
 | --- | --- |
 | [Boundaries in the browser](../test/browser/boundaries.spec.js) | From a real participant session, through `/k8s`: a ballot in someone else's name and an unpinned ballot are refused with `voter-ballot`'s messages, the participant's own ballot lands once and the second is a 409, a label on the menu is refused by `voter-editable-spec` even while the menu grant is on |
+| [The editor in the browser](../test/browser/live-stream.spec.js) | With the menu grant on, a €12.50 coffee saved from the editor is refused by `voter-coffee-price`, once, with the policy's sentence in the page and nothing stored |
 | [The operator in the browser](../test/browser/operator.spec.js) | A participant is refused the operator page and never sees a join code; the operator (Dex `github` id, cluster-admin) sees the code, opens and closes a round, and grants and revokes the menu |
 | [Voter in the browser](../test/browser/) | Real Chromium through Traefik, krm-foyer, Dex and a released Room Pass: QR join and logout, voting, live streams; CI retains video |
 | [Voter's identity check](../voter/participant_storefront_test.go) | `/public/` routes refuse a request without `Krm-Foyer-Identity` |

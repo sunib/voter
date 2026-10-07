@@ -45,6 +45,7 @@ to say which *part* of the API server refused is the point.
 | A participant cannot vote in somebody else's name | **kube-apiserver** (admission) | `voter-ballot` checks the name and labels against the token's display name, which no request can set |
 | A participant cannot vote after the round closes | **kube-apiserver** (admission) | `voter-ballot`: "This round is not open for voting." |
 | A participant cannot relabel or annotate the menu, even with the grant | **kube-apiserver** (admission) | `voter-editable-spec`: a person may change only `spec` |
+| Nobody can price a coffee over €10, even with the grant, even from Git | **kube-apiserver** (admission) | `voter-coffee-price`: "Nobody pays more than €10 for a coffee: Flat White." in the editor's "Admin request failed" panel |
 | The grant switch is absent from a participant's `/room` | **kube-apiserver** | No `get` on `rolebindings`, so the page has nothing to render |
 | **An operator signed in with GitHub cannot vote quietly** | **kube-apiserver** (admission) | `voter-ballot`: a ballot from anyone but a `demo:` user must carry `voter.configbutler.ai/cast-by: operator` |
 
@@ -88,11 +89,13 @@ Two shapes, same position in the request path:
   of your cluster. `failurePolicy: Fail` means an outage of your webhook is an
   outage of the resource it guards; `Ignore` means your rule is advisory.
 
-**This cluster runs two policies, no webhooks**: `kubectl get
-validatingadmissionpolicies` lists `voter-ballot` and `voter-editable-spec`
-(sources in [`voter/config/admission/`](../voter/config/admission/)). Both match
-people only — `system:` users and service accounts are not voters and not
-editors.
+**This cluster runs three policies, no webhooks**: `kubectl get
+validatingadmissionpolicies` lists `voter-ballot`, `voter-editable-spec` and
+`voter-coffee-price` (sources in [`voter/config/admission/`](../voter/config/admission/)).
+The first two match people only — `system:` users and service accounts are not
+voters and not editors. `voter-coffee-price` matches everyone: it checks the
+data, not the writer, so a €12 coffee committed to Git fails Flux's apply with
+the same sentence.
 
 `voter-ballot` is the declared-operator version, not the flat one. A flat *"only
 `demo:` identities may create ballots"* would also refuse your own seeded Ada

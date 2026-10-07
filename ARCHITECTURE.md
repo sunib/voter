@@ -19,7 +19,7 @@ The running revision is **Voter 2.0.0 (`b446793`) behind krm-foyer 0.3.0**, live
 | krm-stream | Watch-to-SSE protocol, snapshots, browser store, drafts/conflicts and patch generation (npm `@configbutler/krm-stream` 0.10.0) | No application credentials, login UI or Git commit workflow |
 | Room Pass | Room lifecycle, rotating codes, browser enrollment, stable participant identity, bound handoff to Dex | No application grants or token signing; no Voter dependency |
 | Dex | OAuth 2.0/OIDC authorization server, connectors, codes and signed tokens | Trusts Room Pass assertions only through a protected authproxy integration |
-| Kubernetes | Resource storage, token authentication, RBAC, audit, and **admission**: `voter-ballot` holds a ballot's rules and `voter-editable-spec` limits a person's edits to `spec` | Identity does not itself grant permission |
+| Kubernetes | Resource storage, token authentication, RBAC, audit, and **admission**: `voter-ballot` holds a ballot's rules and `voter-editable-spec` limits a person's edits to `spec`, and `voter-coffee-price` refuses a coffee over €10 from anyone | Identity does not itself grant permission |
 | ConfigButler (gitops-reverser) | Persisting accepted changes to Git, commit status/history | Request acceptance is distinct from an observed commit |
 | Platform GitOps repository | Installed versions, routes, CRDs, RBAC, admission policies, issuer configuration | Live application changes arrive through Flux |
 
@@ -225,10 +225,11 @@ the gap from the rules review and still lets the save be attempted.
 
 ### Admission
 
-Kubernetes now enforces what Voter's handlers used to. Both policies live in
+Kubernetes now enforces what Voter's handlers used to. The policies live in
 [voter/config/admission/](voter/config/admission/) and are copied into the GitOps
-repository. Both match people only (not `system:` users), so Flux, gitops-reverser and
-controllers are untouched.
+repository. The first two match people only (not `system:` users), so Flux,
+gitops-reverser and controllers are untouched; the third is about the data and matches
+everyone.
 
 - **`voter-ballot`** reads every QuizSession in the namespace as a parameter. A ballot
   from anyone but a `demo:` (Room Pass) user must carry the label
@@ -246,6 +247,12 @@ controllers are untouched.
   Database, the intent annotation and `kubectl apply`'s last-applied one, because the
   talk applies a Database request from a terminal. A person's `kubectl apply` of a
   CoffeeConfig is refused.
+- **`voter-coffee-price`**: on every CoffeeConfig create and update, from anyone,
+  including Flux: no request may set a product's `priceCents` above 1000. A price
+  already stored above it stays until changed, so it does not block other edits.
+  "Nobody pays more than €10 for a coffee: Flat White." It is a 422 (`Invalid`), not a 403: the person may make the
+  change, the change does not make sense. The editor shows the sentence in its "Admin
+  request failed" panel.
 
 So one refusal in the demo that used to be the application's is now the cluster's.
 

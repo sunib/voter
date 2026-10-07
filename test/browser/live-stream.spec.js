@@ -304,6 +304,39 @@ test("a save that keeps losing says so and keeps unsaved input visible", async (
   }
 });
 
+// A refusal about the data rather than the person: voter-coffee-price
+// (voter/config/admission/). The editor holds the grant, so RBAC and
+// voter-editable-spec both let the save through, and the policy's own sentence
+// has to reach the screen -- without the API server's wrapper around it, and
+// without the editor retrying a refusal that is not a race.
+test("a price over €10 is refused by admission, in the policy's words", async ({ browser }) => {
+  const editor = await signIn(browser, "over-priced");
+  let patches = 0;
+  editor.page.on("request", (request) => {
+    if (request.method() === "PATCH" && isCoffeeConfig(request.url())) patches++;
+  });
+  const price = editor.page
+    .locator("label", { hasText: "Base price (cents)" })
+    .first()
+    .locator("input");
+  const before = coffeeConfig().spec.products[0].priceCents;
+  try {
+    await price.fill("1250");
+    await editor.page.getByRole("button", { name: /^Save \d+ Change/ }).click();
+    const refusal = editor.page.getByRole("alert").filter({ hasText: "Admin request failed" });
+    await expect(refusal).toContainText(
+      `Nobody pays more than €10 for a coffee: ${coffeeConfig().spec.products[0].name}.`,
+    );
+    await expect(refusal).not.toContainText("ValidatingAdmissionPolicy");
+    expect(patches).toBe(1);
+    // Nothing was stored, and the person's typing is still there to correct.
+    expect(coffeeConfig().spec.products[0].priceCents).toBe(before);
+    await expect(price).toHaveValue("1250");
+  } finally {
+    await editor.context.close();
+  }
+});
+
 test("usage read failures do not block the editor and a live update retries them", async ({ browser }) => {
   let usageAvailable = false;
   let successfulReads = 0;
