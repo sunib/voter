@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.1.2](https://github.com/sunib/voter/compare/v2.1.1...v2.1.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* merge concurrent voucher edits per voucher ([986e0f3](https://github.com/sunib/voter/commit/986e0f3139fcb55041b58a966683b210a85005c3))
+
 ## [2.1.1](https://github.com/sunib/voter/compare/v2.1.0...v2.1.1) (2026-10-06)
 
 
