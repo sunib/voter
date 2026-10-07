@@ -103,8 +103,9 @@ just move on the server?", so the workaround is less obviously available.
 
 **2026-10-06:** fixed for `spec.products` by entry 3 — once the editor passes the
 CRD's keyed lists to `withOpenAPIKeyedLists`, the merge recurses into each
-product and flashes `spec.products.0.priceCents`. Unkeyed lists (`vouchers`)
-still flash whole. Pinned by `frontend/src/api/liveCoffeeConfig.test.ts`:
+product and flashes `spec.products.0.priceCents`. `spec.vouchers` followed on
+2026-10-07, keyed by `code` (docs/runbook-coffee-keyed-lists.md); an unkeyed
+list would still flash whole. Pinned by `frontend/src/api/liveCoffeeConfig.test.ts`:
 `flashes a remote change inside the product list at the field`.
 
 ---

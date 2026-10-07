@@ -21,10 +21,9 @@ function coffeeResource(object: unknown): object is KRMObject & CoffeeConfig {
 }
 
 /** The keyed lists of voter/config/crd/coffeeconfigs.yaml, and nothing else.
- *  Products are identified by `sku`, so a price edit on one product merges past
- *  somebody else's edit on another instead of conflicting on the whole menu.
- *  Vouchers are not keyed in the CRD and stay one atomic value. Kept in step
- *  with the CRD by liveCoffeeConfig.test.ts. */
+ *  Products are identified by `sku` and vouchers by `code`, so an edit to one
+ *  merges past somebody else's edit to another instead of conflicting on the
+ *  whole list. Kept in step with the CRD by liveCoffeeConfig.test.ts. */
 export const coffeeConfigKeyedLists: KubernetesStructuralSchema = {
   properties: {
     spec: {
@@ -32,6 +31,10 @@ export const coffeeConfigKeyedLists: KubernetesStructuralSchema = {
         products: {
           'x-kubernetes-list-type': 'map',
           'x-kubernetes-list-map-keys': ['sku'],
+        },
+        vouchers: {
+          'x-kubernetes-list-type': 'map',
+          'x-kubernetes-list-map-keys': ['code'],
         },
       },
     },

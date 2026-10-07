@@ -382,6 +382,34 @@ describe('CoffeeConfig library integration', () => {
     ])
   })
 
+  // Vouchers are keyed by code, so the same goes for them.
+  it('merges two people editing different vouchers', async () => {
+    const { live, event } = await fixture()
+    const voucher = (code: string, discountValue: number) => ({
+      code,
+      enabled: true,
+      discountType: 'percentage',
+      discountValue,
+      maximumUsage: 0,
+      appliesToProducts: [],
+    })
+    const menu = (rv: string, a: number, b: number) => {
+      const next = object(rv)
+      return {
+        ...next,
+        spec: { ...next.spec, vouchers: [voucher('A', a), voucher('B', b)] },
+      }
+    }
+    await event({ type: 'modified', object: menu('2', 10, 20), redacted: [] })
+    live.setValue(['spec', 'vouchers', 1, 'discountValue'], 25)
+    await event({ type: 'modified', object: menu('3', 15, 20), redacted: [] })
+
+    expect(live.conflicts.value).toEqual([])
+    expect(live.draft.value?.spec.vouchers.map((v) => v.discountValue)).toEqual(
+      [15, 25],
+    )
+  })
+
   // The same race, lost at the API server instead of on the stream: the 409
   // retry re-sends the whole list with the winner's price kept in it.
   it('re-sends a stale price edit with the other price that won', async () => {

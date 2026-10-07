@@ -78,6 +78,9 @@ spec:
                         type: boolean
                 vouchers:
                   type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - code
                   items:
                     type: object
                     required:
