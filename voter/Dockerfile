@@ -33,7 +33,7 @@ RUN npm run build
 # Backend binary
 ############################################
 # krm-stream 0.3.0 requires Go 1.27.1.
-FROM golang:1.27.1-bookworm AS build
+FROM golang:1.27.2-bookworm AS build
 WORKDIR /src
 
 COPY voter/go.mod voter/go.sum ./
