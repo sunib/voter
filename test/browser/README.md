@@ -27,8 +27,9 @@ The specs:
 | [`live-stream.spec.js`](live-stream.spec.js) | The editor across browsers: live updates, conflicts, the 409 re-send, a price over €10 refused by `voter-coffee-price` in its own words, and the shared-watch withdrawal below |
 | [`join-and-logout.spec.js`](join-and-logout.spec.js) | The QR link followed from another origin reaches Room Pass with the code filled in; logout ends krm-foyer's session and Room Pass's |
 | [`boundaries.spec.js`](boundaries.spec.js) | What the pages never send -- a ballot in someone else's name, one without pins, a second one, a label on the menu -- is refused by Kubernetes, in the policy's words |
+| [`phone-under-updates.spec.js`](phone-under-updates.spec.js) | On an emulated phone, a focused field keeps what was typed while ballots land, the vote is taken away and given back, the phone goes offline, or somebody else saves the menu; an answer taken back reads "answer required" and a price in euros is caught in words, never as an "invalid ..." error |
 
-All five files run: 16 tests, passing against the fixture on 2026-10-07.
+All six files run: 22 tests, passing against the fixture on 2026-10-28.
 [`playwright.config.js`](playwright.config.js) matches every `*.spec.js`; it used to
 name three files, which kept the last two out of every run until that was found.
 

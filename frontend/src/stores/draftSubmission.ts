@@ -45,7 +45,12 @@ export const useDraftSubmissionStore = defineStore('draftSubmission', {
     toAnswerList(questions: NonNullable<QuizSessionSpec['questions']>): DraftAnswer[] {
       return questions.flatMap((q): DraftAnswer[] => {
         const value = this.answers[q.id]
-        if (value === undefined || value === null || value === '') return []
+        // An answer taken back is no answer: boxes ticked and unticked leave
+        // [], a text cleared to spaces leaves blanks. Sent, a required question
+        // reads "invalid answer for ..." instead of "answer required: ...".
+        if (value === undefined || value === null) return []
+        if (Array.isArray(value) && value.length === 0) return []
+        if (typeof value === 'string' && value.trim() === '') return []
         const questionId = q.id
         switch (q.type) {
           case 'singleChoice': return [{ questionId, singleChoice: value as string }]

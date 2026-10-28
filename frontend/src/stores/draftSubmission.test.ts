@@ -18,3 +18,11 @@ it('serializes answers using question types, preserves zero and omits stale fiel
     { questionId: 'multi', multiChoice: ['A'] },
   ])
 })
+it('treats an answer taken back as unanswered, so a required one reads as required', () => {
+  const draft = useDraftSubmissionStore()
+  draft.answers = { tools: [], say: '   ' }
+  expect(draft.toAnswerList([
+    { id: 'tools', title: 'Which tools?', type: 'multiChoice', required: true, choices: ['Helm'] },
+    { id: 'say', title: 'Say something', type: 'freeText', required: true },
+  ])).toEqual([])
+})
