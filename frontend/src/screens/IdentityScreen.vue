@@ -147,10 +147,9 @@ onMounted(async () => {
         </div>
       </div>
       <p class="identity-card__note">
-        The display name is a label. The Kubernetes name beside it is the one on
-        every vote and every order you make here, and it is what RBAC matches on
-        — it came from Room Pass through Dex, and the browser never asserted
-        either of them.
+        Your display name is just a label. Kubernetes knows you by the name next
+        to it. That one is on everything you do here, and RBAC checks it. It
+        came from Room Pass through Dex, not from this browser.
       </p>
     </section>
 
@@ -159,11 +158,9 @@ onMounted(async () => {
         <h2>What this browser was told</h2>
       </div>
       <p class="hero-copy">
-        Every field <code class="inline-code">/auth/session</code> returned,
-        under its own key names. Kubernetes authorizes neither of the names
-        here: it authorizes the username in the answer below, which for a room
-        participant is built from Dex's opaque subject — deliberately so, since
-        nobody can collide with it by typing your name into the join form.
+        Everything <code class="inline-code">/auth/session</code> returned. Your
+        Kubernetes name is built from the subject below, not from your display
+        name, so nobody can become you by typing your name at the door.
       </p>
       <dl class="tech-facts">
         <div
@@ -177,19 +174,17 @@ onMounted(async () => {
       </dl>
       <p class="tech-facts__links">
         <a href="/auth/whoami" target="_blank" rel="noopener">
-          Who Kubernetes takes you to be
+          Who Kubernetes thinks you are
           <i class="pi pi-external-link" aria-hidden="true" />
         </a>
         <a href="/auth/session" target="_blank" rel="noopener">
-          The raw JSON, CSRF token and all
+          The raw JSON
           <i class="pi pi-external-link" aria-hidden="true" />
         </a>
       </p>
       <p class="hero-copy">
-        That is a live SelfSubjectReview: the API server answering, with
-        your token, about your token. There is no stored login object to read —
-        an identity in Kubernetes is derived per request, never persisted — so
-        that answer is the closest thing to one that exists.
+        The first link is a live SelfSubjectReview. Kubernetes stores no login
+        anywhere; it works out who you are on every request.
       </p>
     </section>
 
@@ -198,10 +193,8 @@ onMounted(async () => {
         <h2>What you may do</h2>
       </div>
       <p class="hero-copy">
-        The same question again, asked the other way round:
-        <code class="inline-code">kubectl auth can-i --list</code>, for you,
-        answered by the API server with your own token. Nothing on this page
-        decided any of it, and nothing in this application can change it.
+        <code class="inline-code">kubectl auth can-i --list</code>, answered by
+        the API server with your own token. This app decides none of it.
       </p>
       <AuthorizationTable
         :authz="authz"
@@ -209,13 +202,12 @@ onMounted(async () => {
         :error="authzError"
       />
       <details v-if="authz" class="raw-answer">
-        <summary>The same answer, as the API server returned it</summary>
+        <summary>The raw answer</summary>
         <pre>{{ JSON.stringify(authz.review, null, 2) }}</pre>
       </details>
       <p class="hero-copy">
-        This refreshes by itself. If someone with the rights to change it grants
-        you something while you are looking, the row appears here within a few
-        seconds — no reload, and no new sign-in.
+        It refreshes by itself. When someone grants you something, a new row
+        shows up within seconds.
       </p>
     </section>
 
@@ -228,18 +220,14 @@ onMounted(async () => {
         <h2 class="sign-out__heading">Signing out</h2>
       </div>
       <p class="sign-out__copy">
-        This clears the application's session cookie and nothing else. Your Dex
-        login and your Room Pass enrolment stay where they are, so signing in
-        again normally brings you straight back as the same participant, with no
-        code to type. Room Pass then shows you its own page, with its own button
-        to end the enrolment in this browser too.
+        This ends your session in this app only. Room Pass still knows you, so
+        signing in again usually brings you straight back, no code needed. Room
+        Pass then shows its own page, with a button to sign out there too.
       </p>
       <p class="sign-out__copy">
-        <strong>Normally.</strong> If the room has been stopped, enrolment has
-        closed, your participant was revoked, or your Room Pass session has
-        expired in the meantime, then the way back in is a fresh join code from
-        the presenter's screen — and during a talk there may not be one going
-        spare. There is no reason to sign out while the demo is running.
+        <strong>Usually.</strong> If the room has closed or your Room Pass
+        session has expired, you need a fresh code from the presenter's screen.
+        During the talk: just stay signed in.
       </p>
       <p v-if="signOutError" role="alert" class="error-copy">
         {{ signOutError }}

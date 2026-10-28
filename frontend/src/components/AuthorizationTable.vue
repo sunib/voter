@@ -144,8 +144,8 @@ const wildcardRow = computed(() =>
            floor rather than the whole answer, and presenting a short list as
            the truth in front of a room is exactly the overclaim to avoid. -->
       <p v-if="authz.incomplete" class="error-copy" role="status">
-        This answer is incomplete — an authorizer could not enumerate its rules,
-        so there may be permissions not listed here.
+        This answer is incomplete. An authorizer could not list its rules, so
+        you may have permissions that are not shown here.
         <template v-if="authz.evaluationError">
           Kubernetes said: {{ authz.evaluationError }}
         </template>
