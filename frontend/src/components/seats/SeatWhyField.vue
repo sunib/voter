@@ -30,6 +30,7 @@ const used = computed(() => [...whyText(why.value)].length)
       :placeholder="placeholder"
       :aria-invalid="error ? 'true' : undefined"
     />
-    <span v-if="error" class="field__error" role="alert">{{ error }}</span>
+    <!-- A <p>, not a <span>: .field span is the label's style. -->
+    <p v-if="error" class="field__error" role="alert">{{ error }}</p>
   </label>
 </template>

@@ -2066,3 +2066,8 @@ button.seat-cell--free {
 .seat-why__count--over {
   color: rgb(var(--danger));
 }
+
+.seat-page__taken {
+  margin-top: 0.8rem;
+  font-size: 0.9rem;
+}

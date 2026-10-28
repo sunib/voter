@@ -102,7 +102,9 @@ function label(cell: SeatCell): string {
         class="seat-map__grid"
         :style="{ '--seat-columns': plan.spec.columns }"
       >
-        <div class="seat-map__stage" aria-hidden="true">Stage</div>
+        <!-- Once per page: the zoomed row sits under the full map, which
+             already says where the stage is. -->
+        <div v-if="!large" class="seat-map__stage" aria-hidden="true">Stage</div>
         <span class="seat-map__corner" aria-hidden="true" />
         <span
           v-for="column in columnNumbers"

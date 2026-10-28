@@ -36,6 +36,9 @@ const why = ref('')
 const tried = ref(false)
 const busy = ref(false)
 const failure = ref('')
+// Said under the map, where the person is looking when their seat goes.
+const taken = ref('')
+const TAKEN = 'Someone just took that seat. Pick one close by.'
 
 const whyError = computed(() => (tried.value ? checkWhy(why.value) : ''))
 const seatError = computed(() =>
@@ -45,6 +48,7 @@ const seatError = computed(() =>
 function select(row: number, column: number) {
   selected.value = { row, column }
   failure.value = ''
+  taken.value = ''
 }
 
 // Someone else's claim reaching this phone while you were still choosing: say
@@ -63,7 +67,7 @@ watch(seats, (now) => {
     )
   ) {
     selected.value = null
-    failure.value = 'Someone just took that seat. Pick one close by.'
+    taken.value = TAKEN
   }
 })
 
@@ -104,6 +108,7 @@ async function claim() {
     failure.value = seatErrorMessage(e)
     if ((e as { status?: number }).status === 409) {
       selected.value = null
+      taken.value = TAKEN
       void refresh()
     }
   } finally {
@@ -167,6 +172,9 @@ onMounted(async () => {
             @select="select"
           />
         </template>
+        <p v-else-if="taken" class="field__error seat-page__taken" role="alert">
+          {{ taken }}
+        </p>
         <p v-else-if="seatError" class="field__error" role="alert">
           {{ seatError }}
         </p>
