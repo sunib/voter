@@ -17,8 +17,8 @@ import {
 
 const VOTER = 'https://github.com/sunib/voter'
 
-/** The parts this demo runs on, each with its own code. */
-const parts = [
+/** What I built for this demo. */
+const mine = [
   {
     name: 'Voter',
     url: VOTER,
@@ -30,19 +30,14 @@ const parts = [
     what: 'The door: the join code and the name you chose.',
   },
   {
-    name: 'Dex',
-    url: 'https://github.com/dexidp/dex',
-    what: 'Signs you in, for Room Pass and for the presenter.',
-  },
-  {
     name: 'krm-foyer',
     url: 'https://github.com/ConfigButler/krm-foyer',
-    what: 'Your session, and every request this page makes on your behalf.',
+    what: 'A Kubernetes API proxy for the browser. It keeps your session and sends every request with your own token.',
   },
   {
     name: 'krm-stream',
     url: 'https://github.com/ConfigButler/krm-stream',
-    what: 'The live updates: what changes elsewhere appears here.',
+    what: 'Live updates: what changes elsewhere shows up here.',
   },
   {
     name: 'gitops-reverser',
@@ -50,6 +45,49 @@ const parts = [
     what: 'Writes down every change, in the name of who made it.',
   },
 ] as const
+
+/** The open source it all stands on. */
+const underneath = [
+  {
+    name: 'Kubernetes',
+    url: 'https://github.com/kubernetes/kubernetes',
+    what: 'Where everything is stored and checked.',
+  },
+  {
+    name: 'Talos Linux',
+    url: 'https://github.com/siderolabs/talos',
+    what: 'The operating system of the cluster.',
+  },
+  {
+    name: 'Flux',
+    url: 'https://github.com/fluxcd/flux2',
+    what: 'Keeps the cluster in line with its configuration.',
+  },
+  { name: 'Dex', url: 'https://github.com/dexidp/dex', what: 'Signs you in.' },
+  {
+    name: 'Traefik',
+    url: 'https://github.com/traefik/traefik',
+    what: 'Routes every request to the right app.',
+  },
+  {
+    name: 'Vue',
+    url: 'https://github.com/vuejs/core',
+    what: 'What this page is built with.',
+  },
+] as const
+
+const groups = [
+  {
+    title: 'Made by me',
+    intro: 'Open source, built for demos like this one.',
+    parts: mine,
+  },
+  {
+    title: 'Open source it runs on',
+    intro: 'Doing the heavy lifting behind the scenes.',
+    parts: underneath,
+  },
+]
 
 const now = ref(Date.now())
 const backend = ref<BuildInfoSummary | null>(null)
@@ -112,14 +150,18 @@ onBeforeUnmount(() => {
       </dl>
     </section>
 
-    <section class="panel">
-      <h2>What this runs on</h2>
-      <p class="hero-copy">All open source. Have a look.</p>
+    <section v-for="group in groups" :key="group.title" class="panel">
+      <h2>{{ group.title }}</h2>
+      <p class="hero-copy">{{ group.intro }}</p>
       <ul class="build-info__parts">
-        <li v-for="part in parts" :key="part.name">
-          <a class="text-link" :href="part.url" target="_blank" rel="noopener">{{
-            part.name
-          }}</a>
+        <li v-for="part in group.parts" :key="part.name">
+          <a
+            class="text-link"
+            :href="part.url"
+            target="_blank"
+            rel="noopener"
+            >{{ part.name }}</a
+          >
           <span>{{ part.what }}</span>
         </li>
       </ul>
