@@ -138,6 +138,7 @@ kubectl wait --for=condition=Established \
   crd/coffeeconfigs.examples.configbutler.ai \
   crd/quizsessions.examples.configbutler.ai \
   crd/quizsubmissions.examples.configbutler.ai \
+  crd/seatingplans.examples.configbutler.ai \
   crd/seats.examples.configbutler.ai --timeout=60s
 # The admission policies that hold what a person may write through krm-foyer's
 # /k8s, from the same directory the cluster's copy is taken from.

@@ -1,0 +1,78 @@
+# The layout of the room: how many rows, how many chairs in each.
+#
+# Furniture, not the door. Room Pass's Room holds the join codes; this holds
+# the chairs. They may share a name because both are named after the hall,
+# and nothing derives one from the other.
+#
+# Every Seat names its SeatingPlan (spec.seatingPlanRef) and admission
+# (admission/seat-in-plan-policy.yaml) refuses a Seat that does not fit the
+# active plan. Not immutable: resizing the room is the point, and a resize
+# reaches every open phone over the stream.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: seatingplans.examples.configbutler.ai
+spec:
+  group: examples.configbutler.ai
+  scope: Namespaced
+  names:
+    plural: seatingplans
+    singular: seatingplan
+    kind: SeatingPlan
+    listKind: SeatingPlanList
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Title
+          type: string
+          jsonPath: .spec.title
+        - name: Rows
+          type: integer
+          jsonPath: .spec.rows
+        - name: Columns
+          type: integer
+          jsonPath: .spec.columns
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            SeatingPlan is the layout of a room: rows facing the stage, and
+            chairs in each row. Seats are claimed on it.
+          required:
+            - spec
+          properties:
+            metadata:
+              type: object
+              properties:
+                name:
+                  type: string
+                  # Every Seat's name starts with it (<plan>-<row>-<column>),
+                  # and the Seat CRD bounds its name on this.
+                  maxLength: 20
+            spec:
+              type: object
+              required:
+                - rows
+                - columns
+              properties:
+                title:
+                  type: string
+                  maxLength: 60
+                  description: >-
+                    The room's name as the map heads it, e.g. "Mission 2".
+                    Optional.
+                rows:
+                  type: integer
+                  minimum: 1
+                  maximum: 30
+                  description: >-
+                    How many rows of seats. Row 1 is closest to the stage.
+                columns:
+                  type: integer
+                  minimum: 1
+                  maximum: 30
+                  description: >-
+                    How many seats in each row, counted from the left as seen
+                    from the audience, facing the stage.

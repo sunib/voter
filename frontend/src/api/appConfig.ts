@@ -10,6 +10,9 @@ export interface AppConfig {
   coffeeConfigName: string
   /** The Room whose join code the operator page renders. */
   roomName: string
+  /** The SeatingPlan the map is drawn from and seats are claimed on. Not the
+   *  Room: that is the door, this is the furniture. */
+  seatingPlanName: string
   /** Turns a commit sha into a link, with "{sha}" substituted. Empty when the
    *  deployment has not been told where its audit trail is readable, in which
    *  case a sha is shown as plain text -- a dead link would be worse. */

@@ -253,6 +253,14 @@ everyone.
   "Nobody pays more than €10 for a coffee: Flat White." It is a 422 (`Invalid`), not a 403: the person may make the
   change, the change does not make sense. The editor shows the sentence in its "Admin
   request failed" panel.
+- **`voter-seat`**: a participant claims a Seat in their own display name, labelled
+  with it and with the Seat's plan, row and column (two digits); afterwards they may
+  change only their own Seat's colour and emoji. The CRD already holds for everyone
+  that a Seat is named `<plan>-<row>-<column>` and never moves or changes owner.
+- **`voter-seat-in-plan`**, for everyone: a Seat names the active SeatingPlan, the one
+  the binding's `paramRef.name` and Voter's `SEATING_PLAN_NAME` both name, and a new
+  one fits inside it. No plan, no Seat writes at all. "This room has 8 rows of 12
+  seats. Pick one on the map."
 
 So one refusal in the demo that used to be the application's is now the cluster's.
 
@@ -260,7 +268,8 @@ So one refusal in the demo that used to be the application's is now the cluster'
 
 Participants (`demo:voter-audience`) may read coffeeconfigs; get/list/watch
 quizsessions; **get and create** quizsubmissions (no list or watch); get, list, watch,
-create, patch and update databases; and create/get/list/watch commitrequests. Editing
+create, patch and update databases; get, list, watch, create and patch seats (no
+delete); get/list/watch seatingplans; and create/get/list/watch commitrequests. Editing
 the menu needs the operator's live grant (patch and update on coffeeconfigs).
 
 Voter's ServiceAccount may get `coffeeconfigs/demo-coffee` for storefront prices,

@@ -1,0 +1,89 @@
+# Whose seat it is, held where every claim passes: admission.
+#
+# A participant claims a Seat with their own token, through krm-foyer's /k8s,
+# so the Git commit of the claim is in their name. The CRD already holds what
+# is true of every Seat: its name is its place, and its plan, row, column and
+# owner never change. This adds what is true of a PARTICIPANT's Seat:
+#
+#   - CREATE: it is claimed in their own display name, and its labels say the
+#     same as its spec -- submitter, seatingplan, and row and column padded to
+#     two digits, so they sort in Git and in kubectl.
+#   - UPDATE: only their own Seat, and only spec.color and spec.emoji. The
+#     CRD keeps the rest of spec; this keeps metadata: no relabelling.
+#
+# Room Pass participants only (`demo:`). Operators are not restricted, and
+# whether a Seat fits the room is voter-seat-in-plan's, for everyone.
+#
+# One seat per person is NOT held here: admission cannot count other objects.
+# See docs/deliberate-simplifications.md.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: voter-seat
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [examples.configbutler.ai]
+        apiVersions: ['*']
+        resources: [seats]
+        operations: [CREATE, UPDATE]
+  matchConditions:
+    - name: a-participant
+      expression: "request.userInfo.username.startsWith('demo:')"
+  variables:
+    # As voter-ballot: the name chosen at the join page, which no request can
+    # set for itself.
+    - name: displayName
+      expression: >-
+        has(request.userInfo.extra) && 'configbutler.ai/claims/display-name' in request.userInfo.extra
+          && size(request.userInfo.extra['configbutler.ai/claims/display-name']) == 1
+          ? request.userInfo.extra['configbutler.ai/claims/display-name'][0]
+          : ''
+    - name: labels
+      expression: "object.metadata.?labels.orValue({})"
+    - name: row
+      expression: "(object.spec.row < 10 ? '0' : '') + string(object.spec.row)"
+    - name: column
+      expression: "(object.spec.column < 10 ? '0' : '') + string(object.spec.column)"
+  validations:
+    - expression: "variables.displayName != ''"
+      message: Your sign-in carries no display name, so a seat cannot be claimed in it.
+      reason: Forbidden
+    # Claim in your own name.
+    - expression: >-
+        request.operation != 'CREATE' || object.spec.displayName == variables.displayName
+      messageExpression: "'A seat is claimed in your own name: ' + variables.displayName + '.'"
+      reason: Forbidden
+    - expression: >-
+        request.operation != 'CREATE' || (
+          variables.labels[?'voter.configbutler.ai/submitter'].orValue('') == variables.displayName
+          && variables.labels[?'voter.configbutler.ai/seatingplan'].orValue('') == object.spec.seatingPlanRef.name
+          && variables.labels[?'voter.configbutler.ai/row'].orValue('') == variables.row
+          && variables.labels[?'voter.configbutler.ai/column'].orValue('') == variables.column)
+      messageExpression: >-
+        'A seat is labelled with who claimed it and where: submitter ' + variables.displayName
+          + ', seatingplan ' + object.spec.seatingPlanRef.name
+          + ', row ' + variables.row + ', column ' + variables.column + '.'
+      reason: Forbidden
+    # Change only your own, and only its colour and emoji.
+    - expression: >-
+        request.operation != 'UPDATE' || oldObject.spec.displayName == variables.displayName
+      message: This is someone else's seat. Pick a free one on the map.
+      reason: Forbidden
+    - expression: >-
+        request.operation != 'UPDATE' || (
+          object.metadata.?labels.orValue({}) == oldObject.metadata.?labels.orValue({})
+          && object.metadata.?annotations.orValue({}) == oldObject.metadata.?annotations.orValue({})
+          && object.metadata.?finalizers.orValue([]) == oldObject.metadata.?finalizers.orValue([])
+          && object.metadata.?ownerReferences.orValue([]) == oldObject.metadata.?ownerReferences.orValue([]))
+      message: Only a seat's colour and emoji can change.
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: voter-seat
+spec:
+  policyName: voter-seat
+  validationActions: [Deny]

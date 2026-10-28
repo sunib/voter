@@ -46,6 +46,7 @@ func TestConfigEndpoint(t *testing.T) {
 	registerHandlers(mux, handlerDeps{defaultNS: "voter", cfg: config{
 		CoffeeConfigName:              "demo-coffee",
 		RoomName:                      "demo",
+		SeatingPlanName:               "mission2",
 		AuditTrailCommitURLTemplate:   "https://example.test/commit/{sha}",
 		ParticipantConnectorID:        "room-pass",
 		ConfigButlerGitTargetName:     " voter-demo ",
@@ -66,6 +67,7 @@ func TestConfigEndpoint(t *testing.T) {
 		"namespace":            "voter",
 		"coffeeConfigName":     "demo-coffee",
 		"roomName":             "demo",
+		"seatingPlanName":      "mission2",
 		"commitURLTemplate":    "https://example.test/commit/{sha}",
 		"participantConnector": "room-pass",
 		// Trimmed: an env value with stray spaces must not name a GitTarget

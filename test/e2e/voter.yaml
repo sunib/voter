@@ -53,6 +53,19 @@ roleRef:
 # session cookie, streaming a real Kubernetes object to more than one browser
 # at once.
 #
+# The active seating plan: the name voter-seat-in-plan's binding and Voter's
+# SEATING_PLAN_NAME both say. The cluster's is in the platform repo
+# (voter-demo/seating-plan.yaml).
+apiVersion: examples.configbutler.ai/v1alpha1
+kind: SeatingPlan
+metadata:
+  name: mission2
+  namespace: voter
+spec:
+  title: Mission 2
+  rows: 8
+  columns: 12
+---
 # The CoffeeConfig CRD lives in voter/config/crd/ and must be established first.
 apiVersion: examples.configbutler.ai/v1alpha1
 kind: CoffeeConfig
@@ -106,6 +119,14 @@ rules:
   - apiGroups: [platform.configbutler.ai]
     resources: [databases]
     verbs: [get, list, watch, create, patch, update]
+  # As the cluster's participant-rbac.yaml: claim a seat and recolour it, never
+  # delete it; read the seating plan, never change it.
+  - apiGroups: [examples.configbutler.ai]
+    resources: [seats]
+    verbs: [get, list, watch, create, patch]
+  - apiGroups: [examples.configbutler.ai]
+    resources: [seatingplans]
+    verbs: [get, list, watch]
 ---
 # The grant the operator hands out live from /room, as in the cluster's
 # participant-rbac.yaml: the Role is here, the RoleBinding is created and

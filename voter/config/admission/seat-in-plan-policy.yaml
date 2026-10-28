@@ -1,0 +1,62 @@
+# No Seat without its SeatingPlan, and no Seat outside it.
+#
+# A rule about the data, like voter-coffee-price, so it binds everyone: a Seat
+# from kubectl, from an operator or from Git is held to it exactly as one
+# claimed on a phone.
+#
+# A policy cannot look up "the object this field names", and with
+# `selector: {}` (as voter-ballot reads its rounds) a Seat naming a missing
+# plan would pass whenever some other plan existed. So the binding names the
+# ACTIVE plan, and every Seat must name exactly that one:
+#
+#   - no plan: parameterNotFoundAction Deny refuses every Seat create AND
+#     update. Loud in rehearsal, never quiet on stage.
+#   - another plan: refused, whether it exists or not.
+#
+# ONE ACTIVE PLAN PER NAMESPACE. paramRef.name below and Voter's
+# SEATING_PLAN_NAME name the same object; switching plans is one commit that
+# changes both. Changing only one leaves the phones drawing a map nobody may
+# claim a seat on.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: voter-seat-in-plan
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: examples.configbutler.ai/v1alpha1
+    kind: SeatingPlan
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [examples.configbutler.ai]
+        apiVersions: ['*']
+        resources: [seats]
+        operations: [CREATE, UPDATE]
+  validations:
+    - expression: "object.spec.seatingPlanRef.name == params.metadata.name"
+      messageExpression: >-
+        'Seats here belong to the seating plan ' + params.metadata.name + '.'
+      reason: Invalid
+    # Only on CREATE: a seat claimed before the plan shrank keeps working for
+    # its owner, who may still change its colour.
+    - expression: >-
+        request.operation != 'CREATE'
+          || (object.spec.row <= params.spec.rows && object.spec.column <= params.spec.columns)
+      messageExpression: >-
+        'This room has ' + string(params.spec.rows) + ' rows of '
+          + string(params.spec.columns) + ' seats. Pick one on the map.'
+      reason: Invalid
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: voter-seat-in-plan
+spec:
+  policyName: voter-seat-in-plan
+  validationActions: [Deny]
+  paramRef:
+    # The active seating plan: the same name as Voter's SEATING_PLAN_NAME.
+    # Change the two together.
+    name: mission2
+    namespace: voter
+    parameterNotFoundAction: Deny

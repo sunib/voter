@@ -1,18 +1,23 @@
 # A seat in the room, claimed by the participant sitting in it.
 #
-# The room is a map of 12 rows by 24 columns, laid out like a cinema booking:
-# the stage at the top, row 1 closest to it, column 1 on the left as seen from
-# the audience. Numbers start at 1, as they do on a real seat.
+# Every Seat belongs to a SeatingPlan (seatingplans.yaml), which says how big
+# the room is: rows facing the stage, row 1 closest to it, and seats in each
+# row counted from the left as seen from the audience. Numbers start at 1, as
+# they do on a real seat. The bounds here (1 to 30) are only the outer ones;
+# admission (admission/seat-in-plan-policy.yaml) holds a new Seat to the plan's
+# real size, and refuses any Seat whose plan is not the active one.
 #
-# The seat is in the NAME, seat-<row>-<column>, and that is the whole locking
-# story: two phones claiming the same seat send two creates for one name, and
-# the API server answers the second with 409 AlreadyExists. No controller, no
-# status, no race. The rule below holds the name for everyone, operators
-# included, so no Seat can sit at one place and be named after another.
+# The seat is in the NAME, <plan>-<row>-<column>, and that is the whole
+# locking story: two phones claiming the same seat send two creates for one
+# name, and the API server answers the second with 409 AlreadyExists. No
+# controller, no status, no race. The rule below holds the name for everyone,
+# operators included, so no Seat can sit at one place and be named after
+# another.
 #
 # Where a seat is and whose it is never changes once it exists; its colour and
-# emoji may. Labels (submitter, row, column) are held equal to the spec by
-# admission (admission/seat-policy.yaml), since a CRD rule cannot see labels.
+# emoji may. Labels (submitter, seatingplan, row, column) are held equal to the
+# spec by admission (admission/seat-policy.yaml), since a CRD rule cannot see
+# labels.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -56,50 +61,78 @@ spec:
           description: >-
             Seat is one place in the room, claimed by the participant sitting
             there, in their colour and with their emoji. It is named
-            seat-<row>-<column>, so a seat can be claimed once.
+            <seating plan>-<row>-<column>, so a seat can be claimed once.
           required:
             - spec
           x-kubernetes-validations:
-            # format() rather than 'seat-' + string(row): the cost estimator
-            # takes a concatenated string(int) as unbounded and refuses the CRD.
-            - rule: "self.metadata.name == 'seat-%d-%d'.format([self.spec.row, self.spec.column])"
-              messageExpression: "'A seat is named after its place: seat-%d-%d.'.format([self.spec.row, self.spec.column])"
+            # format() rather than concatenating string(row): the cost
+            # estimator takes a concatenated string(int) as unbounded and
+            # refuses the CRD.
+            - rule: "self.metadata.name == '%s-%d-%d'.format([self.spec.seatingPlanRef.name, self.spec.row, self.spec.column])"
+              messageExpression: "'A seat is named after its place: %s-%d-%d.'.format([self.spec.seatingPlanRef.name, self.spec.row, self.spec.column])"
           properties:
             metadata:
               type: object
               properties:
                 name:
                   type: string
-                  # seat-12-24 is the longest. Bounding it is also what lets
-                  # the API server afford the rule above.
-                  maxLength: 10
+                  # A plan name of up to 20, then -30-30. Bounding it is also
+                  # what lets the API server afford the rule above.
+                  maxLength: 26
             spec:
               type: object
               required:
+                - seatingPlanRef
                 - row
                 - column
                 - displayName
                 - color
                 - emoji
               properties:
+                seatingPlanRef:
+                  type: object
+                  description: >-
+                    The SeatingPlan this seat is on, in the same namespace.
+                    Fixed once the seat is claimed.
+                  required:
+                    - name
+                  properties:
+                    group:
+                      type: string
+                      default: examples.configbutler.ai
+                      enum:
+                        - examples.configbutler.ai
+                    kind:
+                      type: string
+                      default: SeatingPlan
+                      enum:
+                        - SeatingPlan
+                    name:
+                      type: string
+                      description: The SeatingPlan's name, e.g. mission2.
+                      maxLength: 20
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                  x-kubernetes-validations:
+                    - rule: "self == oldSelf"
+                      message: "A seat stays on its seating plan: seatingPlanRef is immutable."
                 row:
                   type: integer
                   minimum: 1
-                  maximum: 12
+                  maximum: 30
                   description: >-
-                    The row, 1 to 12. Row 1 is closest to the stage. Fixed once
-                    the seat is claimed.
+                    The row, from 1 up to the SeatingPlan's rows. Row 1 is
+                    closest to the stage. Fixed once the seat is claimed.
                   x-kubernetes-validations:
                     - rule: "self == oldSelf"
                       message: "A seat does not move: row is immutable."
                 column:
                   type: integer
                   minimum: 1
-                  maximum: 24
+                  maximum: 30
                   description: >-
-                    The seat in its row, 1 to 24, counted from the left as seen
-                    from the audience, facing the stage. Fixed once the seat is
-                    claimed.
+                    The seat in its row, from 1 up to the SeatingPlan's
+                    columns, counted from the left as seen from the audience,
+                    facing the stage. Fixed once the seat is claimed.
                   x-kubernetes-validations:
                     - rule: "self == oldSelf"
                       message: "A seat does not move: column is immutable."

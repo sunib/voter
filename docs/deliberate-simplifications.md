@@ -249,6 +249,72 @@ each carrying its own reasoning in comments.
 
 ---
 
+## 7. Nobody checks that you sit where you say
+
+**What we do.** A participant claims a Seat on a map of the room
+([seats.yaml](../voter/config/crd/seats.yaml)). The seat is self-reported: if
+yours is taken, or you are standing at the back, you pick one close by.
+
+**What we gave up.** The map is a picture of where people *say* they are.
+Nothing ties a Seat to a chair.
+
+**Why that is fine.** The point of the map is that the projector looks like the
+room, so people can find themselves. A wrong seat costs nobody anything.
+
+---
+
+## 8. One seat per person is not enforced by the API
+
+**What we do.** The page offers a claim only to someone who has no Seat yet,
+found by listing with `voter.configbutler.ai/submitter=<their name>`. Admission
+(`voter-seat`) holds that a participant claims in their own name and recolours
+only their own seat.
+
+**What we gave up.** Admission cannot count other objects, so it cannot say
+"you already have one". Someone with `kubectl` and a participant token can
+claim several seats, each in their own name.
+
+**What keeps it closed.** Nothing but the page, and the fact that every claim is
+a commit authored by the person who made it. Fine for a talk.
+
+---
+
+## 9. No deleting a seat, no moving to another
+
+**What we do.** Participants have no `delete` on `seats`, and the CRD makes
+`seatingPlanRef`, `row`, `column` and `displayName` immutable. Only colour and
+emoji change.
+
+**What we gave up.** Someone who claimed the wrong seat keeps it for the talk.
+
+**Recovery.** The operator cleans up: `kubectl -n voter delete seats --all`, or
+one seat by name, after which it is free on every phone.
+
+---
+
+## 10. One active seating plan per namespace
+
+**What we do.** A Seat must name the active SeatingPlan, and fit inside it when
+it is claimed. The `voter-seat-in-plan` binding names that plan in
+`paramRef.name`, and Voter's `SEATING_PLAN_NAME` names the same one for the
+phones. A policy cannot look up "the plan this Seat names", and with
+`selector: {}` a Seat naming a missing plan would pass whenever some other plan
+existed, so the binding names one plan, explicitly.
+
+**What we gave up.** Two rooms in one namespace. And the pairing is two strings
+in two places: switching plans is one commit that changes both. Change only
+the binding and the phones draw a map nobody may claim on; change only
+`SEATING_PLAN_NAME` and the same.
+
+A plan that shrinks does not evict anyone: the size is checked on create only,
+so a seat claimed in row 10 of a plan cut to 8 rows stays, and its owner may
+still recolour it. The map does not draw it.
+
+**Fail loud.** With the plan missing, `parameterNotFoundAction: Deny` refuses
+every Seat create *and* update, so a forgotten plan shows up in rehearsal.
+
+---
+
 ## Things that are *not* simplifications
 
 Worth stating, because they look like candidates and are not:

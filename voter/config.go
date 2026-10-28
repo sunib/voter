@@ -27,6 +27,13 @@ type config struct {
 	// endpoint at somebody else's.
 	RoomName string `envconfig:"ROOM_NAME" default:"demo"`
 
+	// SeatingPlanName is the SeatingPlan the phones draw the map from and
+	// claim seats on. Independent of RoomName: the Room is the door, the
+	// SeatingPlan the furniture. It must name the same object as the
+	// voter-seat-in-plan binding's paramRef (config/admission/), which refuses
+	// a Seat on any other plan; change the two together.
+	SeatingPlanName string `envconfig:"SEATING_PLAN_NAME" default:"mission2"`
+
 	// AudienceCoffeeAdminRole names BOTH the Role that lets the audience edit
 	// the coffee menu and the RoleBinding the operator page creates to hand it
 	// out. One name for both, because there is exactly one of each and two

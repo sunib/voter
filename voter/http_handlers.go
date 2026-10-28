@@ -72,6 +72,7 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			"namespace":        deps.defaultNS,
 			"coffeeConfigName": deps.cfg.CoffeeConfigName,
 			"roomName":         deps.cfg.RoomName,
+			"seatingPlanName":  deps.cfg.SeatingPlanName,
 			// So a save can link the commit it became. Empty when unset, which
 			// the page renders as a plain sha rather than a dead link.
 			"commitURLTemplate": deps.cfg.AuditTrailCommitURLTemplate,

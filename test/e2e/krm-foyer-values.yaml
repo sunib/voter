@@ -37,6 +37,8 @@ sharedWatches:
     - coffeeconfigs.examples.configbutler.ai
     - quizsessions.examples.configbutler.ai
     - databases.platform.configbutler.ai
+    - seats.examples.configbutler.ai
+    - seatingplans.examples.configbutler.ai
     - rooms.room-pass.koudijs.dev
 # Plain HTTP behind Traefik, which terminates TLS for the host. That hop carries
 # session cookies, so only Traefik's pods may reach the port.

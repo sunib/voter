@@ -6,6 +6,7 @@ export const TEST_CONFIG: AppConfig = {
   namespace: 'voter',
   coffeeConfigName: 'demo-coffee',
   roomName: 'demo',
+  seatingPlanName: 'mission2',
   commitURLTemplate: '',
   participantConnector: 'room-pass',
   gitTargetName: 'voter-demo',
