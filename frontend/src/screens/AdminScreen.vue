@@ -117,6 +117,26 @@ const saveButtonLabel = computed(() =>
         ? `Save ${dirtyFieldCount.value} Change${dirtyFieldCount.value === 1 ? '' : 's'}`
         : 'No Changes to Save',
 )
+// The CRD types these as integers, and the API server answers a fraction with
+// its schema error -- 'CoffeeConfig... is invalid: ...priceCents: Invalid
+// value: "number"' -- which is no sentence for a person. A label that says
+// cents still gets "2.5" from somebody thinking in euros, so the page says it
+// first and holds the save until it is a whole number.
+const notWholeNumbers = computed(() => {
+  const spec = draftConfig.value?.spec
+  return [
+    ...(spec?.products ?? []).map((product) => ({
+      label: `${product.name}: base price (cents)`,
+      value: product.priceCents,
+    })),
+    ...(spec?.vouchers ?? []).flatMap((voucher) => [
+      { label: `${voucher.code}: discount value`, value: voucher.discountValue },
+      { label: `${voucher.code}: maximum usage`, value: voucher.maximumUsage },
+    ]),
+  ].filter(
+    (field) => field.value !== undefined && !Number.isInteger(field.value),
+  )
+})
 const connectionMessage = computed(() => {
   if (loadError.value) return loadError.value
   if (state.value.status === 'live')
@@ -673,6 +693,8 @@ onBeforeUnmount(clearAllFlashes)
                     :value="getNumberField(`spec.products.${index}.priceCents`)"
                     type="number"
                     min="0"
+                    step="1"
+                    inputmode="numeric"
                     @input="
                       updateField(
                         `spec.products.${index}.priceCents`,
@@ -869,6 +891,8 @@ onBeforeUnmount(clearAllFlashes)
                     "
                     type="number"
                     min="0"
+                    step="1"
+                    inputmode="numeric"
                     @input="
                       updateField(
                         `spec.vouchers.${index}.discountValue`,
@@ -902,6 +926,8 @@ onBeforeUnmount(clearAllFlashes)
                     "
                     type="number"
                     min="0"
+                    step="1"
+                    inputmode="numeric"
                     @input="
                       updateField(
                         `spec.vouchers.${index}.maximumUsage`,
@@ -1421,12 +1447,25 @@ onBeforeUnmount(clearAllFlashes)
                   {{ cleanDirtyCount }} edit(s) and {{ conflictCount }} missed
                   incoming change(s) in this save.
                 </div>
+                <p
+                  v-for="field in notWholeNumbers"
+                  :key="field.label"
+                  class="error-copy"
+                  role="alert"
+                >
+                  {{ field.label }} must be a whole number, not
+                  {{ field.value }}. Prices are in cents: €2.50 is 250.
+                </p>
               </div>
 
               <div class="save-summary__footer">
                 <button
                   class="button save-summary__button"
-                  :disabled="!canSave || dirtyFieldCount === 0"
+                  :disabled="
+                    !canSave ||
+                    dirtyFieldCount === 0 ||
+                    notWholeNumbers.length > 0
+                  "
                   @click="saveConfig"
                 >
                   {{ saveButtonLabel }}
