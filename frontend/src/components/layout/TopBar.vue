@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { shopOnly } from '../../shopOnly'
-import BuildAgeBadge from './BuildAgeBadge.vue'
 import SessionIdentityBadge from './SessionIdentityBadge.vue'
 import type { ShellWidth } from './shellWidth'
 import { shellWidthClass } from './shellWidth'
@@ -17,8 +16,8 @@ const route = useRoute()
 
 // What this talk asks of the room gets a tab: your seat and the coffee bar.
 // Everything else still works, one tap further away under "Not today": the
-// demos not on today's programme, and the presenter's own page, which a
-// participant would only be refused on.
+// demos not on today's programme, the presenter's own page, which a
+// participant would only be refused on, and which build is running.
 const allTabs = [
   { key: 'seat', to: '/seat/mine', label: 'Seat' },
   { key: 'coffee', to: '/coffee', label: 'Coffee' },
@@ -27,6 +26,7 @@ const notToday = [
   { key: 'quizzes', to: '/', label: 'Quizzes' },
   { key: 'databases', to: '/databases', label: 'Databases' },
   { key: 'room', to: '/room', label: 'Room admin' },
+  { key: 'build', to: '/build', label: 'Build info' },
 ] as const
 // Production is the coffee bar alone, and says so where the demo says its name.
 const production = shopOnly()
@@ -40,6 +40,7 @@ const databaseRoutes = new Set(['databases', 'database-new', 'database-edit'])
 const activeTab = computed(() => {
   const name = String(route.name ?? '')
   if (name === 'room') return 'room'
+  if (name === 'build-info') return 'build'
   if (name === 'seat-claim' || name === 'seat-mine') return 'seat'
   if (databaseRoutes.has(name)) return 'databases'
   return coffeeRoutes.has(name) ? 'coffee' : 'quizzes'
@@ -117,7 +118,6 @@ const widthClass = computed(() => shellWidthClass(props.width))
 
         <div class="top-bar__badges">
           <SessionIdentityBadge />
-          <BuildAgeBadge />
         </div>
       </div>
     </div>

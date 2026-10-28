@@ -17,6 +17,7 @@ import LoginScreen from './screens/LoginScreen.vue'
 import ThanksScreen from './screens/ThanksScreen.vue'
 import SeatClaimScreen from './screens/SeatClaimScreen.vue'
 import SeatMineScreen from './screens/SeatMineScreen.vue'
+import BuildInfoScreen from './screens/BuildInfoScreen.vue'
 import { needsSeat } from './seatOnboarding'
 
 export const router = createRouter({
@@ -57,6 +58,12 @@ export const router = createRouter({
       path: '/seat/mine',
       name: 'seat-mine',
       component: SeatMineScreen,
+    },
+    // Which build is running and what it is built on; under "Not today".
+    {
+      path: '/build',
+      name: 'build-info',
+      component: BuildInfoScreen,
     },
     {
       path: '/coffee',

@@ -2130,3 +2130,27 @@ button.seat-cell--free {
   margin-top: 0.8rem;
   font-size: 0.9rem;
 }
+
+.build-info__date {
+  display: block;
+  color: rgb(var(--muted));
+  font-size: 0.8rem;
+}
+
+.build-info__parts {
+  margin: 1rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.build-info__parts li {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.build-info__parts span {
+  color: rgb(var(--muted));
+  font-size: 0.9rem;
+}
