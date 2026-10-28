@@ -255,17 +255,14 @@ code {
   border-radius: 999px;
   background: rgb(var(--line) / 0.05);
   justify-self: start;
-  /* Five tabs are wider than a phone. They scroll inside the pill rather than
-   * pushing the whole page sideways. */
-  max-width: 100%;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
+  /* No overflow here, whatever the width: it would clip the "Not today" menu
+   * that drops out of the pill. Keep the tabs few enough to fit a phone. */
 }
 
 .nav-tab {
   display: inline-flex;
   flex: none;
+  white-space: nowrap;
   align-items: center;
   justify-content: center;
   min-height: 2.2rem;
@@ -289,6 +286,68 @@ code {
   color: rgb(var(--ink));
   font-weight: 600;
   box-shadow: 0 10px 22px rgba(17, 12, 8, 0.08);
+}
+
+/* The demos that are not on today's programme, one tap away. */
+.nav-more {
+  position: relative;
+}
+
+.nav-more > summary {
+  list-style: none;
+  cursor: pointer;
+  gap: 0.35rem;
+}
+
+.nav-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.nav-more > summary::after {
+  content: '▾';
+  font-size: 0.7rem;
+}
+
+.nav-more[open] > summary::after {
+  content: '▴';
+}
+
+.nav-more__menu {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  right: 0;
+  z-index: 40;
+  display: grid;
+  min-width: 10rem;
+  padding: 0.35rem;
+  border-radius: 18px;
+  border: 1px solid rgb(var(--line) / 0.12);
+  background: rgb(var(--card));
+  box-shadow: var(--shadow);
+}
+
+.nav-more__item {
+  padding: 0.7rem 0.9rem;
+  border-radius: 12px;
+  color: rgb(var(--ink));
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.nav-more__item:hover,
+.nav-more__item[aria-current='page'] {
+  background: rgb(var(--line) / 0.06);
+}
+
+.nav-more__item[aria-current='page'] {
+  font-weight: 600;
+}
+
+/* A phone: the same tabs, a little tighter, so all four fit at 360px. */
+@container (max-width: 420px) {
+  .nav-tab {
+    padding-inline: 0.7rem;
+  }
 }
 
 @media (min-width: 760px) {

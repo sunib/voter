@@ -105,8 +105,14 @@ test('a participant takes a seat once, with a why, and changes its look with ano
 
     // Offered once: Bob may go to the quizzes without a seat, and Alice, with
     // one, is never sent back.
+    // Quizzes are not on today's programme: under "Not today", not a tab.
+    await expect(bob.getByRole('link', { name: 'Quizzes' })).toBeHidden();
+    await bob.getByText('Not today', { exact: true }).click();
     await bob.getByRole('link', { name: 'Quizzes' }).click();
     await bob.waitForURL(`${APP}/`);
+    // The smallest phones in the room: the bar still fits.
+    await bob.setViewportSize({ width: 375, height: 812 });
+    expect(await bob.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await alice.goto(`${APP}/`);
     await expect(alice).toHaveURL(`${APP}/`);
     await alice.goto(`${APP}/seat`);
