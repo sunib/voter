@@ -15,18 +15,18 @@ const props = withDefaults(
 
 const route = useRoute()
 
-// What this talk is about gets a tab: your seat, the coffee bar, and the
-// presenter's room. The demos that are not on today's programme -- quizzes
-// and databases -- still work, one tap further away under "Not today", so a
-// phone's bar holds only what the room is asked to use.
+// What this talk asks of the room gets a tab: your seat and the coffee bar.
+// Everything else still works, one tap further away under "Not today": the
+// demos not on today's programme, and the presenter's own page, which a
+// participant would only be refused on.
 const allTabs = [
   { key: 'seat', to: '/seat/mine', label: 'Seat' },
   { key: 'coffee', to: '/coffee', label: 'Coffee' },
-  { key: 'room', to: '/room', label: 'Room' },
 ] as const
 const notToday = [
   { key: 'quizzes', to: '/', label: 'Quizzes' },
   { key: 'databases', to: '/databases', label: 'Databases' },
+  { key: 'room', to: '/room', label: 'Room admin' },
 ] as const
 // Production is the coffee bar alone, and says so where the demo says its name.
 const production = shopOnly()

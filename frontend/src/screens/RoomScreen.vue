@@ -233,7 +233,7 @@ function signInAsOperator() {
 </script>
 
 <template>
-  <AppShell title="Room">
+  <AppShell title="Room admin">
     <section class="hero-card">
       <p class="eyebrow">Operator</p>
       <h1 class="panel-title">{{ theRoom?.spec?.title ?? 'This room' }}</h1>

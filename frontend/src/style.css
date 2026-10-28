@@ -343,7 +343,7 @@ code {
   font-weight: 600;
 }
 
-/* A phone: the same tabs, a little tighter, so all four fit at 360px. */
+/* A phone: the same tabs, a little tighter. */
 @container (max-width: 420px) {
   .nav-tab {
     padding-inline: 0.7rem;
