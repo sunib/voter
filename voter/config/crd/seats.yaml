@@ -1,0 +1,134 @@
+# A seat in the room, claimed by the participant sitting in it.
+#
+# The room is a map of 12 rows by 24 columns, laid out like a cinema booking:
+# the stage at the top, row 1 closest to it, column 1 on the left as seen from
+# the audience. Numbers start at 1, as they do on a real seat.
+#
+# The seat is in the NAME, seat-<row>-<column>, and that is the whole locking
+# story: two phones claiming the same seat send two creates for one name, and
+# the API server answers the second with 409 AlreadyExists. No controller, no
+# status, no race. The rule below holds the name for everyone, operators
+# included, so no Seat can sit at one place and be named after another.
+#
+# Where a seat is and whose it is never changes once it exists; its colour and
+# emoji may. Labels (submitter, row, column) are held equal to the spec by
+# admission (admission/seat-policy.yaml), since a CRD rule cannot see labels.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: seats.examples.configbutler.ai
+spec:
+  group: examples.configbutler.ai
+  scope: Namespaced
+  names:
+    plural: seats
+    singular: seat
+    kind: Seat
+    listKind: SeatList
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Row
+          type: integer
+          jsonPath: .spec.row
+        - name: Column
+          type: integer
+          jsonPath: .spec.column
+        # Not "Name": kubectl already prints the object's name under NAME, and
+        # two NAME columns read as one repeated.
+        - name: Owner
+          type: string
+          jsonPath: .spec.displayName
+        - name: Emoji
+          type: string
+          jsonPath: .spec.emoji
+        - name: Color
+          type: string
+          jsonPath: .spec.color
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: >-
+            Seat is one place in the room, claimed by the participant sitting
+            there, in their colour and with their emoji. It is named
+            seat-<row>-<column>, so a seat can be claimed once.
+          required:
+            - spec
+          x-kubernetes-validations:
+            # format() rather than 'seat-' + string(row): the cost estimator
+            # takes a concatenated string(int) as unbounded and refuses the CRD.
+            - rule: "self.metadata.name == 'seat-%d-%d'.format([self.spec.row, self.spec.column])"
+              messageExpression: "'A seat is named after its place: seat-%d-%d.'.format([self.spec.row, self.spec.column])"
+          properties:
+            metadata:
+              type: object
+              properties:
+                name:
+                  type: string
+                  # seat-12-24 is the longest. Bounding it is also what lets
+                  # the API server afford the rule above.
+                  maxLength: 10
+            spec:
+              type: object
+              required:
+                - row
+                - column
+                - displayName
+                - color
+                - emoji
+              properties:
+                row:
+                  type: integer
+                  minimum: 1
+                  maximum: 12
+                  description: >-
+                    The row, 1 to 12. Row 1 is closest to the stage. Fixed once
+                    the seat is claimed.
+                  x-kubernetes-validations:
+                    - rule: "self == oldSelf"
+                      message: "A seat does not move: row is immutable."
+                column:
+                  type: integer
+                  minimum: 1
+                  maximum: 24
+                  description: >-
+                    The seat in its row, 1 to 24, counted from the left as seen
+                    from the audience, facing the stage. Fixed once the seat is
+                    claimed.
+                  x-kubernetes-validations:
+                    - rule: "self == oldSelf"
+                      message: "A seat does not move: column is immutable."
+                displayName:
+                  type: string
+                  minLength: 1
+                  # A label value too (voter.configbutler.ai/submitter), so no
+                  # longer than one may be.
+                  maxLength: 63
+                  description: >-
+                    Who claimed the seat: their display name from Room Pass.
+                    Fixed once the seat is claimed.
+                  x-kubernetes-validations:
+                    - rule: "self == oldSelf"
+                      message: "A seat keeps its owner: displayName is immutable."
+                color:
+                  type: string
+                  pattern: "^#[0-9a-fA-F]{6}$"
+                  description: >-
+                    The seat's colour on the map, as #rrggbb. May change.
+                emoji:
+                  type: string
+                  description: >-
+                    The seat's emoji on the map, one of a fixed list chosen to
+                    read well small and on a dark projector. May change. Adding
+                    one is a change to this CRD.
+                  # An enum rather than "is this one emoji": skin tones, ZWJ
+                  # sequences and flags make that unanswerable in a schema, and
+                  # the list guarantees nothing unexpected reaches the projector.
+                  # The phone offers exactly these (frontend/src/api/seats.ts).
+                  enum: ["🦊","🐙","🦄","🐝","🐢","🦉","🐳","🦖","🐧","🦀","🐸","🐼",
+                         "🚀","🌵","🍄","🌈","⚡","🔥","🍕","🧇","☕","🎸","🎲","👾"]
