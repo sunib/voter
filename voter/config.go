@@ -74,6 +74,12 @@ type config struct {
 	// somebody else's message, mid-demo. When the GitTarget exists, setting
 	// this is the only change needed.
 	ConfigButlerDatabaseGitTargetName string `envconfig:"CONFIGBUTLER_DATABASE_GIT_TARGET_NAME"`
+	// ConfigButlerSeatGitTargetName is the same for claiming or changing a
+	// seat, whose why becomes the commit message. Empty means no CommitRequest:
+	// the seat is still written and reaches Git on the target's own window,
+	// under its default message. The seat-why admission policy names the same
+	// target (config/admission/seat-why-policy.yaml).
+	ConfigButlerSeatGitTargetName string `envconfig:"CONFIGBUTLER_SEAT_GIT_TARGET_NAME"`
 	// AuditTrailCommitURLTemplate turns a commit sha into a link a participant
 	// can open. "{sha}" is substituted; anything else is passed through.
 	//

@@ -11,6 +11,7 @@ export const TEST_CONFIG: AppConfig = {
   participantConnector: 'room-pass',
   gitTargetName: 'voter-demo',
   databaseGitTargetName: '',
+  seatGitTargetName: '',
   commitRequestNamespace: '',
   commitCloseDelaySeconds: 2,
   audienceCoffeeAdminRole: 'voter-audience-coffee-admin',

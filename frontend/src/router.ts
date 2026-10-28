@@ -15,6 +15,9 @@ import VoteResultsScreen from './screens/VoteResultsScreen.vue'
 import AnswerScreen from './screens/AnswerScreen.vue'
 import LoginScreen from './screens/LoginScreen.vue'
 import ThanksScreen from './screens/ThanksScreen.vue'
+import SeatClaimScreen from './screens/SeatClaimScreen.vue'
+import SeatMineScreen from './screens/SeatMineScreen.vue'
+import { needsSeat } from './seatOnboarding'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -42,6 +45,18 @@ export const router = createRouter({
       path: '/',
       name: 'home',
       component: HomeScreen,
+    },
+    // Where you sit: taken once (seat-claim), then yours to recolour
+    // (seat-mine). Each sends you to the other when it is the wrong one.
+    {
+      path: '/seat',
+      name: 'seat-claim',
+      component: SeatClaimScreen,
+    },
+    {
+      path: '/seat/mine',
+      name: 'seat-mine',
+      component: SeatMineScreen,
     },
     {
       path: '/coffee',
@@ -128,6 +143,11 @@ router.beforeEach(async (to) => {
   // successful login still bounced back to the login screen.
   const session = await getSession()
   if (session !== null) {
+    // A participant's first stop is taking a seat. /join-room always lands
+    // here, so this is where they are sent on, once (seatOnboarding.ts).
+    if (to.name === 'home' && (await needsSeat(session))) {
+      return { name: 'seat-claim' }
+    }
     return true
   }
   return { name: 'login', query: { next: to.fullPath } }

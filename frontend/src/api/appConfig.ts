@@ -24,6 +24,9 @@ export interface AppConfig {
   gitTargetName: string
   /** The same for a Database save; empty until a target watches Databases. */
   databaseGitTargetName: string
+  /** The same for claiming or changing a seat, whose why becomes the commit
+   *  message; empty for none. */
+  seatGitTargetName: string
   /** Where CommitRequests are created; empty means `namespace`. */
   commitRequestNamespace: string
   /** How long a commit window may wait for the write it publishes. */

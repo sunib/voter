@@ -84,6 +84,7 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			// does now, as the person who saved. An empty target asks nothing.
 			"gitTargetName":           strings.TrimSpace(deps.cfg.ConfigButlerGitTargetName),
 			"databaseGitTargetName":   strings.TrimSpace(deps.cfg.ConfigButlerDatabaseGitTargetName),
+			"seatGitTargetName":       strings.TrimSpace(deps.cfg.ConfigButlerSeatGitTargetName),
 			"commitRequestNamespace":  strings.TrimSpace(deps.cfg.ConfigButlerCommitRequestNamespace),
 			"commitCloseDelaySeconds": deps.cfg.ConfigButlerCloseDelaySeconds,
 			// The Role the operator binds the audience to, and the binding's name.

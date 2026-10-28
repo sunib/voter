@@ -36,6 +36,16 @@ export const QUIZSUBMISSIONS: ResourceRef = {
   version: 'v1alpha1',
   resource: 'quizsubmissions',
 }
+export const SEATS: ResourceRef = {
+  group: 'examples.configbutler.ai',
+  version: 'v1alpha1',
+  resource: 'seats',
+}
+export const SEATINGPLANS: ResourceRef = {
+  group: 'examples.configbutler.ai',
+  version: 'v1alpha1',
+  resource: 'seatingplans',
+}
 export const DATABASES: ResourceRef = {
   group: 'platform.configbutler.ai',
   version: 'v1alpha1',
@@ -132,16 +142,21 @@ export async function getObject<T>(
 
 /** Every object of a kind in the namespace, projected. A list's items carry no
  *  apiVersion or kind of their own for every type, so they are filled in from
- *  the list's, which is what a stream event would carry. */
+ *  the list's, which is what a stream event would carry. A label selector, when
+ *  given, narrows it on the API server. */
 export async function listObjects<T>(
   ref: ResourceRef,
   namespace?: string,
+  labelSelector?: string,
 ): Promise<T[]> {
+  const query = labelSelector
+    ? `?labelSelector=${encodeURIComponent(labelSelector)}`
+    : ''
   const list = await requestJson<{
     apiVersion: string
     kind: string
     items: Obj[]
-  }>(collectionURL(ref, namespace), { cache: 'no-store' })
+  }>(collectionURL(ref, namespace) + query, { cache: 'no-store' })
   const kind = list.kind.replace(/List$/, '')
   return list.items.map((item) =>
     project({ apiVersion: list.apiVersion, kind, ...item } as T),

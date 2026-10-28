@@ -94,6 +94,11 @@ The attendee UI should feel like a **conference lanyard + signage system**: high
 ### Attendee
 
 - `/` — the home page: open rounds first, then the coffee entry points.
+- `/seat` — taking your seat, once: tap a seat on the map, pick a colour and an
+  emoji, say why, "Claim". A participant without one is sent here from `/` once
+  per page load. Someone who has a seat is sent on to `/seat/mine`.
+- `/seat/mine` — your seat on the map; change its colour or emoji, with a why.
+  Someone without a seat is sent to `/seat`.
 - `/answer/<round>`
   - Render the round's questions and cast a ballot.
 

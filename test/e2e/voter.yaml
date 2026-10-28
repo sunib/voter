@@ -53,19 +53,11 @@ roleRef:
 # session cookie, streaming a real Kubernetes object to more than one browser
 # at once.
 #
-# The active seating plan: the name voter-seat-in-plan's binding and Voter's
-# SEATING_PLAN_NAME both say. The cluster's is in the platform repo
-# (voter-demo/seating-plan.yaml).
-apiVersion: examples.configbutler.ai/v1alpha1
-kind: SeatingPlan
-metadata:
-  name: mission2
-  namespace: voter
-spec:
-  title: Mission 2
-  rows: 8
-  columns: 12
----
+# No SeatingPlan here, on purpose. With one, every participant's first stop is
+# /seat rather than /, which is right on stage and wrong for every spec that is
+# not about seats. test/browser/seats.spec.js creates mission2 (the name
+# voter-seat-in-plan's binding and Voter's SEATING_PLAN_NAME both say) and
+# removes it again.
 # The CoffeeConfig CRD lives in voter/config/crd/ and must be established first.
 apiVersion: examples.configbutler.ai/v1alpha1
 kind: CoffeeConfig

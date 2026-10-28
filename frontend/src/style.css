@@ -255,10 +255,17 @@ code {
   border-radius: 999px;
   background: rgb(var(--line) / 0.05);
   justify-self: start;
+  /* Five tabs are wider than a phone. They scroll inside the pill rather than
+   * pushing the whole page sideways. */
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
 
 .nav-tab {
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
   min-height: 2.2rem;
@@ -1871,4 +1878,191 @@ p {
 .recovery-details textarea {
   width: 100%;
   margin-top: 0.6rem;
+}
+
+/* Seats: the map of the room, the look pickers and the why. A seat's own
+ * colour arrives as --seat-color; everything else is a token, so the map holds
+ * up in both palettes. */
+.seat-page h1 {
+  margin: 0;
+}
+
+.seat-page__place {
+  margin-top: 1rem;
+  font-weight: 700;
+}
+
+.seat-page__hint {
+  margin-top: 0.8rem;
+  color: rgb(var(--muted));
+}
+
+.seat-page__welcome,
+.seat-page__done {
+  margin: 0 0 1rem;
+  padding: 0.8rem 1rem;
+  border-radius: 18px;
+  background: rgb(var(--surface-flash) / 0.9);
+}
+
+.seat-page__done {
+  margin: 0.8rem 0 0;
+}
+
+.seat-page__actions {
+  margin-top: 1.2rem;
+  display: flex;
+}
+
+.seat-page__actions .button {
+  flex: 1;
+}
+
+.seat-map {
+  margin-top: 1rem;
+  /* Small enough that twelve or so columns fit a phone; past that the map
+   * scrolls inside itself, and the zoomed row is where you tap. */
+  --seat-size: minmax(1.15rem, 1fr);
+}
+
+.seat-map--large {
+  --seat-size: 2.75rem;
+}
+
+/* The page never scrolls sideways; a wide room scrolls inside its map. */
+.seat-map__scroll {
+  /* The offset parent the zoomed row centres its chosen seat against. */
+  position: relative;
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
+}
+
+.seat-map__grid {
+  display: grid;
+  grid-template-columns: 1.4rem repeat(var(--seat-columns), var(--seat-size));
+  gap: 0.2rem;
+  align-items: center;
+  min-width: min-content;
+}
+
+.seat-map__stage {
+  grid-column: 2 / -1;
+  padding: 0.3rem;
+  border-radius: 8px 8px 18px 18px;
+  background: rgb(var(--ink) / 0.85);
+  color: rgb(var(--bg));
+  text-align: center;
+  font-size: 0.8rem;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  margin-bottom: 0.3rem;
+}
+
+.seat-map__number {
+  font-size: 0.65rem;
+  color: rgb(var(--muted));
+  text-align: center;
+}
+
+.seat-map--large .seat-map__number {
+  font-size: 0.8rem;
+}
+
+/* Named, so the page's monospace font never gets a say in an emoji. */
+.seat-cell,
+.seat-look__emoji {
+  font-family:
+    'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+}
+
+.seat-cell {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 0;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  line-height: 1;
+  border: 0;
+  background: var(--seat-color, transparent);
+  color: rgb(var(--ink));
+}
+
+.seat-map--large .seat-cell {
+  border-radius: 10px;
+  font-size: 1.5rem;
+}
+
+.seat-cell--free {
+  border: 1px dashed rgb(var(--line) / 0.3);
+}
+
+button.seat-cell--free {
+  cursor: pointer;
+}
+
+.seat-cell--selected {
+  outline: 3px solid rgb(var(--accent));
+  outline-offset: 1px;
+}
+
+.seat-cell--mine {
+  outline: 3px solid rgb(var(--ink));
+  outline-offset: 1px;
+}
+
+.seat-look {
+  margin-top: 1.2rem;
+  border: 0;
+  padding: 0;
+}
+
+.seat-look__legend {
+  margin-bottom: 0.5rem;
+  font-weight: 700;
+}
+
+.seat-look__colors,
+.seat-look__emojis {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 0.45rem;
+}
+
+.seat-look__color,
+.seat-look__emoji {
+  aspect-ratio: 1;
+  min-height: 2.75rem;
+  border-radius: 14px;
+  border: 1px solid rgb(var(--line) / 0.14);
+  cursor: pointer;
+}
+
+.seat-look__color {
+  background: var(--seat-color);
+}
+
+.seat-look__emoji {
+  background: rgb(var(--surface-raised) / 0.8);
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.seat-look__choice--on {
+  outline: 3px solid rgb(var(--ink));
+  outline-offset: 2px;
+}
+
+.seat-why {
+  margin-top: 1.2rem;
+}
+
+.seat-why__count {
+  font-size: 0.8rem;
+  color: rgb(var(--muted));
+}
+
+.seat-why__count--over {
+  color: rgb(var(--danger));
 }

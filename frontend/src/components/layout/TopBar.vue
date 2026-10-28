@@ -20,6 +20,7 @@ const route = useRoute()
 // home page and the other a link buried in a hero.
 const allTabs = [
   { key: 'quizzes', to: '/', label: 'Quizzes' },
+  { key: 'seat', to: '/seat/mine', label: 'Seat' },
   { key: 'coffee', to: '/coffee', label: 'Coffee' },
   { key: 'databases', to: '/databases', label: 'Databases' },
   { key: 'room', to: '/room', label: 'Room' },
@@ -36,6 +37,7 @@ const databaseRoutes = new Set(['databases', 'database-new', 'database-edit'])
 const activeTab = computed(() => {
   const name = String(route.name ?? '')
   if (name === 'room') return 'room'
+  if (name === 'seat-claim' || name === 'seat-mine') return 'seat'
   if (databaseRoutes.has(name)) return 'databases'
   return coffeeRoutes.has(name) ? 'coffee' : 'quizzes'
 })

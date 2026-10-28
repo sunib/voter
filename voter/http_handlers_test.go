@@ -50,6 +50,7 @@ func TestConfigEndpoint(t *testing.T) {
 		AuditTrailCommitURLTemplate:   "https://example.test/commit/{sha}",
 		ParticipantConnectorID:        "room-pass",
 		ConfigButlerGitTargetName:     " voter-demo ",
+		ConfigButlerSeatGitTargetName: "seats",
 		ConfigButlerCloseDelaySeconds: 2,
 		AudienceCoffeeAdminRole:       "voter-audience-coffee-admin",
 		AudienceBallotRole:            "voter-audience-ballot",
@@ -74,6 +75,7 @@ func TestConfigEndpoint(t *testing.T) {
 		// that does not exist.
 		"gitTargetName":           "voter-demo",
 		"databaseGitTargetName":   "",
+		"seatGitTargetName":       "seats",
 		"commitRequestNamespace":  "",
 		"commitCloseDelaySeconds": float64(2),
 		"audienceCoffeeAdminRole": "voter-audience-coffee-admin",

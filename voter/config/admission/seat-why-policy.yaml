@@ -1,0 +1,50 @@
+# A seat's why is required, and short enough to read off a projector.
+#
+# Claiming or changing a seat is two writes: the Seat, then a CommitRequest
+# whose message is the participant's why. The phone refuses to send either
+# without a why (frontend/src/api/seats.ts, checkWhy); this holds the same line
+# for a CommitRequest written by hand: 3 to 80 characters once trimmed.
+#
+# Only a participant's, and only for the seats GitTarget. The coffee and
+# Database editors send a CommitRequest too, with a reason that is optional and
+# may run to 1024 characters; this must not touch them. The target is named
+# here and in Voter's CONFIGBUTLER_SEAT_GIT_TARGET_NAME; change the two
+# together.
+#
+# It cannot make anyone send a CommitRequest at all. A Seat written without one
+# still reaches Git, under the target's default message.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: voter-seat-why
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [configbutler.ai]
+        apiVersions: ['*']
+        resources: [commitrequests]
+        operations: [CREATE]
+  matchConditions:
+    - name: a-participant
+      expression: "request.userInfo.username.startsWith('demo:')"
+    - name: for-a-seat
+      expression: "object.spec.?gitTargetRef.?name.orValue('') == 'seats'"
+  variables:
+    - name: why
+      expression: "object.spec.?message.orValue('').trim()"
+  validations:
+    - expression: "size(variables.why) >= 3"
+      message: Tell us why, in at least 3 characters.
+      reason: Invalid
+    - expression: "size(variables.why) <= 80"
+      message: Keep the why under 80 characters.
+      reason: Invalid
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: voter-seat-why
+spec:
+  policyName: voter-seat-why
+  validationActions: [Deny]

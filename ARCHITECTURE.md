@@ -261,6 +261,9 @@ everyone.
   the binding's `paramRef.name` and Voter's `SEATING_PLAN_NAME` both name, and a new
   one fits inside it. No plan, no Seat writes at all. "This room has 8 rows of 12
   seats. Pick one on the map."
+- **`voter-seat-why`**: a participant's CommitRequest for the `seats` GitTarget carries
+  a why of 3 to 80 characters once trimmed. Other targets are untouched: the coffee
+  and Database reasons stay optional.
 
 So one refusal in the demo that used to be the application's is now the cluster's.
 
@@ -322,6 +325,26 @@ partial success rather than an error. The watch echo updates the store, and one 
 read recovers a missing echo. A failed stream never masquerades as live: session
 expiry, disconnect, forbidden access and resource deletion are explicit states, and
 deletion prunes the draft rather than carrying it to a replacement UID.
+
+## Seats
+
+A participant's first stop after joining is `/seat`: where they sit on the room's
+map, a colour, an emoji, and why. The router sends a participant there from `/`
+once per page load while they have no Seat and a SeatingPlan exists
+([frontend/src/seatOnboarding.ts](frontend/src/seatOnboarding.ts)); the operator
+is never sent. Afterwards `/seat/mine` shows their seat and changes its colour and
+emoji, again with a why.
+
+A claim is a Seat the participant creates through `/k8s`, named
+`<plan>-<row>-<column>`, so two phones claiming one seat get one 201 and one 409
+AlreadyExists: "Someone just took that seat. Pick one close by." A change is a merge
+patch of `spec.color` and `spec.emoji`. After either write the browser creates a
+CommitRequest for `CONFIGBUTLER_SEAT_GIT_TARGET_NAME` with the why as its message,
+so the commit is the participant's, in their words; if the seat write fails nothing
+else is sent ([frontend/src/api/seats.ts](frontend/src/api/seats.ts)). The map
+streams the active SeatingPlan by name and every Seat in the namespace, so a claim
+on another phone or a plan resized in Git redraws it without a reload. The page
+never names Git or Kubernetes: that is the talk's reveal.
 
 ## Coffee and Git responsibilities
 
