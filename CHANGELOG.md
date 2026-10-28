@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.2.0](https://github.com/sunib/voter/compare/v2.1.2...v2.2.0) (2026-10-28)
+
+
+### Features
+
+* "Room admin", under "Not today" with the other pages Friday skips ([0214e2d](https://github.com/sunib/voter/commit/0214e2dce0402115315be932571ba7566a0dc8c1))
+* a Seat CRD, one per participant, named after its place ([3f97bdf](https://github.com/sunib/voter/commit/3f97bdfb1840342c81cb2b8313aa580a7135a5cb))
+* a SeatingPlan, and every Seat points at it ([cedefe1](https://github.com/sunib/voter/commit/cedefe1688d7164546ef92bb2bcefd815c5eaa4f))
+* build info says what is mine and what it stands on ([b679913](https://github.com/sunib/voter/commit/b679913bc436d573711aa7d4891ed7a14ca70f03))
+* build info under "Not today", with links to the code it runs on ([3f1088a](https://github.com/sunib/voter/commit/3f1088a4d92419d1c63ce34780f0f0ad29c6a722))
+* Seat, Coffee and Room as tabs; quizzes and databases under "Not today" ([f2af671](https://github.com/sunib/voter/commit/f2af671fccc59e243e15b84f37418252fe5a2986))
+* take your seat once, then change its colour and emoji, with a why ([954d985](https://github.com/sunib/voter/commit/954d985fb97df6b79ca0b16eb907ef9f84abd34a))
+
+
+### Bug Fixes
+
+* plainer words on /me, each said once ([5fc89d2](https://github.com/sunib/voter/commit/5fc89d2c2aa27d990dd812b6b5dee272bd288c04))
+* say "answer required" and "whole cents", never "invalid ..." ([#39](https://github.com/sunib/voter/issues/39)) ([6ac4115](https://github.com/sunib/voter/commit/6ac4115d4ea94b6fd7ffe1bccebda51f444ce90b))
+* say a seat was taken under the map, and the why's error in red ([ac9b3c2](https://github.com/sunib/voter/commit/ac9b3c24089bccd49c5f2e89e8dbb8e9417603f1))
+
 ## [2.1.2](https://github.com/sunib/voter/compare/v2.1.1...v2.1.2) (2026-10-07)
 
 
