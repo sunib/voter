@@ -39,7 +39,12 @@ const menuGrant = JSON.stringify({
 const { defaultBrowserType: _, ...pixel } = devices['Pixel 7'];
 
 async function join(browser, contexts, names, displayName, path = '/') {
-  const context = await browser.newContext({ ...pixel, ignoreHTTPSErrors: true });
+  // Recorded by hand: the config's `video: 'on'` reaches only Playwright's own
+  // page fixture, never a context a test makes for itself.
+  const context = await browser.newContext({
+    ...pixel, ignoreHTTPSErrors: true,
+    recordVideo: { dir: test.info().outputPath('videos'), size: pixel.viewport },
+  });
   contexts.push(context);
   const page = await context.newPage();
   page.on('pageerror', error => { throw error; });
@@ -51,6 +56,18 @@ async function join(browser, contexts, names, displayName, path = '/') {
   await page.waitForURL(`${APP}${path}`);
   names.push(displayName);
   return page;
+}
+
+/** Closes the phones and attaches what each one showed to the HTML report. */
+async function closeAll(contexts) {
+  for (const [i, context] of contexts.entries()) {
+    const pages = context.pages();
+    await context.close();
+    for (const page of pages) {
+      const video = page.video();
+      if (video) await test.info().attach(`phone ${i + 1}`, { path: await video.path(), contentType: 'video/webm' });
+    }
+  }
 }
 
 async function round(name, questions) {
@@ -139,7 +156,7 @@ test('a phone keeps its focus and its words while the room votes around it', asy
       { questionId: 'why', freeText: 'Because the room keeps moving.' },
     ]);
   } finally {
-    for (const c of contexts) await c.close();
+    await closeAll(contexts);
     cleanUp(names, name);
   }
 });
@@ -179,7 +196,7 @@ test('a vote taken away and given back mid-answer keeps what was typed', async (
       { questionId: 'why', freeText: 'Half a thought, finished.' },
     ]);
   } finally {
-    for (const c of contexts) await c.close();
+    await closeAll(contexts);
     kube('apply', '-f', '-', { input: everyoneBinding });
     cleanUp(names, name);
   }
@@ -208,7 +225,7 @@ test('a phone back from the pocket can still vote', async ({ browser }) => {
     await phone.getByRole('button', { name: 'Submit', exact: true }).tap();
     await expect(phone.getByText('Your vote is recorded. Thank you!')).toBeVisible();
   } finally {
-    for (const c of contexts) await c.close();
+    await closeAll(contexts);
     cleanUp(names, name);
   }
 });
@@ -245,7 +262,7 @@ test('a required answer taken back reads as required, never as invalid', async (
     await submit.tap();
     await expect(phone.getByText('Your vote is recorded. Thank you!')).toBeVisible();
   } finally {
-    for (const c of contexts) await c.close();
+    await closeAll(contexts);
     cleanUp(names, name);
   }
 });
@@ -285,7 +302,7 @@ test('a price being typed on a phone survives somebody else saving the menu', as
     await expect.poll(() => JSON.parse(kube('get', 'coffeeconfig', 'demo-coffee', '-o', 'json')).spec.products[0].priceCents).toBe(250);
     await expect(phone.getByText(/invalid/i)).toHaveCount(0);
   } finally {
-    for (const c of contexts) await c.close();
+    await closeAll(contexts);
     kube('replace', '-f', '-', { input: JSON.stringify((({ metadata: { resourceVersion, ...metadata }, ...rest }) => ({ ...rest, metadata }))(JSON.parse(before))) });
     kube('delete', 'rolebinding', 'voter-audience-coffee-admin', '--ignore-not-found');
     cleanUp(names);
@@ -320,7 +337,7 @@ test('a price typed in euros is answered in words, not a schema error', async ({
     await expect.poll(stored).toBe(250);
     await expect(phone.getByText(/Invalid value|is invalid|must be of type/)).toHaveCount(0);
   } finally {
-    for (const c of contexts) await c.close();
+    await closeAll(contexts);
     kube('replace', '-f', '-', { input: JSON.stringify((({ metadata: { resourceVersion, ...metadata }, ...rest }) => ({ ...rest, metadata }))(JSON.parse(before))) });
     kube('delete', 'rolebinding', 'voter-audience-coffee-admin', '--ignore-not-found');
     cleanUp(names);
