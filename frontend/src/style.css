@@ -1980,18 +1980,12 @@ p {
 .seat-map {
   margin-top: 1rem;
   /* Small enough that twelve or so columns fit a phone; past that the map
-   * scrolls inside itself, and the zoomed row is where you tap. */
+   * scrolls inside itself. */
   --seat-size: minmax(1.15rem, 1fr);
-}
-
-.seat-map--large {
-  --seat-size: 2.75rem;
 }
 
 /* The page never scrolls sideways; a wide room scrolls inside its map. */
 .seat-map__scroll {
-  /* The offset parent the zoomed row centres its chosen seat against. */
-  position: relative;
   overflow-x: auto;
   padding-bottom: 0.2rem;
 }
@@ -2023,10 +2017,6 @@ p {
   text-align: center;
 }
 
-.seat-map--large .seat-map__number {
-  font-size: 0.8rem;
-}
-
 /* Named, so the page's monospace font never gets a say in an emoji. */
 .seat-cell,
 .seat-look__emoji {
@@ -2046,11 +2036,6 @@ p {
   border: 0;
   background: var(--seat-color, transparent);
   color: rgb(var(--ink));
-}
-
-.seat-map--large .seat-cell {
-  border-radius: 10px;
-  font-size: 1.5rem;
 }
 
 .seat-cell--free {

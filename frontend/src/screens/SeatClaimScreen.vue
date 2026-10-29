@@ -112,10 +112,13 @@ async function claim() {
       why.value,
     )
     markSeated()
-    await router.replace({
-      name: 'seat-mine',
-      query: { claimed: receipt.whyLost ? 'why-lost' : '1' },
-    })
+    // Seated, so on to coffee. A reason that did not make it is the one thing
+    // worth stopping for, and the seat page is where that is said.
+    await router.replace(
+      receipt.whyLost
+        ? { name: 'seat-mine', query: { claimed: 'why-lost' } }
+        : { name: 'order' },
+    )
   } catch (e) {
     failure.value = seatErrorMessage(e)
     if ((e as { status?: number }).status === 409) {
@@ -147,7 +150,7 @@ onMounted(async () => {
     <section class="panel seat-page">
       <h1>Where are you sitting?</h1>
       <p class="hero-copy">
-        Row 1 is closest to the stage. Not exactly sure? Close enough is fine.
+        Row 1 is closest to the stage.
       </p>
 
       <p v-if="loadError" role="alert" class="error-copy">{{ loadError }}</p>
@@ -172,16 +175,9 @@ onMounted(async () => {
           <p class="seat-page__place">
             Row {{ selected.row }}, seat {{ selected.column }}
           </p>
-          <SeatMap
-            :plan="plan"
-            :seats="seats"
-            :selected="selected"
-            :preview="{ color, emoji }"
-            :only-row="selected.row"
-            selectable
-            large
-            @select="select"
-          />
+          <p class="seat-page__hint">
+            No problem if it's not exact, it is what it is now.
+          </p>
         </template>
         <p v-else-if="taken" class="field__error seat-page__taken" role="alert">
           {{ taken }}
@@ -189,7 +185,9 @@ onMounted(async () => {
         <p v-else-if="seatError" class="field__error" role="alert">
           {{ seatError }}
         </p>
-        <p v-else class="seat-page__hint">Tap a free seat.</p>
+        <p v-else class="seat-page__hint">
+          Tap a free seat. Just do it approximately.
+        </p>
 
         <SeatLookPicker v-model:color="color" v-model:emoji="emoji" />
 

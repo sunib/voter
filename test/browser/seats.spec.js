@@ -34,8 +34,7 @@ test('a participant takes a seat once, with a why, and changes its look with ano
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
     return page;
   }
-  // The overview map; the zoomed row under it carries the same labels.
-  const seat = (page, label) => page.getByLabel(label, { exact: true }).first();
+  const seat = (page, label) => page.getByLabel(label, { exact: true });
 
   try {
     // Joining lands on the seat page, not the quizzes: taking a seat is first.
@@ -54,6 +53,7 @@ test('a participant takes a seat once, with a why, and changes its look with ano
 
     await seat(alice, 'Row 3, seat 7, free').click();
     await expect(alice.getByText('Row 3, seat 7', { exact: true })).toBeVisible();
+    await expect(alice.getByText("No problem if it's not exact, it is what it is now.")).toBeVisible();
     await alice.getByRole('button', { name: 'Teal' }).click();
     await alice.getByRole('button', { name: '🦊' }).click();
     await alice.getByLabel('Why this seat, this colour and this emoji?').fill('ok');
@@ -63,9 +63,10 @@ test('a participant takes a seat once, with a why, and changes its look with ano
     await alice.getByLabel('Why this seat, this colour and this emoji?').fill('  Near the door, foxes are clever ');
     await alice.getByRole('button', { name: 'Claim', exact: true }).click();
 
-    await alice.waitForURL(`${APP}/seat/mine?claimed=1`);
+    // Seated, the next stop is coffee.
+    await alice.waitForURL(`${APP}/coffee`);
+    await alice.goto(`${APP}/seat/mine`);
     await expect(alice.getByRole('heading', { name: 'Row 3, seat 7' })).toBeVisible();
-    await expect(alice.getByText("You're in.")).toBeVisible();
     const claimed = JSON.parse(kube('get', 'seat', 'mission2-3-7', '-o', 'json'));
     // Claimed as the Kubernetes identity, which admission checked against the
     // token, with the chosen name beside it for the map.
@@ -152,7 +153,8 @@ test('a participant takes a seat once, with a why, and changes its look with ano
     await seat(operator, 'Row 1, seat 1, free').click();
     await operator.getByLabel('Why this seat, this colour and this emoji?').fill('Front row, to keep an eye on things');
     await operator.getByRole('button', { name: 'Claim', exact: true }).click();
-    await operator.waitForURL(`${APP}/seat/mine?claimed=1`);
+    await operator.waitForURL(`${APP}/coffee`);
+    await operator.goto(`${APP}/seat/mine`);
     await expect(operator.getByRole('heading', { name: 'Row 1, seat 1' })).toBeVisible();
     expect(JSON.parse(kube('get', 'seat', 'mission2-1-1', '-o', 'json')).spec.claimedBy)
       .toEqual({ displayName: 'Kilgore Trout', username: 'github:kilgore@kilgore.trout' });

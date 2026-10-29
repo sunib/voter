@@ -5,7 +5,7 @@
 //
 // Names are not drawn: a seat is its colour and emoji. Whose it is shows in an
 // accessible label, never on the map itself.
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed } from 'vue'
 
 import { seatGrid, type SeatCell } from '../../api/liveSeats'
 import type { Seat, SeatingPlan } from '../../api/seats'
@@ -21,45 +21,18 @@ const props = withDefaults(
     preview?: { color: string; emoji: string }
     /** Free seats are buttons; otherwise the map only shows. */
     selectable?: boolean
-    /** Draw this one row only, with big seats: the zoom for a phone. */
-    onlyRow?: number
-    large?: boolean
   }>(),
   {
     mine: undefined,
     selected: null,
     preview: undefined,
     selectable: false,
-    onlyRow: undefined,
-    large: false,
   },
 )
 
 const emit = defineEmits<{ select: [row: number, column: number] }>()
 
-// A zoomed row is wider than a phone, so the chosen seat is brought to the
-// middle of it rather than left past the edge. Sideways only: the page itself
-// does not move under the person's thumb.
-const scroller = ref<HTMLElement | null>(null)
-watch(
-  () => [props.selected?.row, props.selected?.column],
-  async () => {
-    if (!props.large) return
-    await nextTick()
-    const box = scroller.value
-    const cell = box?.querySelector<HTMLElement>('.seat-cell--selected')
-    if (!box || !cell) return
-    box.scrollLeft = cell.offsetLeft - (box.clientWidth - cell.offsetWidth) / 2
-  },
-  { immediate: true },
-)
-
-const grid = computed(() => {
-  const rows = seatGrid(props.plan.spec, props.seats)
-  return props.onlyRow === undefined
-    ? rows
-    : rows.filter((cells) => cells[0]?.row === props.onlyRow)
-})
+const grid = computed(() => seatGrid(props.plan.spec, props.seats))
 
 const columnNumbers = computed(() =>
   Array.from({ length: props.plan.spec.columns }, (_, i) => i + 1),
@@ -96,15 +69,13 @@ function label(cell: SeatCell): string {
 </script>
 
 <template>
-  <div class="seat-map" :class="{ 'seat-map--large': large }">
-    <div ref="scroller" class="seat-map__scroll">
+  <div class="seat-map">
+    <div class="seat-map__scroll">
       <div
         class="seat-map__grid"
         :style="{ '--seat-columns': plan.spec.columns }"
       >
-        <!-- Once per page: the zoomed row sits under the full map, which
-             already says where the stage is. -->
-        <div v-if="!large" class="seat-map__stage" aria-hidden="true">Stage</div>
+        <div class="seat-map__stage" aria-hidden="true">Stage</div>
         <span class="seat-map__corner" aria-hidden="true" />
         <span
           v-for="column in columnNumbers"
