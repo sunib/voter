@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.2](https://github.com/sunib/voter/compare/v2.4.1...v2.4.2) (2026-10-29)
+
+
+### Bug Fixes
+
+* read a CommitRequest's commit from status.commit ([cfd192f](https://github.com/sunib/voter/commit/cfd192f124e262c7c558344244bcc9e2af451eb3))
+
 ## [2.4.1](https://github.com/sunib/voter/compare/v2.4.0...v2.4.1) (2026-10-29)
 
 
