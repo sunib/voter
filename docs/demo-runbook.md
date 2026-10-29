@@ -483,7 +483,7 @@ The order feed needs no reset. Restarting the pod empties it.
 | Symptom | Do this |
 |---|---|
 | Nobody can join | `kubectl -n voter get rooms.room-pass.koudijs.dev demo -o yaml`, check `endsAt` and `enrollment` |
-| A phone says "This round isn't open to you. Yet." | Working as intended: flip their group (or Everyone) under **Who may vote** on `/room`. It opens within about five seconds |
+| A phone says "This round isn't open to you. Yet." | Working as intended: flip their group (or Everyone) under **Who may vote** on `/room`. It opens within a second or two |
 | Who-may-vote switches do nothing | `kubectl -n voter get role voter-audience-ballot`. Last resort: `kubectl -n voter create rolebinding voter-audience-ballot-voter-audience --role=voter-audience-ballot --group=demo:voter-audience` |
 | Join works, voting 403s with no card | Read the message. "This round is not open for voting." or "The round changed…" is admission, working; a reload fixes the second. Otherwise `kubectl -n voter get rolebinding voter-audience` |
 | The picked person still cannot save the menu | They joined in an earlier Room (new UID, new name). Pick again; `/room` shows the username it bound |
@@ -493,7 +493,7 @@ The order feed needs no reset. Restarting the pod empties it.
 | `evaluation` will not open | You are signed in as a participant. Reenter through the GitHub door |
 | The grant switch is missing from `/room` | Same cause: reading it needs `rolebindings` |
 | Switch says the Role does not exist | `kubectl -n voter get role voter-audience-coffee-admin` |
-| Grant on but a phone still refuses | Wait about five seconds. Nothing to press |
+| Grant on but a phone still refuses | It should take a second. On that phone's `/me`, the line under the table says whether it follows the bindings or asks every few seconds; if it asks, give it five seconds. Nothing to press |
 | A pushed menu or round edit changed nothing | That object is seeded, not reconciled. Delete it and let Flux recreate it |
 | Voucher still depleted after raising the limit | Reorder. The limit is read fresh every order |
 | A voucher vanished after a terminal patch | A merge patch replaced the list. Use `--type=json` with an index. Reseed the CoffeeConfig |

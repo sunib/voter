@@ -433,12 +433,14 @@ test("shared watches isolate RBAC withdrawal and deny access to a warm cache", a
   const metrics = () => kube("get", "--raw", "/api/v1/namespaces/voter/services/krm-foyer-metrics:9090/proxy/metrics");
   try {
     expect(await retained.page.evaluate(async () => (await fetch("/metrics")).status)).toBe(404);
-    // Both viewers attached to krm-foyer's shared watch on the CoffeeConfig:
-    // two subscriptions, one watch at the API server held by its shared-watch
-    // identity. Balanced gauges, so they read the same whether this test runs
-    // alone or after every other one in the file. This test's job is that
-    // withdrawal isolates one viewer and leaves the other's cache warm.
-    await expect.poll(metrics).toContain("krm_foyer_shared_subscriptions_open 2\n");
+    // Both viewers attached to krm-foyer's shared watches: the CoffeeConfig,
+    // and the RoleBindings in voter that their permission table follows
+    // (grantChanges.ts) -- two subscriptions each, on watches at the API server
+    // held by its shared-watch identity. Balanced gauges, so they read the same
+    // whether this test runs alone or after every other one in the file. This
+    // test's job is that withdrawal isolates one viewer and leaves the other's
+    // cache warm.
+    await expect.poll(metrics).toContain("krm_foyer_shared_subscriptions_open 4\n");
     await expect.poll(metrics).toMatch(/krm_foyer_upstream_watches_open\{identity="shared"\} [1-9]/);
     await shopName(withdrawn.page).fill("Keep this unsaved draft");
     // The name RBAC matches on is the API server's, from krm-foyer's whoami.
@@ -451,10 +453,12 @@ test("shared watches isolate RBAC withdrawal and deny access to a warm cache", a
     await expect(withdrawn.page.getByRole("status").getByText(/^FORBIDDEN: Kubernetes refused/)).toBeVisible({ timeout: 60000 });
     expect(Date.now() - started).toBeLessThan(60000);
     await expect(shopName(withdrawn.page)).toHaveValue("Keep this unsaved draft");
-    // Exactly one attachment released, not both: the surviving viewer stayed on
-    // the shared watch throughout, which is what "warm cache" means here. The
-    // live update at the end of this test is the proof that it kept working.
-    await expect.poll(metrics).toContain("krm_foyer_shared_subscriptions_open 1\n");
+    // Exactly one viewer's attachments released, both of them (it may read
+    // neither the menu nor the bindings now), and not the other's: the
+    // surviving viewer stayed on the shared watches throughout, which is what
+    // "warm cache" means here. The live update at the end of this test is the
+    // proof that it kept working. The bindings' recheck runs on its own clock.
+    await expect.poll(metrics, { timeout: 60000 }).toContain("krm_foyer_shared_subscriptions_open 2\n");
     const frames = await withdrawn.page.evaluate(async () => (await fetch("/stream/v1?group=examples.configbutler.ai&version=v1alpha1&resource=coffeeconfigs&namespace=voter&name=demo-coffee")).text());
     expect(frames).toContain('"terminal":true');
     expect(frames).not.toContain('"object"');

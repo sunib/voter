@@ -62,6 +62,12 @@ test('a participant is refused the operator page and never sees a join code', as
     // No round controls either, so there is nothing to click by mistake.
     await expect(page.getByRole('button', { name: 'Open', exact: true })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Close', exact: true })).toHaveCount(0);
+    // Nor the grants. A participant may read the RoleBindings in voter (their
+    // permission table follows them), so it is the Room's refusal that keeps
+    // these off their screen, not the bindings'.
+    await expect(page.getByRole('checkbox', { name: /Let the room edit the coffee menu/ })).toHaveCount(0);
+    await expect(page.getByTestId('ballot-switches')).toHaveCount(0);
+    await expect(page.getByTestId('pick-someone')).toHaveCount(0);
 
     // And the write behind those buttons refuses this identity on its own,
     // rather than relying on the page having hidden them. It is the same patch

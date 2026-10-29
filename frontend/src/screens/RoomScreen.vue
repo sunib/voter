@@ -110,6 +110,21 @@ const roomFaulted = computed(() => room.faulted())
 const roomUnavailable = computed(
   () => roomDenied.value || roomExpired.value || roomFaulted.value,
 )
+// The operator's controls wait for the Room to have streamed once. A
+// participant may read the RoleBindings in voter (the permission table follows
+// them), so the bindings no longer hide these controls from a participant; the
+// Room does, and until its refusal arrives nobody knows who is looking.
+const roomSeen = ref(false)
+watch(
+  () => room.synced(),
+  (live) => {
+    if (live) roomSeen.value = true
+  },
+  { immediate: true },
+)
+const operatorControls = computed(
+  () => roomSeen.value && !roomUnavailable.value,
+)
 
 const sortedRounds = computed(() =>
   (rounds.items.value as RoundObject[])
@@ -166,10 +181,10 @@ async function changeState(name: string, state: 'live' | 'closed') {
 // --- what the audience may do ----------------------------------------------
 //
 // The switch creates or deletes ONE RoleBinding, with this operator's own
-// token. There is no admin check in front of it: reading the grant needs
-// permission on rolebindings, which a participant does not have, so a
-// participant simply never sees the control -- Kubernetes decided that, not
-// this component.
+// token. There is no admin check in front of it: the control is shown to
+// whoever Kubernetes lets read the Room (operatorControls above), and creating
+// the binding needs rights a participant does not have -- Kubernetes decided
+// both, not this component.
 //
 // It is re-read whenever a binding in the namespace changes, as well as written,
 // so the switch still tells the truth if the binding is changed from a terminal
@@ -354,9 +369,9 @@ function signInAsOperator() {
     </section>
 
     <!-- Demo 2's switch. One RoleBinding, created and deleted with your own
-         token, and every phone in the room discovers the change by asking the
-         API server what it may do -- not by being told by this application. -->
-    <section v-if="!roomUnavailable && grantVisible" class="panel">
+         token. Every phone in the room sees the binding change and asks the
+         API server what it may now do -- it is not told by this application. -->
+    <section v-if="operatorControls && grantVisible" class="panel">
       <div class="section-heading">
         <h2 class="panel-title">What the audience may do</h2>
         <span
@@ -401,10 +416,9 @@ function signInAsOperator() {
       <PickSomeone />
     </section>
 
-    <!-- Who may cast a ballot. Read with the same operator rights as the
-         switch above, and hidden from anyone refused them. -->
+    <!-- Who may cast a ballot. Shown on the same terms as the switch above. -->
     <BallotSwitches
-      v-if="!roomUnavailable"
+      v-if="operatorControls"
       :audience-group="theRoom?.spec?.audienceGroup"
       :answers="theRoom?.spec?.question?.answers"
     />

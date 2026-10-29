@@ -4,10 +4,10 @@ Status (2026-10-29):
 
 | Step | State |
 | --- | --- |
-| 1. krm-foyer namespaced shared watches | merged (ConfigButler/krm-foyer#47); **0.4.0 not released yet** (release PR #48) |
-| 2. GitOps | RBAC and admission policy **live** (`external/k8s` b16d590); chart bump waits for 0.4.0 |
-| 3. Verify the RBAC | participant and policy checks pass on the cluster; shared-identity checks wait for 0.4.0 |
-| 4. Voter app | built on `feat/watchable-permissions`; do not release before the chart bump (see step 4) |
+| 1. krm-foyer namespaced shared watches | released in 0.4.0 (ConfigButler/krm-foyer#47) |
+| 2. GitOps | **live**: RBAC and admission policy (`external/k8s` b16d590), krm-foyer 0.4.0 sharing `rolebindings` in voter (0ae667f) |
+| 3. Verify the RBAC | every `kubectl` check below passes on the cluster |
+| 4. Voter app | built on `feat/watchable-permissions`, fixture on krm-foyer 0.4.0 |
 | 5. Rehearse | not yet |
 
 ## Why
@@ -194,9 +194,9 @@ per phone.
 
 ### 4. Voter app (`feat:`, deploys on its own)
 
-**Release after the chart bump.** Until krm-foyer shares `rolebindings`, each
-phone's stream is its own watch at the API server, as that phone: it works
-(participants hold the grant since step 2), but 200 phones are 200 watches.
+**Needs krm-foyer 0.4.0 sharing `rolebindings` (step 2, live).** Without it
+each phone's stream is its own watch at the API server, as that phone: it works,
+but 200 phones are 200 watches.
 
 Built: `frontend/src/api/grantChanges.ts` (`onGrantChange`), used by
 `useAuthorization` and `RoomScreen`'s audience grant; `/me` shows which mode the
@@ -239,9 +239,17 @@ unless a stream is unavailable.
   then the coffee grant appears and disappears within 2 s, one review each.
 - `test/browser/boundaries.spec.js`: the policy refuses a ClusterRole ref and
   allows a Role (server-side dry runs).
-- `test/e2e/voter.yaml` carries step 2's participant rule. The chart values
-  (`sharedWatches.namespacedResources`) go into `krm-foyer-values.yaml` with
-  the 0.4.0 bump in `up.sh`.
+- `test/e2e/voter.yaml` carries step 2's participant rule, and
+  `krm-foyer-values.yaml` its `sharedWatches.namespacedResources`, on 0.4.0.
+- `test/browser/demo-groups.spec.js`: `/room` lists nothing for 6 s, a join
+  moves a head count and a terminal's binding moves its switch, within 2 s.
+- `test/browser/live-stream.spec.js`: two editors hold four shared
+  subscriptions (the menu and the bindings each), and a withdrawn viewer
+  releases both of its own and neither of the other's.
+- `test/browser/operator.spec.js`: a participant on `/room` sees no grant, ballot
+  or pick controls. Participants may now read the bindings, so the controls wait
+  for the Room stream, which a participant is refused, rather than for the
+  bindings' 403.
 
 ### 5. Rehearse
 
