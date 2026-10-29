@@ -10,7 +10,7 @@
 // your own token, and renders whatever Kubernetes is willing to send. A
 // participant's RBAC grants nothing on rooms, so a participant sees the refusal
 // below and no code -- the demo is better when the refusal is real.
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { toString as qrToString } from 'qrcode/lib/browser'
 
 import AppShell from '../components/layout/AppShell.vue'
@@ -23,6 +23,7 @@ import {
   ROOM_REQUIREMENTS,
 } from '../api/authz'
 import { useAuthorization } from '../api/useAuthorization'
+import { onGrantChange } from '../api/grantChanges'
 import PermissionRequirements from '../components/PermissionRequirements.vue'
 import BallotSwitches from '../components/room/BallotSwitches.vue'
 import PickSomeone from '../components/room/PickSomeone.vue'
@@ -170,8 +171,9 @@ async function changeState(name: string, state: 'live' | 'closed') {
 // participant simply never sees the control -- Kubernetes decided that, not
 // this component.
 //
-// It is polled as well as written, so the switch still tells the truth if the
-// binding is changed from a terminal or by a second operator.
+// It is re-read whenever a binding in the namespace changes, as well as written,
+// so the switch still tells the truth if the binding is changed from a terminal
+// or by a second operator.
 const grantGranted = ref(false)
 const grantVisible = ref(false)
 const grantBusy = ref(false)
@@ -221,8 +223,7 @@ async function toggleGrant(next: boolean) {
 }
 
 void refreshGrant()
-const grantTimer = setInterval(() => void refreshGrant(), 5000)
-onBeforeUnmount(() => clearInterval(grantTimer))
+onGrantChange(() => void refreshGrant(), 5000)
 
 function signInAsOperator() {
   // Allowlisted by krm-foyer's login.authorizationParameters, not free text;

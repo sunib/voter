@@ -140,3 +140,53 @@ test('the operator sees the join code, opens and closes a round, and grants the 
     kube('delete', 'rolebinding', GRANT, '--ignore-not-found');
   }
 });
+
+// A grant reaches the room because the room watches the RoleBindings in voter,
+// not because every phone asks every few seconds
+// (docs/runbook-watchable-permissions.md). So: no rules review while nothing
+// changes, then one, promptly, when the operator's binding appears.
+test('the coffee grant reaches a participant at once, with one rules review and no polling', async ({ browser }) => {
+  const displayName = `grant-watch-${Date.now()}`;
+  kube('delete', 'rolebinding', GRANT, '--ignore-not-found');
+
+  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const page = await context.newPage();
+  page.on('pageerror', error => { throw error; });
+  let reviews = 0;
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname.endsWith('/selfsubjectrulesreviews')) reviews++;
+  });
+  // The fixture's room holds no create commitrequests, so the refusal stays on
+  // screen either way; the grant is what moves this one row out of it.
+  const refused = page.locator('.permission-gap__row--missing', { hasText: 'patch coffeeconfigs' });
+  try {
+    await page.goto(`${APP}/admin`);
+    await page.getByLabel('Room code').fill(JSON.parse(kube('get', 'room', 'demo', '-o', 'json')).status.joinCode.code);
+    await page.getByLabel('Display name').fill(displayName);
+    // The Room asks one question at the door; any answer will do here.
+    await page.getByRole('radio', { name: 'Vue' }).check();
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await page.waitForURL(`${APP}/admin`, { timeout: 30000 });
+    await expect(refused).toBeVisible({ timeout: 20000 });
+
+    // Longer than the 4-second poll this replaced: a page still polling asks
+    // at least once in here.
+    const before = reviews;
+    await page.waitForTimeout(6000);
+    expect(reviews, 'the page asked again while no grant changed').toBe(before);
+
+    // Standing in for the operator's switch on /room.
+    kube('create', 'rolebinding', GRANT, `--role=${GRANT}`, '--group=demo:voter-audience');
+    await expect(refused).toBeHidden({ timeout: 2000 });
+    expect(reviews).toBe(before + 1);
+
+    kube('delete', 'rolebinding', GRANT);
+    await expect(refused).toBeVisible({ timeout: 2000 });
+    expect(reviews).toBe(before + 2);
+  } finally {
+    await context.close();
+    kube('delete', 'rolebinding', GRANT, '--ignore-not-found');
+    const participants = JSON.parse(kube('get', 'participants', '-o', 'json')).items;
+    for (const p of participants) if (p.spec.displayName === displayName) kube('delete', 'participant', p.metadata.name);
+  }
+});

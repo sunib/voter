@@ -21,9 +21,14 @@ import {
 import { getWhoAmI, type WhoAmI } from '../api/whoami'
 
 const router = useRouter()
-// Polled, not fetched once: an operator can widen the audience's grant while
+// Live, not fetched once: an operator can widen the audience's grant while
 // this page is open, and the row that changes should change here too.
-const { authz, error: authzError, loading: authzLoading } = useAuthorization()
+const {
+  authz,
+  error: authzError,
+  loading: authzLoading,
+  mode: authzMode,
+} = useAuthorization()
 const session = ref<Session | null>(currentSession())
 const whoami = ref<WhoAmI | null>(null)
 const signingOut = ref(false)
@@ -217,6 +222,13 @@ onMounted(async () => {
         :loading="authzLoading"
         :error="authzError"
       />
+      <p class="metadata-copy" data-testid="authz-mode">
+        {{
+          authzMode === 'watch'
+            ? 'Asked again whenever a RoleBinding in this namespace changes.'
+            : 'Asked again every few seconds: the RoleBindings here cannot be watched right now.'
+        }}
+      </p>
       <details v-if="authz" class="raw-answer">
         <summary>The raw answer</summary>
         <pre>{{ JSON.stringify(authz.review, null, 2) }}</pre>

@@ -119,6 +119,11 @@ rules:
   - apiGroups: [examples.configbutler.ai]
     resources: [seatingplans]
     verbs: [get, list, watch]
+  # As the cluster's participant-rbac.yaml: the grants in voter, watched so a
+  # phone asks "what may I do?" again only when one changes.
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [rolebindings]
+    verbs: [get, list, watch]
 ---
 # The grant the operator hands out live from /room, as in the cluster's
 # participant-rbac.yaml: the Role is here, the RoleBinding is created and
