@@ -3,7 +3,10 @@
 // participant gets a RoleBinding of their own to the coffee-admin Role, naming
 // their Kubernetes username; the room-wide switch is a different binding and
 // keeps working as it did. Their next save is a commit in their name.
-import { onBeforeUnmount, ref } from 'vue'
+//
+// Nothing here polls: the binding is read again when one changes, and the
+// people to pick from are a live view of the room's Participants.
+import { computed, ref } from 'vue'
 
 import {
   grantPerson,
@@ -11,35 +14,36 @@ import {
   personGrant,
   pickParticipant,
   revokePerson,
-  type Participant,
+  useLiveParticipants,
   type PersonGrant,
 } from '../../api/roomGrants'
-import { listObjects, PARTICIPANTS } from '../../api/kube'
+import { onGrantChange } from '../../api/grantChanges'
 
 const holder = ref<PersonGrant | null>(null)
-const participants = ref<Participant[]>([])
+const { live: room, participants } = useLiveParticipants()
 const visible = ref(false)
 const loaded = ref(false)
 const busy = ref(false)
-const error = ref('')
+const actionError = ref('')
+// Refused is not shown: the bindings' 403 already hides the control.
+const error = computed(
+  () => actionError.value || (room.faulted() ? room.error.value : ''),
+)
 
 async function refresh() {
   try {
-    const [bindings, list] = await Promise.all([
-      listRoleBindings(),
-      listObjects<Participant>(PARTICIPANTS),
-    ])
+    const bindings = await listRoleBindings()
     if (!busy.value) holder.value = personGrant(bindings)
-    participants.value = list
     visible.value = true
-    error.value = ''
+    actionError.value = ''
   } catch (e) {
     const status = (e as { status?: number }).status
     if (status === 401 || status === 403) {
       visible.value = false
     } else {
       visible.value = true
-      error.value = e instanceof Error ? e.message : 'Could not read the room.'
+      actionError.value =
+        e instanceof Error ? e.message : 'Could not read the room.'
     }
   } finally {
     loaded.value = true
@@ -49,16 +53,16 @@ async function refresh() {
 async function pick() {
   const chosen = pickParticipant(participants.value, holder.value)
   if (chosen === null) {
-    error.value = 'Nobody has joined the room yet.'
+    actionError.value = 'Nobody has joined the room yet.'
     return
   }
   busy.value = true
-  error.value = ''
+  actionError.value = ''
   try {
     await grantPerson(chosen)
     holder.value = personGrant(await listRoleBindings())
   } catch (e) {
-    error.value =
+    actionError.value =
       e instanceof Error ? e.message : 'Could not hand out the menu.'
   } finally {
     busy.value = false
@@ -67,12 +71,12 @@ async function pick() {
 
 async function revoke() {
   busy.value = true
-  error.value = ''
+  actionError.value = ''
   try {
     await revokePerson()
     holder.value = null
   } catch (e) {
-    error.value =
+    actionError.value =
       e instanceof Error ? e.message : 'Could not take the menu back.'
   } finally {
     busy.value = false
@@ -80,8 +84,7 @@ async function revoke() {
 }
 
 void refresh()
-const timer = setInterval(() => void refresh(), 4000)
-onBeforeUnmount(() => clearInterval(timer))
+onGrantChange(() => void refresh(), 4000)
 </script>
 
 <template>

@@ -218,14 +218,17 @@ trigger:
 - `AnswerScreen` keeps `poll: false` and its own marker trigger. It may also use
   the binding trigger, since ballot grants are RoleBindings too.
 
-**Operator page:** `RoomScreen`'s `refreshGrant` (5 s) reads only the binding,
-and now uses the same trigger. The operator is an admin, so this works before
-step 2 too, through a per-user stream.
+**Operator page:** `RoomScreen`'s `refreshGrant` (5 s), `PickSomeone` and
+`BallotSwitches` (4 s each) read the same bindings, and now use the same
+trigger. The operator is an admin, so this works before step 2 too, through a
+per-user stream.
 
-*Changed from the plan:* `PickSomeone` and `BallotSwitches` keep their 4-second
-polls. Each also lists Participants (who can be picked, head counts per answer
-group), and those change as people join, which a binding watch does not see.
-They run in the operator's browser alone, so the load is one browser's.
+*Added to the plan:* `PickSomeone` and `BallotSwitches` also read Participants
+(who can be picked, head counts per answer group), which change as people join
+and no binding does. They follow those through their own stream
+(`useLiveParticipants` in `roomGrants.ts`), so the pick pool and the counts
+move as the room fills instead of every 4 s. Nothing on `/room` polls now
+unless a stream is unavailable.
 
 **Tests:**
 - `frontend/src/api/grantChanges.test.ts`: the first snapshot does not count

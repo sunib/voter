@@ -8,16 +8,19 @@
 // participant's vote page sees the marker move, asks the API server once
 // whether it may now create a QuizSubmission, and its refusal turns into a
 // ballot -- or back -- without polling. Nothing in Voter decides who votes.
-import { computed, onBeforeUnmount, ref } from 'vue'
+//
+// Nor does this page poll: the bindings are read again when one changes, and
+// the head counts are a live view of the room's Participants.
+import { computed, ref } from 'vue'
 
 import {
   announceBallotGroups,
   ballotGroups,
   listRoleBindings,
   setBallotGrant,
-  type Participant,
+  useLiveParticipants,
 } from '../../api/roomGrants'
-import { listObjects, PARTICIPANTS } from '../../api/kube'
+import { onGrantChange } from '../../api/grantChanges'
 
 const props = defineProps<{
   audienceGroup?: string
@@ -46,19 +49,29 @@ const switches = computed<Switch[]>(() => {
 })
 
 const open = ref<Set<string>>(new Set())
-const counts = ref<Map<string, number>>(new Map())
-const total = ref(0)
 const visible = ref(false)
 const loaded = ref(false)
 const busy = ref('')
-const error = ref('')
+const actionError = ref('')
+
+const { live: room, participants } = useLiveParticipants()
+// Refused is not shown: the bindings' 403 already hides the control.
+const error = computed(
+  () => actionError.value || (room.faulted() ? room.error.value : ''),
+)
+const active = computed(() => participants.value.filter((p) => !p.spec.revoked))
+const total = computed(() => active.value.length)
+const counts = computed(() => {
+  const tally = new Map<string, number>()
+  for (const p of active.value) {
+    for (const g of p.spec.groups ?? []) tally.set(g, (tally.get(g) ?? 0) + 1)
+  }
+  return tally
+})
 
 async function refresh() {
   try {
-    const [bindings, participants] = await Promise.all([
-      listRoleBindings(),
-      listObjects<Participant>(PARTICIPANTS),
-    ])
+    const bindings = await listRoleBindings()
     if (busy.value === '') {
       const groups = ballotGroups(bindings)
       open.value = groups
@@ -66,17 +79,8 @@ async function refresh() {
       // a switch here, or a binding made from a terminal.
       await announceBallotGroups(groups)
     }
-    const tally = new Map<string, number>()
-    let active = 0
-    for (const p of participants) {
-      if (p.spec.revoked) continue
-      active++
-      for (const g of p.spec.groups ?? []) tally.set(g, (tally.get(g) ?? 0) + 1)
-    }
-    counts.value = tally
-    total.value = active
     visible.value = true
-    error.value = ''
+    actionError.value = ''
   } catch (e) {
     // As the coffee switch: a participant is refused, and the control is
     // simply not theirs. Anything else is a fault worth seeing.
@@ -85,7 +89,7 @@ async function refresh() {
       visible.value = false
     } else {
       visible.value = true
-      error.value =
+      actionError.value =
         e instanceof Error ? e.message : 'Could not read who may vote.'
     }
   } finally {
@@ -101,7 +105,7 @@ function countFor(s: Switch): number {
 
 async function toggle(group: string, next: boolean) {
   busy.value = group
-  error.value = ''
+  actionError.value = ''
   const previous = new Set(open.value)
   const optimistic = new Set(open.value)
   if (next) optimistic.add(group)
@@ -111,11 +115,11 @@ async function toggle(group: string, next: boolean) {
     await setBallotGrant(group, next)
   } catch (e) {
     open.value = previous
-    error.value =
+    actionError.value =
       e instanceof Error ? e.message : 'Could not change who may vote.'
   } finally {
     busy.value = ''
-    // Not left to the next poll: the room is waiting for this.
+    // Not left to the binding's own event: the room is waiting for this.
     await refresh()
   }
 }
@@ -133,8 +137,7 @@ const summary = computed(() => {
 })
 
 void refresh()
-const timer = setInterval(() => void refresh(), 4000)
-onBeforeUnmount(() => clearInterval(timer))
+onGrantChange(() => void refresh(), 4000)
 </script>
 
 <template>

@@ -8,9 +8,13 @@
 // the names this page gives them, so a binding made from a terminal during the
 // talk shows up here as the switch it is.
 
+import { computed } from 'vue'
+
 import { appConfig } from './appConfig'
 import type { ApiError } from './http'
+import { useLiveResources } from './liveResources'
 import {
+  PARTICIPANTS,
   QUIZSESSIONS,
   ROLEBINDINGS,
   createObject,
@@ -45,6 +49,21 @@ export interface Participant {
     groups?: string[]
     revoked?: boolean
   }
+}
+
+/** The room's Participants, live, for the operator's controls: who can be
+ *  picked, and how many answered what. They change as people join at the door,
+ *  which no RoleBinding does, so they are watched on their own. A participant
+ *  is refused this stream, as they are refused the bindings. */
+export function useLiveParticipants() {
+  const live = useLiveResources({
+    ...PARTICIPANTS,
+    namespace: appConfig().namespace,
+  })
+  const participants = computed(
+    () => live.items.value as unknown as Participant[],
+  )
+  return { live, participants }
 }
 
 /** The bindings in the application's namespace. Each grant below is a filter
