@@ -87,7 +87,9 @@ fails while app and CRD disagree, and old Seats cannot be updated afterwards.
 6. **Verify the object, not the Kustomization's Ready.** `voter-demo` applies
    every revision, then health-checks. While a health check fails it stays
    not-Ready and its `lastAppliedRevision` does not move, but the new YAML is
-   applied all the same. So check what landed:
+   applied all the same, once the current health-check wait (up to 10 minutes)
+   runs out; `flux reconcile` does not cut that wait short. So check what
+   landed:
 
    ```bash
    kubectl get crd seats.examples.configbutler.ai -o jsonpath='{.spec.versions[0].schema.openAPIV3Schema.properties.spec.required}'

@@ -1,0 +1,52 @@
+# Open or refresh the release pull request as soon as a commit lands on main,
+# instead of after ci.yml has gone green (release.yml waits for that).
+#
+# Copied from gitops-reverser's release-pr.yml, minus its draft-release check:
+# Voter's releases are never drafts, so release-please's "latest release" lookup
+# always sees the newest one.
+#
+# Safe to run before the tests because it only rewrites the release PR. Nothing
+# is tagged here (skip-github-release). A release is still cut only by
+# release.yml, after CI passed on the commit it releases.
+#
+# It also closes a race. release.yml merges the release PR itself, and used to
+# be the one that opened it, looking it up by label a second later. That lookup
+# missed a PR it had just made three times (2.1.0, 2.1.2, 2.3.0), and each sat
+# unmerged until someone noticed. Opened here, the PR is minutes old by the time
+# release.yml looks for it.
+#
+# The one state in which this must not compute a PR: the release PR is merged
+# and release.yml has not tagged it yet. release-please sees the merged,
+# untagged PR and aborts on its own.
+name: Release PR
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Shared with release.yml's release-please job, so the two never rewrite the PR
+# branch at the same time. A newer push replaces a pending run; a running one
+# finishes first.
+concurrency:
+  group: release-pr-main
+  cancel-in-progress: false
+
+jobs:
+  release-please-pr:
+    name: Release Please (PR)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Open or refresh the release PR
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true

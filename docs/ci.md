@@ -103,17 +103,18 @@ load-bearing now, not a style preference:
 
 The loop:
 
-1. Merge to `main`. `ci.yml` runs and publishes `sha-<short sha>`.
-2. `release.yml` waits for that run to go **green** — it triggers on
-   `workflow_run`, so a red build can never be released — then opens or updates
-   a `chore(main): release X.Y.Z` pull request with the changelog.
-3. Merge that pull request. release-please tags `vX.Y.Z` and cuts the GitHub
-   release; `retag` moves the version tags onto the tested digest.
-4. Flux's image automation in the platform repository elects the new version
+1. Merge to `main`. `ci.yml` runs and publishes `sha-<short sha>`. At the same
+   time `release-pr.yml` opens or updates a `chore(main): release X.Y.Z` pull
+   request with the changelog. That needs no green build: it only writes the PR.
+2. `release.yml` waits for the CI run to go **green** — it triggers on
+   `workflow_run`, so a red build can never be released — then merges that pull
+   request itself, tags `vX.Y.Z` and cuts the GitHub release; `retag` moves the
+   version tags onto the tested digest.
+3. Flux's image automation in the platform repository elects the new version
    from the `1.x` range, writes `image: …:X.Y.Z@sha256:…` into `app.yaml` **in
    Git**, and the ordinary reconcile deploys it.
 
-Step 4 is why nobody copies a digest out of a job summary any more. The digest
+Step 3 is why nobody copies a digest out of a job summary any more. The digest
 is still pinned — Flux writes it — so Git keeps saying exactly what runs; it is
 just no longer a human doing the writing. See
 `k8s.koudijs.dev/2-gitops/voter-demo/image-automation.yaml` in the platform

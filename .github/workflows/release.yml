@@ -66,6 +66,10 @@ jobs:
     if: >-
       ${{ github.event_name == 'workflow_run'
           && github.event.workflow_run.conclusion == 'success' }}
+    # Shared with release-pr.yml, so the two never rewrite the PR branch at once.
+    concurrency:
+      group: release-pr-main
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write
@@ -93,15 +97,24 @@ jobs:
       # A merge made with GITHUB_TOKEN triggers no workflow, so nothing would
       # ever come back to tag it. Hence the second release-please run right
       # after: it finds the merged pull request and cuts the release now.
+      #
+      # Which PR: the one release-please just created or updated, by the number
+      # it returns. Only when it touched none (release-pr.yml already had it
+      # current) is the PR looked up by label, and by then it is minutes old.
+      # The label lookup alone missed a PR made a second earlier three times.
       - name: Merge the release pull request
         id: merge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
+          PR_JSON: ${{ steps.release.outputs.pr }}
         run: |
           set -euo pipefail
-          PR="$(gh pr list --repo "$REPO" --state open --base main \
-            --label 'autorelease: pending' --json number --jq '.[0].number // empty')"
+          PR="$(jq -r '.number // empty' <<< "${PR_JSON:-null}")"
+          if [ -z "$PR" ]; then
+            PR="$(gh pr list --repo "$REPO" --state open --base main \
+              --label 'autorelease: pending' --json number --jq '.[0].number // empty')"
+          fi
           if [ -z "$PR" ]; then
             echo "No release pull request open; nothing to merge."
             exit 0
