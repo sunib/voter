@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.3.0](https://github.com/sunib/voter/compare/v2.2.0...v2.3.0) (2026-10-29)
+
+
+### Features
+
+* let's fix the mistake with the empty vouchers, that's a nice catch ([9aa6366](https://github.com/sunib/voter/commit/9aa636673f4e8627173e3409af55e418784526d3))
+* Let's get a new release out in a more standaridzed way ([e003b63](https://github.com/sunib/voter/commit/e003b63a1643e3fa800df0b99422df5057c0104c))
+
 ## [2.2.0](https://github.com/sunib/voter/compare/v2.1.2...v2.2.0) (2026-10-28)
 
 
