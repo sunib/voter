@@ -29,9 +29,13 @@ async function fixture(editable = true) {
   let controller: ReadableStreamDefaultController<Uint8Array>
   let seq = 0
   const requests: RequestInit[] = []
-  // A save is a PATCH of the object, then a CommitRequest; this answers both
-  // well enough (the CommitRequest reads its name from metadata).
+  // A press of Save is one CommitRequest, then a PATCH of the object, retried on
+  // a 409. host answers the object's traffic, commit the CommitRequests, so a
+  // test queues the object's responses without counting the request.
   const host = vi.fn(async (_init: RequestInit) =>
+    json({ metadata: { name: 'coffee-save-test' } }),
+  )
+  const commit = vi.fn(async (_init: RequestInit) =>
     json({ metadata: { name: 'coffee-save-test' } }),
   )
   const fetch = vi.fn(async (url: string, init: RequestInit = {}) => {
@@ -46,7 +50,7 @@ async function fixture(editable = true) {
         { headers: { 'Content-Type': 'text/event-stream' } },
       )
     requests.push(init)
-    return host(init)
+    return url.includes('/commitrequests') ? commit(init) : host(init)
   })
   await useTestAppConfig()
   vi.stubGlobal('fetch', fetch)
@@ -70,6 +74,7 @@ async function fixture(editable = true) {
     live,
     event,
     host,
+    commit,
     requests,
     fetch,
     disconnect: () => controller.close(),
@@ -179,7 +184,7 @@ describe('CoffeeConfig library integration', () => {
   })
 
   it('uses one stream-seeded store and keeps later edits when a receipt arrives', async () => {
-    const { live, event, host, requests } = await fixture()
+    const { live, event, host, commit, requests } = await fixture()
     expect(requests).toHaveLength(0)
     live.setValue(['spec', 'shopName'], 'Submitted')
     let finish!: (response: Response) => void
@@ -189,12 +194,13 @@ describe('CoffeeConfig library integration', () => {
           finish = resolve
         }),
     )
-    // The CommitRequest after it is refused: the save still happened.
-    host.mockResolvedValueOnce(json({ kind: 'Status', message: 'down' }, 503))
+    // The CommitRequest ahead of it is refused: the save still happens.
+    commit.mockResolvedValueOnce(json({ kind: 'Status', message: 'down' }, 503))
     const save = live.save('Reason')
     await live.save('Double click')
-    expect(requests).toHaveLength(1)
-    expect(JSON.parse(String(requests[0]!.body))).toEqual({
+    await vi.waitFor(() => expect(requests).toHaveLength(2))
+    expect(requests.map((request) => request.method)).toEqual(['POST', 'PATCH'])
+    expect(JSON.parse(String(requests[1]!.body))).toEqual({
       spec: { shopName: 'Submitted' },
       metadata: { uid: 'coffee', resourceVersion: '1' },
     })
@@ -230,17 +236,17 @@ describe('CoffeeConfig library integration', () => {
     expect(live.error.value).toBe('')
     expect(live.notice.value).toContain('Saved to Kubernetes')
     expect(live.draft.value?.spec.shopName).toBe('Mine')
-    // The last write is the CommitRequest, asked for once, after the save
-    // that landed.
+    // The CommitRequest goes first, and ONCE: it waits for whichever attempt
+    // lands. A second one would be refused SaveInProgress while it waits.
     expect(requests.map((request) => request.method ?? 'GET')).toEqual([
+      'POST',
       'PATCH',
       'GET',
       'PATCH',
-      'POST',
     ])
     // The retry carries the same edits against the version that won, never a
     // newer version stapled onto the original patch.
-    expect(JSON.parse(String(requests[2]!.body))).toEqual({
+    expect(JSON.parse(String(requests[3]!.body))).toEqual({
       spec: { shopName: 'Mine' },
       metadata: { uid: 'coffee', resourceVersion: '2' },
     })
@@ -261,6 +267,7 @@ describe('CoffeeConfig library integration', () => {
     expect(live.notice.value).toContain('conflict')
     expect(live.canSave.value).toBe(false)
     expect(requests.map((request) => request.method ?? 'GET')).toEqual([
+      'POST',
       'PATCH',
       'GET',
     ])
@@ -278,6 +285,7 @@ describe('CoffeeConfig library integration', () => {
     expect(live.conflicts.value).toEqual([])
     expect(live.notice.value).toContain('nothing left to save')
     expect(requests.map((request) => request.method ?? 'GET')).toEqual([
+      'POST',
       'PATCH',
       'GET',
     ])
@@ -294,7 +302,7 @@ describe('CoffeeConfig library integration', () => {
         }),
     )
     const saving = live.save('')
-    await vi.waitFor(() => expect(requests).toHaveLength(2))
+    await vi.waitFor(() => expect(requests).toHaveLength(3))
     await event({
       type: 'modified',
       object: object('3', 'Newest'),
@@ -306,7 +314,9 @@ describe('CoffeeConfig library integration', () => {
     expect(live.needsRead.value).toBe(true)
     host.mockResolvedValueOnce(json(object('3', 'Newest')))
     await live.save('')
+    // The second press only re-reads: no new CommitRequest, nothing to save.
     expect(requests.map((request) => request.method ?? 'GET')).toEqual([
+      'POST',
       'PATCH',
       'GET',
       'GET',
@@ -425,7 +435,7 @@ describe('CoffeeConfig library integration', () => {
       .mockResolvedValueOnce(json(won))
     await live.save('')
     expect(live.conflicts.value).toEqual([])
-    expect(JSON.parse(String(requests[2]!.body)).spec.products).toEqual([
+    expect(JSON.parse(String(requests[3]!.body)).spec.products).toEqual([
       { sku: 'a', name: 'A', priceCents: 375, enabled: true },
       { sku: 'b', name: 'B', priceCents: 250, enabled: true },
     ])

@@ -1,6 +1,6 @@
 import type { KRMObject } from '@configbutler/krm-stream'
 
-import { getDatabase, patchDatabase } from './databases'
+import { getDatabase, requestDatabaseCommit, writeDatabase } from './databases'
 import type { Database } from './databaseTypes'
 import { useLiveEditableResource } from './liveEditableResource'
 
@@ -31,7 +31,8 @@ export function useLiveDatabase(namespace: string, name: string) {
     },
     editable: true,
     read: () => getDatabase(name),
-    write: (intent, reason) => patchDatabase(name, intent, { reason }),
+    write: (intent, reason) => writeDatabase(name, intent, reason),
+    requestCommit: requestDatabaseCommit,
     isExpectedKind: databaseResource,
     copy: {
       invalid: 'The stream returned something that is not a Database.',

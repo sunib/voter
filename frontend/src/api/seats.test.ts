@@ -162,28 +162,35 @@ describe('writing a seat', () => {
   })
   afterEach(() => vi.unstubAllGlobals())
 
-  it('claims, then passes the trimmed why on to the seats target', async () => {
+  // The why goes FIRST, so it is waiting for the window the claim opens
+  // (kube.ts, writeWithCommit).
+  it('passes the trimmed why on to the seats target, then claims', async () => {
     stubFetch((call) =>
       json(call.method === 'POST' ? { ...(call.body as object), metadata: { name: 'made' } } : {}),
     )
     const receipt = await claimSeat(3, 7, ALICE, '#e4572e', '🦊', '  by the door ')
     expect(receipt.whyLost).toBe(false)
     expect(calls.map((c) => [c.method, c.url])).toEqual([
-      ['POST', '/k8s/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/seats?fieldManager=voter'],
       ['POST', '/k8s/apis/configbutler.ai/v1alpha3/namespaces/voter/commitrequests?fieldManager=voter'],
+      ['POST', '/k8s/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/seats?fieldManager=voter'],
     ])
-    expect(calls[1]?.body).toMatchObject({
+    expect(calls[0]?.body).toMatchObject({
       metadata: { generateName: 'seat-claim-' },
       spec: { gitTargetRef: { name: 'seats' }, message: 'by the door' },
     })
   })
 
-  it('sends nothing else when the claim is refused', async () => {
-    stubFetch(() => json({ reason: 'AlreadyExists', message: 'exists' }, 409))
+  // The why was sent ahead; with no write to attach to it commits nothing.
+  it('reports a refused claim as an error, after the why', async () => {
+    stubFetch((call) =>
+      call.url.includes('commitrequests')
+        ? json({ metadata: { name: 'made' } })
+        : json({ reason: 'AlreadyExists', message: 'exists' }, 409),
+    )
     await expect(
       claimSeat(3, 7, ALICE, '#e4572e', '🦊', 'by the door'),
     ).rejects.toMatchObject({ status: 409 })
-    expect(calls).toHaveLength(1)
+    expect(calls).toHaveLength(2)
   })
 
   it('reports a why that could not be passed on, not a failure', async () => {
@@ -198,12 +205,12 @@ describe('writing a seat', () => {
     stubFetch(() => json({ metadata: { name: 'made' } }))
     const seat = buildSeat('mission2', 3, 7, ALICE, '#e4572e', '🦊')
     await changeSeat(seat, '#2ec4b6', '🐙', 'teal is calmer')
-    expect(calls[0]).toMatchObject({
+    expect(calls[1]).toMatchObject({
       method: 'PATCH',
       url: '/k8s/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/seats/mission2-3-7?fieldManager=voter',
       body: { spec: { color: '#2ec4b6', emoji: '🐙' } },
     })
-    expect(calls[1]?.body).toMatchObject({
+    expect(calls[0]?.body).toMatchObject({
       metadata: { generateName: 'seat-change-' },
       spec: { message: 'teal is calmer' },
     })

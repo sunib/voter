@@ -13,7 +13,8 @@ export const TEST_CONFIG: AppConfig = {
   databaseGitTargetName: '',
   seatGitTargetName: '',
   commitRequestNamespace: '',
-  commitCloseDelaySeconds: 2,
+  // No lead: a test waits for nothing. kube.test covers the sleep itself.
+  commitLeadMillis: 0,
   audienceCoffeeAdminRole: 'voter-audience-coffee-admin',
   audienceBallotRole: 'voter-audience-ballot',
   shopOnly: false,

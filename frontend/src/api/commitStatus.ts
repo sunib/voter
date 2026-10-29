@@ -25,12 +25,21 @@ interface Condition {
   message?: string
 }
 
+/** The Ready/True reasons (gitops-reverser 0.55.0) that end a request with no
+ *  commit carrying its message: no window of this person's came in time,
+ *  someone else's held the branch the whole wait, or the audit log never named
+ *  who asked. */
+const MESSAGE_LOST = new Set(['NoWindow', 'WindowMismatch', 'AuthorUnresolved'])
+
 /**
  * Reads the outcome out of a CommitRequest's status.
  *
- * Ready/True is the commit; Stalled/True is ConfigButler giving up. Anything
- * else is still in flight, INCLUDING an object with no conditions yet, which is
- * what the first event after a create always looks like.
+ * Ready/True is the request ending, which is the commit -- except for the
+ * reasons in MESSAGE_LOST, where the change reached Git, if at all, WITHOUT this
+ * person's message, and reads as a failure in the operator's own sentence.
+ * Stalled/True is ConfigButler giving up.
+ * Anything else is still in flight, INCLUDING an object with no conditions
+ * yet, which is what the first event after a create always looks like.
  */
 export function readCommitOutcome(object: unknown): {
   state: CommitState
@@ -51,7 +60,8 @@ export function readCommitOutcome(object: unknown): {
   }
   const ready = of('Ready')
   if (ready?.status === 'True') {
-    return { state: 'committed', sha, detail: ready.message ?? '' }
+    const lost = sha === '' && MESSAGE_LOST.has(ready.reason ?? '')
+    return { state: lost ? 'failed' : 'committed', sha, detail: ready.message ?? '' }
   }
   return { state: 'pending', sha: '', detail: '' }
 }

@@ -29,8 +29,9 @@ export interface AppConfig {
   seatGitTargetName: string
   /** Where CommitRequests are created; empty means `namespace`. */
   commitRequestNamespace: string
-  /** How long a commit window may wait for the write it publishes. */
-  commitCloseDelaySeconds: number
+  /** How long a save waits between its CommitRequest and its write (kube.ts,
+   *  writeWithCommit). */
+  commitLeadMillis: number
   /** The Role the operator binds the audience to, which names the binding too. */
   audienceCoffeeAdminRole: string
   /** The Role the operator binds a group to so it may vote. Each binding is

@@ -15,7 +15,7 @@ import {
   conditionalPatch,
   getObject,
   mergePatch,
-  requestCommit,
+  requestCommitAhead,
   type CommitReceipt,
 } from './kube'
 
@@ -85,23 +85,30 @@ export type PatchCoffeeConfigResult = {
   saved: boolean
 } & CommitReceipt
 
-/** Saves the editor's spec changes as this person: a merge patch conditional on
- *  the uid and resourceVersion it was editing, then a CommitRequest so
- *  ConfigButler commits it with the editor's reason as the message. */
+/** Saves the editor's spec changes as this person: a CommitRequest so
+ *  ConfigButler commits it with the editor's reason as the message, then a
+ *  merge patch conditional on the uid and resourceVersion it was editing
+ *  (kube.ts, writeWithCommit, says why in that order). */
 export async function patchAdminCoffeeConfig(
   intent: SaveRequest,
   options?: PatchAdminCoffeeConfigOptions,
 ): Promise<PatchCoffeeConfigResult> {
-  const config = appConfig()
-  await mergePatch(COFFEECONFIGS, config.coffeeConfigName, conditionalPatch(intent))
-  return {
-    saved: true,
-    ...(await requestCommit(
-      config.gitTargetName,
-      'coffee-save-',
-      changeReason(options?.reason),
-    )),
-  }
+  // Built first: a patch outside spec throws here, before anything is sent.
+  const body = conditionalPatch(intent)
+  const receipt = await requestCoffeeCommit(options?.reason)
+  await mergePatch(COFFEECONFIGS, appConfig().coffeeConfigName, body)
+  return { saved: true, ...receipt }
+}
+
+/** The two halves of patchAdminCoffeeConfig, for the live editor, which asks
+ *  once per press of Save and may then patch more than once (a 409 it retries;
+ *  liveEditableResource.ts). */
+export async function requestCoffeeCommit(reason?: string): Promise<CommitReceipt> {
+  return await requestCommitAhead(appConfig().gitTargetName, 'coffee-save-', changeReason(reason))
+}
+
+export async function writeAdminCoffeeConfig(intent: SaveRequest): Promise<void> {
+  await mergePatch(COFFEECONFIGS, appConfig().coffeeConfigName, conditionalPatch(intent))
 }
 
 /** How many times each voucher has been redeemed, keyed by the lower-cased

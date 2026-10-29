@@ -236,12 +236,53 @@ export interface CommitReceipt {
   commitError?: string
 }
 
-/** Asks ConfigButler to commit the change just made, as this person: a
- *  CommitRequest naming the GitTarget, with the editor's reason as the commit
- *  message. An empty target means the deployment has none, and nothing is asked.
+/** Makes a write as this person, and asks ConfigButler to commit it with the
+ *  editor's reason as the message: the CommitRequest FIRST, then, after
+ *  appConfig().commitLeadMillis, the write.
+ *
+ *  In that order because a branch worker holds one open window at a time and
+ *  another author's write closes it. A request made after its write loses the
+ *  message whenever someone else's write lands in between; one registered
+ *  before the write attaches to the window the write opens, and its message
+ *  goes with that window however soon it closes. The lead is a fixed sleep
+ *  rather than a watch on the request: the request registers once its audit
+ *  event arrives, and CurrentOrNext still catches a write that overtakes it.
+ *
+ *  A failed request does not stop the write, which goes at once instead; a
+ *  failed write throws, and its request ends on its own with nothing to commit. */
+export async function writeWithCommit<T>(
+  target: string,
+  generateName: string,
+  reason: string,
+  write: () => Promise<T>,
+): Promise<{ result: T; receipt: CommitReceipt }> {
+  const receipt = await requestCommitAhead(target, generateName, reason)
+  return { result: await write(), receipt }
+}
+
+/** The first half of writeWithCommit, for a save that may take several writes
+ *  to land: one request, then the lead, then however many attempts. A request
+ *  per attempt would be refused SaveInProgress while the first still waits. */
+export async function requestCommitAhead(
+  target: string,
+  generateName: string,
+  reason: string,
+): Promise<CommitReceipt> {
+  const receipt = await requestCommit(target, generateName, reason)
+  const lead = appConfig().commitLeadMillis
+  if (receipt.commitRequested && lead > 0) {
+    await new Promise((resolve) => setTimeout(resolve, lead))
+  }
+  return receipt
+}
+
+/** Asks ConfigButler to commit this person's next write: a CommitRequest
+ *  naming the GitTarget, with the editor's reason as the commit message. An
+ *  empty target means the deployment has none, and nothing is asked. Use
+ *  writeWithCommit, which orders it before the write.
  *
  *  The save and this are two Kubernetes writes. If this one fails the save
- *  still happened, so it reports PARTIAL success rather than an error. */
+ *  still happens, so it reports PARTIAL success rather than an error. */
 export async function requestCommit(
   target: string,
   generateName: string,
@@ -250,14 +291,17 @@ export async function requestCommit(
   if (target === '') return {}
   const config = appConfig()
   const namespace = config.commitRequestNamespace || config.namespace
-  const spec: Record<string, unknown> = { gitTargetRef: { name: target } }
-  if (reason !== '') spec.message = reason
-  // Without this the request races the write it exists to publish, and loses:
-  // nothing is attached, so the message is dropped and the edit waits out the
-  // target's own window instead.
-  if (config.commitCloseDelaySeconds > 0) {
-    spec.closeDelaySeconds = config.commitCloseDelaySeconds
+  const spec: Record<string, unknown> = {
+    gitTargetRef: { name: target },
+    // Spelled out, not left to gitops-reverser's defaults, because the timings
+    // are this page's: attach to this person's next window (or the current one,
+    // if the write overtook the request), wait at most 3s for it -- a failed
+    // write leaves the request waiting, and a second save meanwhile is refused
+    // SaveInProgress -- and close it 1s after the write, since a save is one
+    // write.
+    window: { attach: 'CurrentOrNext', attachTimeout: '3s', maxDuration: '1s' },
   }
+  if (reason !== '') spec.message = reason
   try {
     const created = await createObject<{ metadata: { name: string } }>(
       COMMITREQUESTS,

@@ -20,7 +20,7 @@ import {
   getObject,
   listObjects,
   mergePatch,
-  requestCommit,
+  writeWithCommit,
 } from './kube'
 
 /** The CRD's enum, in its order. Chosen to read well small and on a dark
@@ -192,17 +192,23 @@ export interface SeatReceipt {
   whyLost: boolean
 }
 
-async function passOnWhy(prefix: string, why: string): Promise<boolean> {
-  const receipt = await requestCommit(
+/** Writes the seat with its why passed on first (kube.ts, writeWithCommit). */
+async function withWhy(
+  prefix: string,
+  why: string,
+  write: () => Promise<Seat>,
+): Promise<SeatReceipt> {
+  const { result, receipt } = await writeWithCommit(
     appConfig().seatGitTargetName,
     prefix,
     whyText(why),
+    write,
   )
-  return receipt.commitRequested === false
+  return { seat: result, whyLost: receipt.commitRequested === false }
 }
 
-/** Claims a seat as this person, then passes on their why. If the claim fails
- *  nothing else is sent. */
+/** Passes on this person's why, then claims a seat as them. A refused claim
+ *  throws; the why sent ahead of it then commits nothing. */
 export async function claimSeat(
   row: number,
   column: number,
@@ -212,25 +218,22 @@ export async function claimSeat(
   why: string,
 ): Promise<SeatReceipt> {
   const plan = appConfig().seatingPlanName
-  const seat = await createObject<Seat>(
-    SEATS,
-    buildSeat(plan, row, column, claimedBy, color, emoji),
+  return withWhy('seat-claim-', why, () =>
+    createObject<Seat>(SEATS, buildSeat(plan, row, column, claimedBy, color, emoji)),
   )
-  return { seat, whyLost: await passOnWhy('seat-claim-', why) }
 }
 
-/** Changes the colour and emoji of a seat, and nothing else, then passes on the
- *  why. */
+/** Passes on the why, then changes the colour and emoji of a seat, and nothing
+ *  else. */
 export async function changeSeat(
   seat: Seat,
   color: string,
   emoji: string,
   why: string,
 ): Promise<SeatReceipt> {
-  const changed = await mergePatch<Seat>(SEATS, seat.metadata.name ?? '', {
-    spec: { color, emoji },
-  })
-  return { seat: changed, whyLost: await passOnWhy('seat-change-', why) }
+  return withWhy('seat-change-', why, () =>
+    mergePatch<Seat>(SEATS, seat.metadata.name ?? '', { spec: { color, emoji } }),
+  )
 }
 
 /** A failed claim or change in plain words. A refusal by admission is already

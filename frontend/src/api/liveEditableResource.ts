@@ -18,6 +18,7 @@ import {
   type SaveRequest,
 } from '@configbutler/krm-stream'
 import type { ApiError } from './coffee'
+import type { CommitReceipt } from './kube'
 import type { LiveScope } from './liveResources'
 
 /** What a save reports back. `commitRequested` means the request was accepted,
@@ -36,8 +37,14 @@ export interface EditableResourceOptions<T> {
   editable?: boolean
   /** A plain read of the same object, used to reconcile after a save or a 409. */
   read: () => Promise<unknown>
-  /** Send the captured intent. Only called when `editable`. */
-  write: (intent: SaveRequest, reason: string) => Promise<SaveReceipt>
+  /** Send the captured intent. Only called when `editable`, and possibly more
+   *  than once per press of Save: a 409 is retried. */
+  write: (intent: SaveRequest, reason: string) => Promise<unknown>
+  /** Ask ConfigButler to commit what this press of Save writes: called ONCE,
+   *  before the first write, however many attempts follow. A request per
+   *  attempt would be refused SaveInProgress while the first still waits for
+   *  its window (kube.ts, writeWithCommit, says why it goes first). */
+  requestCommit: (reason: string) => Promise<CommitReceipt>
   /** The structural slice of the CRD schema that names its keyed lists
    *  (`x-kubernetes-list-type: map`). Without it every list is one atomic
    *  value: two people editing different elements of the same list conflict on
@@ -92,7 +99,7 @@ const saveAttempts = 3
 export function useLiveEditableResource<T>(
   options: EditableResourceOptions<T>,
 ) {
-  const { scope, read, write, isExpectedKind, copy } = options
+  const { scope, read, write, requestCommit, isExpectedKind, copy } = options
   const editable = options.editable ?? false
   const policy = editable ? regionPolicy([['spec']]) : readOnlyPolicy
   const store = new LiveResourceStore(
@@ -243,6 +250,7 @@ export function useLiveEditableResource<T>(
         await refreshFromServer()
         return
       }
+      let receipt: CommitReceipt | undefined
       for (let attempt = 1; ; attempt++) {
         // Re-captured every attempt, and safe to: captureSave reads the draft
         // and the store's current server version without consuming either, so a
@@ -255,8 +263,12 @@ export function useLiveEditableResource<T>(
           if (attempt > 1) notice.value = copy.alreadyDone
           return
         }
+        // Once, and only once there is something to send. The request then waits
+        // for whichever attempt lands.
+        receipt ??= await requestCommit(reason)
+        if (disposed) return
         try {
-          const receipt = await write(intent, reason)
+          await write(intent, reason)
           if (disposed) return
           // Only a FAILURE is worth a sentence here. Acceptance is not news,
           // and saying it froze the screen on a half-truth: the commit landed

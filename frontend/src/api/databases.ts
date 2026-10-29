@@ -10,7 +10,9 @@ import {
   getObject,
   listObjects,
   mergePatch,
-  requestCommit,
+  requestCommitAhead,
+  writeWithCommit,
+  type CommitReceipt,
 } from './kube'
 import type { SaveReceipt } from './liveEditableResource'
 
@@ -56,25 +58,23 @@ export async function createDatabase(
     )
   }
   const note = changeReason(reason)
-  const created = await createObject<Database>(DATABASES, {
-    apiVersion: 'platform.configbutler.ai/v1alpha1',
-    kind: 'Database',
-    metadata: {
-      name: trimmed,
-      namespace: appConfig().namespace,
-      ...(note ? { annotations: { [INTENT_ANNOTATION]: note } } : {}),
-    },
-    spec,
-  })
-  return {
-    saved: true,
-    name: created.metadata?.name ?? trimmed,
-    ...(await requestCommit(
-      appConfig().databaseGitTargetName,
-      'database-create-',
-      note,
-    )),
-  }
+  const { result: created, receipt } = await writeWithCommit(
+    appConfig().databaseGitTargetName,
+    'database-create-',
+    note,
+    () =>
+      createObject<Database>(DATABASES, {
+        apiVersion: 'platform.configbutler.ai/v1alpha1',
+        kind: 'Database',
+        metadata: {
+          name: trimmed,
+          namespace: appConfig().namespace,
+          ...(note ? { annotations: { [INTENT_ANNOTATION]: note } } : {}),
+        },
+        spec,
+      }),
+  )
+  return { saved: true, name: created.metadata?.name ?? trimmed, ...receipt }
 }
 
 /** The note goes in the same merge patch as the spec it explains, so one write
@@ -85,18 +85,33 @@ export async function patchDatabase(
   intent: SaveRequest,
   options?: { reason?: string },
 ): Promise<SaveReceipt> {
-  const note = changeReason(options?.reason)
-  await mergePatch(
-    DATABASES,
-    name,
-    conditionalPatch(intent, note ? { [INTENT_ANNOTATION]: note } : undefined),
+  // Built first: a patch outside spec throws here, before anything is sent.
+  const body = databasePatch(intent, options?.reason)
+  const receipt = await requestDatabaseCommit(options?.reason)
+  await mergePatch(DATABASES, name, body)
+  return { saved: true, ...receipt }
+}
+
+/** The two halves of patchDatabase, for the live editor, which asks once per
+ *  press of Save and may then patch more than once (a 409 it retries;
+ *  liveEditableResource.ts). */
+export async function requestDatabaseCommit(reason?: string): Promise<CommitReceipt> {
+  return await requestCommitAhead(
+    appConfig().databaseGitTargetName,
+    'database-save-',
+    changeReason(reason),
   )
-  return {
-    saved: true,
-    ...(await requestCommit(
-      appConfig().databaseGitTargetName,
-      'database-save-',
-      note,
-    )),
-  }
+}
+
+export async function writeDatabase(
+  name: string,
+  intent: SaveRequest,
+  reason: string,
+): Promise<void> {
+  await mergePatch(DATABASES, name, databasePatch(intent, reason))
+}
+
+function databasePatch(intent: SaveRequest, reason?: string) {
+  const note = changeReason(reason)
+  return conditionalPatch(intent, note ? { [INTENT_ANNOTATION]: note } : undefined)
 }

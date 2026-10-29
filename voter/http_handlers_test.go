@@ -51,7 +51,7 @@ func TestConfigEndpoint(t *testing.T) {
 		ParticipantConnectorID:        "room-pass",
 		ConfigButlerGitTargetName:     " voter-demo ",
 		ConfigButlerSeatGitTargetName: "seats",
-		ConfigButlerCloseDelaySeconds: 2,
+		ConfigButlerCommitLeadMillis:  500,
 		AudienceCoffeeAdminRole:       "voter-audience-coffee-admin",
 		AudienceBallotRole:            "voter-audience-ballot",
 	}})
@@ -77,7 +77,7 @@ func TestConfigEndpoint(t *testing.T) {
 		"databaseGitTargetName":   "",
 		"seatGitTargetName":       "seats",
 		"commitRequestNamespace":  "",
-		"commitCloseDelaySeconds": float64(2),
+		"commitLeadMillis":        float64(500),
 		"audienceCoffeeAdminRole": "voter-audience-coffee-admin",
 		"audienceBallotRole":      "voter-audience-ballot",
 		"shopOnly":                false,

@@ -2,7 +2,11 @@ import type {
   KRMObject,
   KubernetesStructuralSchema,
 } from '@configbutler/krm-stream'
-import { getAdminCoffeeConfig, patchAdminCoffeeConfig } from './coffee'
+import {
+  getAdminCoffeeConfig,
+  requestCoffeeCommit,
+  writeAdminCoffeeConfig,
+} from './coffee'
 import type { CoffeeConfig } from './coffeeTypes'
 import { useLiveEditableResource } from './liveEditableResource'
 
@@ -61,7 +65,8 @@ export function useLiveCoffeeConfig(
     },
     editable,
     read: getAdminCoffeeConfig,
-    write: (intent, reason) => patchAdminCoffeeConfig(intent, { reason }),
+    write: (intent) => writeAdminCoffeeConfig(intent),
+    requestCommit: requestCoffeeCommit,
     keyedLists: coffeeConfigKeyedLists,
     isExpectedKind: coffeeResource,
     copy: {

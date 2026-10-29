@@ -82,11 +82,11 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			"participantConnector": deps.cfg.ParticipantConnectorID,
 			// Where a save asks ConfigButler for its commit, which the browser
 			// does now, as the person who saved. An empty target asks nothing.
-			"gitTargetName":           strings.TrimSpace(deps.cfg.ConfigButlerGitTargetName),
-			"databaseGitTargetName":   strings.TrimSpace(deps.cfg.ConfigButlerDatabaseGitTargetName),
-			"seatGitTargetName":       strings.TrimSpace(deps.cfg.ConfigButlerSeatGitTargetName),
-			"commitRequestNamespace":  strings.TrimSpace(deps.cfg.ConfigButlerCommitRequestNamespace),
-			"commitCloseDelaySeconds": deps.cfg.ConfigButlerCloseDelaySeconds,
+			"gitTargetName":          strings.TrimSpace(deps.cfg.ConfigButlerGitTargetName),
+			"databaseGitTargetName":  strings.TrimSpace(deps.cfg.ConfigButlerDatabaseGitTargetName),
+			"seatGitTargetName":      strings.TrimSpace(deps.cfg.ConfigButlerSeatGitTargetName),
+			"commitRequestNamespace": strings.TrimSpace(deps.cfg.ConfigButlerCommitRequestNamespace),
+			"commitLeadMillis":       deps.cfg.ConfigButlerCommitLeadMillis,
 			// The Role the operator binds the audience to, and the binding's name.
 			"audienceCoffeeAdminRole": deps.cfg.AudienceCoffeeAdminRole,
 			// The Role the operator binds a group to, so it may vote.

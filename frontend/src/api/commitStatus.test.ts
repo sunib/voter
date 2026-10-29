@@ -110,6 +110,20 @@ describe('readCommitOutcome', () => {
     expect(outcome.state).toBe('committed')
     expect(outcome.sha).toBe('')
   })
+
+  // Ready, but nothing carried the message: the room must not be told it did.
+  it.each(['NoWindow', 'WindowMismatch', 'AuthorUnresolved'])(
+    'reports %s as a lost message, in the operator\'s words',
+    (reason) => {
+      const outcome = readCommitOutcome({
+        status: {
+          conditions: [{ type: 'Ready', status: 'True', reason, message: 'why not' }],
+        },
+      })
+      expect(outcome.state).toBe('failed')
+      expect(outcome.detail).toBe('why not')
+    },
+  )
 })
 
 describe('shortSha', () => {

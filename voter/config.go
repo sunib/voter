@@ -93,19 +93,23 @@ type config struct {
 	// are created. Empty means "use the runtime namespace", which must also be
 	// the GitTarget's namespace.
 	ConfigButlerCommitRequestNamespace string `envconfig:"CONFIGBUTLER_COMMITREQUEST_NAMESPACE"`
-	// ConfigButlerCloseDelaySeconds is how long the branch worker may wait for
-	// the CoffeeConfig write to reach it before finalizing the window. It is a
-	// deadline, not a sleep: an attached window still closes on the first normal
-	// flush, so a larger value costs nothing when the write arrives promptly.
+	// ConfigButlerCommitLeadMillis is how long the browser waits between
+	// creating a save's CommitRequest and making the write it saves.
 	//
-	// It must not be zero. The patch and the CommitRequest are two independent
-	// trips through the API server, and the patch is the slower one -- it is held
-	// head-of-line in the reverser's watch goroutine until the API server's audit
-	// batch names its author. A zero delay finalizes before that lands, so the
-	// request expires as NoWindowInGrace and the save commits later, under the
-	// target's default message instead of the editor's. Two seconds covers the
-	// audit batch (audit-webhook-batch-max-wait=1s) with margin.
-	ConfigButlerCloseDelaySeconds int32 `envconfig:"CONFIGBUTLER_CLOSE_DELAY_SECONDS" default:"2"`
+	// The request goes FIRST because a branch worker holds one open window at a
+	// time, and another author's write closes it. Write-then-request loses the
+	// message whenever someone else's write lands in between, which in a full
+	// room is often: the request then finds no window of its author's and ends
+	// WindowMismatch, and the edit commits under the target's default message.
+	// A request registered before the write attaches to the window that write
+	// opens, and keeps its message however soon that window is closed.
+	//
+	// A request registers once its own audit event names its author, so the
+	// lead covers the audit batch (250ms on this cluster) and its delivery. It
+	// is a fixed sleep, not a watch on the request's status: cheaper for a room
+	// of phones, and the request's attach mode (CurrentOrNext) still catches a
+	// write that overtakes it. Zero writes at once.
+	ConfigButlerCommitLeadMillis int32 `envconfig:"CONFIGBUTLER_COMMIT_LEAD_MS" default:"500"`
 
 	// ParticipantConnectorID is the Dex connector whose logins are the
 	// audience, published in /config.json so the vote screen can explain who

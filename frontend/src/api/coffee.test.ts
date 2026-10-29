@@ -131,7 +131,8 @@ describe('endpoint paths', () => {
       patch: { spec: { shopName: 'New' } },
     })
 
-    const patch = calls[0]!
+    // calls[0] is the CommitRequest, sent ahead of the write (kube.ts).
+    const patch = calls[1]!
     expect(patch.url).toBe(`${COFFEE_URL}?fieldManager=voter`)
     expect(patch.init.method).toBe('PATCH')
     expect(headersOf(patch).get('content-type')).toBe(
@@ -213,7 +214,8 @@ describe('CSRF proof', () => {
       { reason: '  raise the limit  ' },
     )
 
-    const commit = calls[1]!
+    // First, so it is waiting for the window the patch opens (kube.ts).
+    const commit = calls[0]!
     expect(commit.url).toBe(`${COMMITREQUESTS_URL}?fieldManager=voter`)
     expect(commit.init.method).toBe('POST')
     expect(bodyOf(commit)).toEqual({
@@ -223,7 +225,7 @@ describe('CSRF proof', () => {
       spec: {
         gitTargetRef: { name: 'voter-demo' },
         message: 'raise the limit',
-        closeDelaySeconds: 2,
+        window: { attach: 'CurrentOrNext', attachTimeout: '3s', maxDuration: '1s' },
       },
     })
     expect(result).toEqual({
