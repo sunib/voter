@@ -94,6 +94,12 @@ async function claim() {
   busy.value = true
   try {
     username.value = await currentUsername()
+    // The CRD would refuse it too, but in words about a schema, not you.
+    if (username.value === '') {
+      failure.value =
+        'Kubernetes did not say who you are, so a seat cannot be claimed as you. Sign in again.'
+      return
+    }
     const receipt = await claimSeat(
       place.row,
       place.column,

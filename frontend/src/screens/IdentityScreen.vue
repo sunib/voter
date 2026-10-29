@@ -44,6 +44,12 @@ const provider = computed(() => {
   if (connector === 'linkedin') return 'LinkedIn'
   return connector || 'your sign-in'
 })
+const nameSource = computed(() => {
+  if (viaRoomPass.value) return 'the subject below'
+  if (provider.value === 'GitHub' || provider.value === 'LinkedIn')
+    return `your ${provider.value} email`
+  return 'the email your sign-in vouches for'
+})
 
 function formatExpiry(timestamp: string): string {
   const when = new Date(timestamp)
@@ -169,9 +175,8 @@ onMounted(async () => {
       </div>
       <p class="hero-copy">
         Everything <code class="inline-code">/auth/session</code> returned. Your
-        Kubernetes name is built from
-        {{ viaRoomPass ? 'the subject below' : `your ${provider} email` }}, not
-        from your display name, so nobody can become you by typing your name.
+        Kubernetes name is built from {{ nameSource }}, not from your display
+        name, so nobody can become you by typing your name.
       </p>
       <dl class="tech-facts">
         <div

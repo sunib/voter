@@ -15,11 +15,11 @@ import {
 } from './seats'
 import { useTestAppConfig } from './testAppConfig'
 
-// The enum in voter/config/crd/seats.yaml, which the API server holds; the
-// phone must offer exactly these.
 const ALICE = { displayName: 'Alice', username: 'demo:CgVhbGljZQ' }
 const BOB = { displayName: 'Bob', username: 'demo:CgNib2I' }
 
+// The enum in voter/config/crd/seats.yaml, which the API server holds; the
+// phone must offer exactly these.
 const CRD_EMOJIS = ["🦊","🐙","🦄","🐝","🐢","🦉","🐳","🦖","🐧","🦀","🐸","🐼",
   "🚀","🌵","🍄","🌈","⚡","🔥","🍕","🧇","☕","🎸","🎲","👾"]
 
