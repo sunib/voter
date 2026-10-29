@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.0](https://github.com/sunib/voter/compare/v2.3.0...v2.4.0) (2026-10-29)
+
+
+### Features
+
+* round of updates, lets hope that its not a feat actually haha ([3609a5d](https://github.com/sunib/voter/commit/3609a5d492fb2687209e366345fd0770b3920cba))
+
 ## [2.3.0](https://github.com/sunib/voter/compare/v2.2.0...v2.3.0) (2026-10-29)
 
 
