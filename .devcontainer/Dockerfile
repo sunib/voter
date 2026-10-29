@@ -7,7 +7,7 @@
 # Stage 1: CI base image with essential build tools
 # Pinned by digest (Scorecard "pinned dependencies"); Dependabot's docker
 # ecosystem keeps version + digest current together.
-FROM golang:1.27.1-bookworm@sha256:648f440f42a0958804efb24df176f806f9d353b41f1c0627f666428e40310f6b AS ci
+FROM golang:1.27.3-bookworm@sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9 AS ci
 
 # Avoid warnings by switching to noninteractive
 ENV DEBIAN_FRONTEND=noninteractive
@@ -83,7 +83,7 @@ ENV PATH="/go/bin:/usr/local/go/bin:${PATH}" \
     KUBECTL_VERSION=v1.37.0 \
     KUSTOMIZE_VERSION=5.8.1 \
     KUBEBUILDER_VERSION=4.16.0 \
-    GOLANGCI_LINT_VERSION=v2.13.2 \
+    GOLANGCI_LINT_VERSION=v2.15.0 \
     HELM_VERSION=v4.3.0 \
     K3D_VERSION=v5.9.0 \
     FLUX_VERSION=2.9.5 \
