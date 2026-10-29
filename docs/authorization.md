@@ -71,6 +71,18 @@ operations throughout the `voter` namespace:
 | Databases | get, list, watch, create, patch, update |
 | QuizSessions | get, list, watch |
 | QuizSubmissions | get, create |
+| Seats | get, list, watch, create, patch |
+| SeatingPlans | get, list, watch |
+| RoleBindings | get, list, watch |
+
+Reading RoleBindings is how a page knows when to
+ask what it may do: every live grant is a binding in `voter`, so the page
+watches them and asks its rules review again when one changes
+([runbook](runbook-watchable-permissions.md)). It shows Role names, service
+account names, group names and the `demo:` name of the person picked on
+`/room`, all of which are on the projector anyway. Roles and ClusterRoleBindings
+stay unreadable, and admission (`voter-rolebinding-roleref`) keeps every binding
+in `voter` pointing at a Role there.
 
 There is no list or watch on QuizSubmissions: no page needs them, and they would
 hand everyone everybody's answers. The vote page `get`s its own ballot's name to
@@ -114,9 +126,9 @@ nor patch on them. Broader additive grants or administrator access are separate;
 the CRD does not enforce immutable spec fields.
 
 Neither Role grants Secrets, RBAC changes, impersonation or deletion
-(`delete quizsubmissions` is denied). Participants cannot read RoleBindings
-either, which is why the grant switch simply does not appear on a participant's
-`/room` — Kubernetes withholds it, not the page. Neither Role is limited to one
+(`delete quizsubmissions` is denied). Participants may read RoleBindings but not
+create, change or delete them, and the grant switch does not appear on a
+participant's `/room` because Kubernetes refuses them the Room it waits for. Neither Role is limited to one
 named CoffeeConfig. A participant can `get` another ballot whose name they guess,
 but cannot list them.
 
@@ -194,9 +206,10 @@ and test an authorization mechanism for that explicitly.
 
 | Test file | What it establishes |
 | --- | --- |
-| [Boundaries in the browser](../test/browser/boundaries.spec.js) | From a real participant session, through `/k8s`: a ballot in someone else's name and an unpinned ballot are refused with `voter-ballot`'s messages, the participant's own ballot lands once and the second is a 409, a label on the menu is refused by `voter-editable-spec` even while the menu grant is on |
+| [Boundaries in the browser](../test/browser/boundaries.spec.js) | From a real participant session, through `/k8s`: a ballot in someone else's name and an unpinned ballot are refused with `voter-ballot`'s messages, the participant's own ballot lands once and the second is a 409, a label on the menu is refused by `voter-editable-spec` even while the menu grant is on; a RoleBinding to a ClusterRole is refused by `voter-rolebinding-roleref`, to a Role allowed |
 | [The editor in the browser](../test/browser/live-stream.spec.js) | With the menu grant on, a €12.50 coffee saved from the editor is refused by `voter-coffee-price`, once, with the policy's sentence in the page and nothing stored |
-| [The operator in the browser](../test/browser/operator.spec.js) | A participant is refused the operator page and never sees a join code; the operator (Dex `github` id, cluster-admin) sees the code, opens and closes a round, and grants and revokes the menu |
+| [The operator in the browser](../test/browser/operator.spec.js) | A participant is refused the operator page and never sees a join code or a grant; the operator (Dex `github` id, cluster-admin) sees the code, opens and closes a round, and grants and revokes the menu; the grant reaches a participant's editor within 2 s with one rules review and none while nothing changes |
+| [The room's groups in the browser](../test/browser/demo-groups.spec.js) | Voting opened to one answer group; the menu handed to one person; `/room` lists nothing while idle, and follows a join and a binding made from a terminal within 2 s |
 | [Voter in the browser](../test/browser/) | Real Chromium through Traefik, krm-foyer, Dex and a released Room Pass: QR join and logout, voting, live streams; CI retains video |
 | [Voter's identity check](../voter/participant_storefront_test.go) | `/public/` routes refuse a request without `Krm-Foyer-Identity` |
 
@@ -228,7 +241,10 @@ actual platform policy file and the distinction between local k3s and live Ciliu
 Live views read through krm-foyer's `/stream/v1`, not through Voter. krm-foyer
 holds one API-server watch per scope for the room, as its own shared identity
 (`krm-foyer-voter-shared`: list and watch on CoffeeConfigs, QuizSessions,
-Databases, CommitRequests and Rooms, plus SubjectAccessReview create). Before it
+Databases, Seats, SeatingPlans, CommitRequests and Rooms through a ClusterRole,
+on RoleBindings in `voter` alone through a Role there, plus SubjectAccessReview
+create). It may not read RoleBindings anywhere else; RBAC objects are most of a
+cluster's access policy. Before it
 discloses anything to a subscriber it asks a SubjectAccessReview for that
 person's own identity, and it asks again periodically while the stream is open;
 a denied or failed check closes that subscription. The load rehearsal held 197

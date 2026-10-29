@@ -150,7 +150,7 @@ kubectl -n voter rollout status deployment/voter --timeout=180s
 # krm-foyer, as released, beside Voter on the application's host
 # (docs/krm-foyer-migration.md, step 1). Chart and image are pinned by digest;
 # bump them together with krm-foyer-values.yaml's image.tag.
-krm_foyer_chart=oci://ghcr.io/configbutler/charts/krm-foyer:0.3.0@sha256:40f68f1ba1477e09a9813d304991518f600310b1f31e3a600634ba3a0c1ad0d2
+krm_foyer_chart=oci://ghcr.io/configbutler/charts/krm-foyer:0.4.0@sha256:c32a488216b5b1fb2c519d2c4f9b69a61f797786eaf44f31aaab79ed46286736
 # The client secret of voter-fixture in dex.yaml: krm-foyer signs in as Voter's client.
 kubectl -n voter create secret generic krm-foyer-oidc --from-literal=client-secret=voter-fixture-secret \
   --dry-run=client -o yaml | kubectl apply -f -

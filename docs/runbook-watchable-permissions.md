@@ -1,11 +1,19 @@
 # Runbook: permissions the room can watch
 
-Status: **plan**, nothing built yet (2026-10-29).
+Status (2026-10-29):
+
+| Step | State |
+| --- | --- |
+| 1. krm-foyer namespaced shared watches | released in 0.4.0 (ConfigButler/krm-foyer#47) |
+| 2. GitOps | **live**: RBAC and admission policy (`external/k8s` b16d590), krm-foyer 0.4.0 sharing `rolebindings` in voter (0ae667f) |
+| 3. Verify the RBAC | every `kubectl` check below passes on the cluster |
+| 4. Voter app | sunib/voter#46, fixture on krm-foyer 0.4.0 |
+| 5. Rehearse | not yet |
 
 ## Why
 
-To know "what may I do?", the browser polls a SelfSubjectRulesReview every 4
-seconds (`frontend/src/api/useAuthorization.ts`) on every page that shows
+To know "what may I do?", the browser polls a SelfSubjectRulesReview (a POST to
+`/k8s/apis/authorization.k8s.io/v1/selfsubjectrulesreviews`) every 4 seconds (`frontend/src/api/useAuthorization.ts`) on every page that shows
 permissions: the coffee menu editor, Databases, `/me` and `/room`. The operator's
 page also polls the grant itself every 5 seconds, plus two 4-second polls in
 `PickSomeone.vue` and `BallotSwitches.vue`. With 200 phones on the menu editor
@@ -186,6 +194,14 @@ per phone.
 
 ### 4. Voter app (`feat:`, deploys on its own)
 
+**Needs krm-foyer 0.4.0 sharing `rolebindings` (step 2, live).** Without it
+each phone's stream is its own watch at the API server, as that phone: it works,
+but 200 phones are 200 watches.
+
+Built: `frontend/src/api/grantChanges.ts` (`onGrantChange`), used by
+`useAuthorization` and `RoomScreen`'s audience grant; `/me` shows which mode the
+page is in (`data-testid="authz-mode"`).
+
 **`frontend/src/api/useAuthorization.ts`:** replace the 4-second interval with a
 trigger:
 
@@ -197,29 +213,51 @@ trigger:
 - Backup poll: every **2 minutes**.
 - **If the stream is refused or keeps failing, go back to the 4-second poll**,
   so the app never depends on step 2 having landed. Show the mode in
-  `StreamDiagnostics`.
+  `StreamDiagnostics`. *Built:* on `/me` instead. `StreamDiagnostics` renders
+  only when the Room stream fails, so a mode shown there would rarely be seen.
 - `AnswerScreen` keeps `poll: false` and its own marker trigger. It may also use
   the binding trigger, since ballot grants are RoleBindings too.
 
 **Operator page:** `RoomScreen`'s `refreshGrant` (5 s), `PickSomeone` and
-`BallotSwitches` (4 s each) read the same bindings, so switch them to the same
-watch. The operator is an admin, so this works before step 2 too, through a
+`BallotSwitches` (4 s each) read the same bindings, and now use the same
+trigger. The operator is an admin, so this works before step 2 too, through a
 per-user stream.
 
+*Added to the plan:* `PickSomeone` and `BallotSwitches` also read Participants
+(who can be picked, head counts per answer group), which change as people join
+and no binding does. They follow those through their own stream
+(`useLiveParticipants` in `roomGrants.ts`), so the pick pool and the counts
+move as the room fills instead of every 4 s. Nothing on `/room` polls now
+unless a stream is unavailable.
+
 **Tests:**
-- Unit test the trigger: debounce, refresh on reconnect, fall back to polling on
-  `FORBIDDEN`.
-- `test/browser/operator.spec.js`: the coffee toggle reaches a participant's
-  page in under 2 seconds with no request to `/auth/rules` in between.
-- The e2e fixture needs step 2's RBAC and chart values in `test/e2e`.
+- `frontend/src/api/grantChanges.test.ts`: the first snapshot does not count
+  as a change, even when it arrives in one chunk; a burst gives one refresh;
+  a reconnect gives one; `FORBIDDEN` falls back to the caller's interval; one
+  stream per page, closed with its last subscriber.
+- `test/browser/operator.spec.js`: no rules review for 6 s on the menu editor,
+  then the coffee grant appears and disappears within 2 s, one review each.
+- `test/browser/boundaries.spec.js`: the policy refuses a ClusterRole ref and
+  allows a Role (server-side dry runs).
+- `test/e2e/voter.yaml` carries step 2's participant rule, and
+  `krm-foyer-values.yaml` its `sharedWatches.namespacedResources`, on 0.4.0.
+- `test/browser/demo-groups.spec.js`: `/room` lists nothing for 6 s, a join
+  moves a head count and a terminal's binding moves its switch, within 2 s.
+- `test/browser/live-stream.spec.js`: two editors hold four shared
+  subscriptions (the menu and the bindings each), and a withdrawn viewer
+  releases both of its own and neither of the other's.
+- `test/browser/operator.spec.js`: a participant on `/room` sees no grant, ballot
+  or pick controls. Participants may now read the bindings, so the controls wait
+  for the Room stream, which a participant is refused, rather than for the
+  bindings' 403.
 
 ### 5. Rehearse
 
 With `rehearse-production.mjs`, or a few phones:
 
 - Flip the coffee toggle. The menu editor's Save appears within about a second.
-  In the browser's network tab, `/auth/rules` is called once per flip, not every
-  4 s.
+  In the browser's network tab, `selfsubjectrulesreviews` is called once per
+  flip, not every 4 s.
 - Pick a person: only that phone changes.
 - Kill the krm-foyer pod: the pages fall back to polling and recover when it
   returns.

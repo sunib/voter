@@ -1,22 +1,19 @@
 // A live view of what this identity may do.
 //
 // The operator can widen the audience's grant mid-demo, and every phone in the
-// room has to notice without anyone refreshing anything. So this polls.
-//
-// Polling rather than the SSE stream is deliberate, and it is not laziness. The
-// stream's scope allowlist (voter/participant_stream.go) denies by default and
-// lists exactly the objects a participant may watch; RBAC is not on it, and a
-// participant has no permission to watch RoleBindings anyway. Widening either
-// to make a permission table live would undo the thing the table is there to
-// demonstrate. A SelfSubjectRulesReview is one cheap call, and at this interval
-// the room sees the change land within a few seconds of the switch.
+// room has to notice without anyone refreshing anything. The answer is a
+// SelfSubjectRulesReview, asked again whenever a RoleBinding in the namespace
+// changes (grantChanges.ts): Kubernetes' own RBAC, not a copy kept in sync.
+// Where that stream is unavailable, it is asked every few seconds instead.
 
 import { onScopeDispose, ref, shallowRef, type Ref, type ShallowRef } from 'vue'
 
 import { getAuthorization, type Authorization } from './authz'
+import { onGrantChange, type GrantMode } from './grantChanges'
 
-/** Slow enough not to matter for 300 phones, fast enough that the room sees the
- *  switch take effect while the operator is still talking about it. */
+/** Without the stream: slow enough not to matter for 300 phones, fast enough
+ *  that the room sees the switch take effect while the operator is still
+ *  talking about it. */
 const POLL_INTERVAL_MS = 4000
 
 export interface LiveAuthorization {
@@ -26,10 +23,12 @@ export interface LiveAuthorization {
    *  refusal it has not actually been told about yet. */
   loading: Ref<boolean>
   refresh: () => Promise<void>
+  /** How a change reaches this page; `off` when the caller asks for itself. */
+  mode: Readonly<Ref<GrantMode | 'off'>>
 }
 
 /**
- * Polls /auth/rules for as long as the calling scope lives.
+ * Keeps /auth/rules' answer current for as long as the calling scope lives.
  *
  * Errors are kept in `error` rather than thrown: losing the permission table is
  * not a reason to break the page it is on, and the most likely cause is an
@@ -45,7 +44,6 @@ export function useAuthorization(
   const error = ref('')
   const loading = ref(true)
 
-  let timer: ReturnType<typeof setInterval> | undefined
   let disposed = false
 
   async function refresh(): Promise<void> {
@@ -66,14 +64,14 @@ export function useAuthorization(
   void refresh()
   // A page that knows when its answer may have changed asks then instead: the
   // vote page re-asks when the round's ballot-groups marker moves.
-  if (options.poll ?? true) {
-    timer = setInterval(() => void refresh(), POLL_INTERVAL_MS)
-  }
+  const mode =
+    (options.poll ?? true)
+      ? onGrantChange(() => void refresh(), POLL_INTERVAL_MS).mode
+      : ref<'off'>('off')
 
   onScopeDispose(() => {
     disposed = true
-    if (timer !== undefined) clearInterval(timer)
   })
 
-  return { authz, error, loading, refresh }
+  return { authz, error, loading, refresh, mode }
 }

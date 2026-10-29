@@ -3,11 +3,11 @@
 This is the implementation plan, not a claim that the target design is deployed.
 [ARCHITECTURE.md](ARCHITECTURE.md) defines the boundaries and target data flow.
 
-Voter **2.0.0** runs behind krm-foyer 0.3.0 on `demo.koudijs.dev` since 2026-10-06:
+Voter **2.5.0** runs behind krm-foyer 0.4.0 on `demo.koudijs.dev` (cutover 2026-10-06):
 krm-foyer owns login, the session, `/k8s` and live streams, and the browser uses
-krm-stream **0.10.0** against krm-foyer's `/stream/v1`. Room Pass runs 2.2.0. Cluster
-facts were last verified **2026-10-06**, after the cutover
-([docs/krm-foyer-migration.md](docs/krm-foyer-migration.md)).
+krm-stream **0.10.0** against krm-foyer's `/stream/v1`. Room Pass runs 2.2.0. Versions
+were last checked **2026-10-29**; the cutover is in
+[docs/krm-foyer-migration.md](docs/krm-foyer-migration.md).
 
 **This file keeps only actionable work.** A section is deleted when its last item
 closes, and completed increments live in Git history rather than here -- which is
@@ -307,6 +307,10 @@ an unrelated OIDC application through Dex, and upgrade without changing identiti
       and the authenticated browser journey; record a Git revert as the rollback.
       Require the concurrency and 200-attendee acceptance tests before presenting the
       completed refactor as ready for the event; the current rollout is an intermediate build.
+- [ ] Rehearse permissions the room can watch
+      ([runbook step 5](docs/runbook-watchable-permissions.md#5-rehearse)) once the
+      release carrying it is deployed: one rules review per coffee flip, a pick that
+      changes one phone, and a killed krm-foyer pod that the pages ride out on polling.
 
 ## 5a. The Databases page
 

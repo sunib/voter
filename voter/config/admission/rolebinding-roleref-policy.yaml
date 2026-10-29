@@ -1,0 +1,40 @@
+# A RoleBinding in voter grants a Role in voter, never a ClusterRole.
+#
+# The browser watches the RoleBindings in voter and asks "what may I do?" again
+# only when one of them changes (docs/runbook-watchable-permissions.md). That
+# holds only while everything a participant may do in voter is written down in
+# voter: a ClusterRole can be edited from outside the namespace, and nobody is
+# watching it. This is part 1 of that runbook's agreement, enforced.
+#
+# Everyone, the operator and Flux included: the agreement is about the
+# namespace, not about who writes to it. A grant that needs a ClusterRole's
+# rules gets a Role with those rules, here or in participant-rbac.yaml.
+#
+# roleRef cannot change after create, so CREATE is all there is to check.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: voter-rolebinding-roleref
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: voter
+    resourceRules:
+      - apiGroups: [rbac.authorization.k8s.io]
+        apiVersions: ['*']
+        resources: [rolebindings]
+        operations: [CREATE]
+  validations:
+    - expression: "object.roleRef.kind == 'Role'"
+      messageExpression: "'A RoleBinding in voter grants a Role in voter, not the ' + object.roleRef.kind + ' ' + object.roleRef.name + ': the room watches the bindings here, and nobody watches a ClusterRole.'"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: voter-rolebinding-roleref
+spec:
+  policyName: voter-rolebinding-roleref
+  validationActions: [Deny]

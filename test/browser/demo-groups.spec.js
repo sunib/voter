@@ -173,3 +173,49 @@ test('the operator hands the coffee menu to one participant picked at random', a
     cleanUp([name]);
   }
 });
+
+// /room follows the room rather than asking it: the switches re-read their
+// bindings when one changes, and the head counts are a live view of the
+// Participants (docs/runbook-watchable-permissions.md). So nothing is listed
+// while nothing happens, a join moves a count, and a binding made from a
+// terminal moves its switch, each within a couple of seconds.
+test('the operator page follows joins and grants without polling', async ({ browser }) => {
+  const name = `follow-${Date.now()}-svelte`;
+  const binding = 'voter-audience-ballot-frontend-svelte';
+  const contexts = [];
+  kube('delete', 'rolebinding', binding, '--ignore-not-found');
+  try {
+    const room = await operator(browser, contexts);
+    let lists = 0;
+    room.on('request', (request) => {
+      const { pathname } = new URL(request.url());
+      if (request.method() === 'GET' && /\/namespaces\/voter\/(rolebindings|participants)$/.test(pathname)) lists++;
+    });
+    const svelteSwitch = room.getByRole('checkbox', { name: 'Let Svelte vote' });
+    const svelteRow = room.locator('label.grant-switch', { has: svelteSwitch });
+    await expect(svelteSwitch).toBeEnabled();
+    await expect(svelteSwitch).not.toBeChecked();
+    const people = async () => Number((await svelteRow.innerText()).match(/(\d+) (person|people)/)[1]);
+    const before = await people();
+    // Only what follows the first read counts.
+    lists = 0;
+
+    // Longer than the 4-second poll this replaced.
+    await room.waitForTimeout(6000);
+    expect(lists, 'the operator page listed bindings or participants while nothing changed').toBe(0);
+
+    await join(browser, contexts, name, 'Svelte');
+    await expect.poll(people, { timeout: 2000 }).toBe(before + 1);
+    expect(lists, 'a join should arrive on the stream, not through a list').toBe(0);
+
+    // From a terminal, standing in for a second operator.
+    kube('create', 'rolebinding', binding, '--role=voter-audience-ballot', '--group=demo:frontend-svelte');
+    await expect(svelteSwitch).toBeChecked({ timeout: 2000 });
+    kube('delete', 'rolebinding', binding);
+    await expect(svelteSwitch).not.toBeChecked({ timeout: 2000 });
+  } finally {
+    for (const c of contexts) await c.close();
+    kube('delete', 'rolebinding', binding, '--ignore-not-found');
+    cleanUp([name]);
+  }
+});

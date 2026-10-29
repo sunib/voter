@@ -4,8 +4,8 @@ Voter is a coffee and voting demo built on public infrastructure components. Sin
 2.0.0 it no longer signs anyone in: **krm-foyer** owns login, the session, `/k8s` and
 the live streams on the same host, and the browser reads and writes Kubernetes as the
 person using it. Room Pass is an independent enrollment service (`sunib/room-pass`).
-The running revision is **Voter 2.0.0 (`b446793`) behind krm-foyer 0.3.0**, live on
-`demo.koudijs.dev` since **2026-10-06**. How it got here is
+The running revision is **Voter 2.5.0 behind krm-foyer 0.4.0** on `demo.koudijs.dev`;
+the krm-foyer cutover was **2026-10-06**. How it got here is
 [docs/krm-foyer-migration.md](docs/krm-foyer-migration.md); remaining targets are in
 [PLAN.md](PLAN.md).
 
@@ -210,14 +210,19 @@ there is the API server's own.
 
 The audience switch creates or deletes RoleBinding `voter-audience-coffee-admin`, with
 the operator's own token, binding the static Role of that name -- which lives in Git --
-to the group in `Room.spec.audienceGroup`. Reading the binding needs `get` on
-`rolebindings`, which the audience does not hold, so a participant never sees the
-switch, and Kubernetes decided that. The **binding is deliberately not in the Flux
+to the group in `Room.spec.audienceGroup`. The controls appear only once the Room has
+streamed, which a participant is refused, so a participant never sees the switch, and
+Kubernetes decided that; creating the binding needs rights they do not hold either. The
+**binding is deliberately not in the Flux
 kustomization**: Flux would recreate whatever the switch deletes, and the grant would
 stop being revocable. gitops-reverser mirrors it to the audit trail instead, so widening
 what a room may do arrives in Git as a reviewable diff authored by whoever did it.
-Every phone discovers the change by polling its rules review; nothing is pushed and no
-session is re-established.
+Every phone watches the RoleBindings in `voter` (one shared watch for the room) and,
+when one changes, asks its rules review again; no session is re-established. Where that
+stream is unavailable a phone falls back to asking every 4 s, plus a 2-minute backup
+poll either way ([runbook](docs/runbook-watchable-permissions.md)). `/room`'s own
+controls follow the same bindings, and the room's Participants on a stream of their own,
+so nothing on it polls.
 
 `/admin` stays reachable by everyone on purpose: the audience may read the CoffeeConfig
 and watch it change, and may not save until the operator grants it. The page explains
@@ -267,6 +272,9 @@ everyone.
 - **`voter-seat-why`**: a participant's CommitRequest for the `seats` GitTarget carries
   a why of 3 to 80 characters once trimmed. Other targets are untouched: the coffee
   and Database reasons stay optional.
+- **`voter-rolebinding-roleref`**, for everyone, in `voter` only: a RoleBinding grants a
+  Role in `voter`, never a ClusterRole. "What may I do" follows the bindings in `voter`,
+  which is only the whole story while nothing there points outside the namespace.
 
 So one refusal in the demo that used to be the application's is now the cluster's.
 
@@ -275,7 +283,8 @@ So one refusal in the demo that used to be the application's is now the cluster'
 Participants (`demo:voter-audience`) may read coffeeconfigs; get/list/watch
 quizsessions; **get and create** quizsubmissions (no list or watch); get, list, watch,
 create, patch and update databases; get, list, watch, create and patch seats (no
-delete); get/list/watch seatingplans; and create/get/list/watch commitrequests. Editing
+delete); get/list/watch seatingplans; create/get/list/watch commitrequests; and
+get/list/watch rolebindings, so a page knows when to ask what it may do. Editing
 the menu needs the operator's live grant (patch and update on coffeeconfigs).
 
 Voter's ServiceAccount may get `coffeeconfigs/demo-coffee` for storefront prices,
@@ -288,7 +297,9 @@ storefront now, since Voter reads the menu as itself.
 The SPA uses `@configbutler/krm-stream` 0.10.0 (`connectResourceStream`) against
 krm-foyer's `/stream/v1`. krm-foyer keeps one API-server watch per scope for the whole
 room, as `krm-foyer-voter-shared`, which may list/watch coffeeconfigs, quizsessions,
-databases, commitrequests and rooms and create SubjectAccessReviews. Each subscriber is
+databases, seats, seatingplans, commitrequests and rooms (a ClusterRole), list/watch
+rolebindings in `voter` alone (a Role there, `sharedWatches.namespacedResources`), and
+create SubjectAccessReviews. Each subscriber is
 checked with SARs before anything is disclosed and rechecked while it stays connected,
 so RBAC decides per person even though the watch is shared. Shared-watch audit events
 name that ServiceAccount; writes keep the person's name. Sharing is per krm-foyer
@@ -448,10 +459,14 @@ repositories".
 
 | | |
 | --- | --- |
-| Voter | `ghcr.io/sunib/voter:2.0.0@sha256:5e9f79b7…`, commit `b446793` |
-| krm-foyer | `0.3.0@sha256:6b620d65…` |
+| Voter | `ghcr.io/sunib/voter:2.5.0@sha256:de66185a…`, commit `5784e7a` |
+| krm-foyer | `0.4.0@sha256:cab05ad9…` |
 | Room Pass | `2.2.0@sha256:6571a631…` |
-| GitOps | `ConfigButler/k8s` commit `2ebda2e` |
+| GitOps | `ConfigButler/k8s` commit `0ae667f` (2026-10-29) |
+
+Voter follows its own 1.x/2.x minors and patches through Flux image automation, so
+`app.yaml` in the GitOps repository is the authority; this table was last checked
+2026-10-29.
 
 The rounds are `demo1` and `evaluation`, both seeded by GitOps and then left alone.
 

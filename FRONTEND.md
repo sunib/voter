@@ -231,7 +231,9 @@ Why:
   - Then create a `CommitRequest` as the person. If that fails, the save is reported
     as a partial success.
 - Writes carry `?fieldManager=voter`.
-- "What may I do" is a SelfSubjectRulesReview, flattened in the browser.
+- "What may I do" is a SelfSubjectRulesReview, flattened in the browser, asked again
+  when a RoleBinding in the namespace changes (`api/grantChanges.ts`), with a 4 s poll
+  only when that stream is unavailable.
 
 ## 8. Live updates strategy (frontend)
 

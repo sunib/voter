@@ -88,3 +88,15 @@ test('a participant cannot stuff the ballot box, relabel the menu, or pass as so
     for (const p of participants) if (p.spec.displayName === displayName) kube('delete', 'participant', p.metadata.name);
   }
 });
+
+// The room learns what it may do by watching the RoleBindings in voter, which
+// is only the whole story while each of them grants a Role in voter. A
+// ClusterRole is refused by admission (rolebinding-roleref-policy.yaml) for
+// everyone, cluster-admin included; a Role is fine. Server-side dry runs: the
+// request goes through admission and nothing is stored.
+test('a RoleBinding in voter grants a Role in voter, never a ClusterRole', () => {
+  const bind = (...ref) => kube('create', 'rolebinding', `roleref-probe-${Date.now()}`, ...ref, '--group=nobody', '--dry-run=server', { stdio: 'pipe' });
+
+  expect(() => bind('--clusterrole=view')).toThrow(/A RoleBinding in voter grants a Role in voter, not the ClusterRole view/);
+  expect(bind('--role=voter-audience-ballot')).toContain('created (server dry run)');
+});
