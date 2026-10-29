@@ -7,7 +7,7 @@ Status (2026-10-29):
 | 1. krm-foyer namespaced shared watches | released in 0.4.0 (ConfigButler/krm-foyer#47) |
 | 2. GitOps | **live**: RBAC and admission policy (`external/k8s` b16d590), krm-foyer 0.4.0 sharing `rolebindings` in voter (0ae667f) |
 | 3. Verify the RBAC | every `kubectl` check below passes on the cluster |
-| 4. Voter app | built on `feat/watchable-permissions`, fixture on krm-foyer 0.4.0 |
+| 4. Voter app | sunib/voter#46, fixture on krm-foyer 0.4.0 |
 | 5. Rehearse | not yet |
 
 ## Why
