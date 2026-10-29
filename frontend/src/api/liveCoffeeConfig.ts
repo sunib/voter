@@ -73,7 +73,7 @@ export function useLiveCoffeeConfig(
       alreadyDone:
         'Somebody else had already made this change. There is nothing left to save.',
       lostTheRace:
-        'Somebody else is editing the menu too, and their save landed first each time. Your edits are kept — press Save again.',
+        'Somebody else is editing the menu too, and their save landed first each time. Your edits are kept. Press Save again.',
     },
   })
 }

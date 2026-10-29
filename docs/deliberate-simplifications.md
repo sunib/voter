@@ -266,13 +266,13 @@ room, so people can find themselves. A wrong seat costs nobody anything.
 ## 8. One seat per person is not enforced by the API
 
 **What we do.** The page offers a claim only to someone who has no Seat yet,
-found by listing with `voter.configbutler.ai/submitter=<their name>`. Admission
-(`voter-seat`) holds that a participant claims in their own name and recolours
-only their own seat.
+found by asking the API server for the Seat whose `spec.claimedBy.username` is
+theirs. Admission (`voter-seat`) holds that a participant claims as themselves
+and recolours only their own seat.
 
 **What we gave up.** Admission cannot count other objects, so it cannot say
 "you already have one". Someone with `kubectl` and a participant token can
-claim several seats, each in their own name.
+claim several seats, each as themselves.
 
 **What keeps it closed.** Nothing but the page, and the fact that every claim is
 a commit authored by the person who made it. Fine for a talk.
@@ -282,7 +282,7 @@ a commit authored by the person who made it. Fine for a talk.
 ## 9. No deleting a seat, no moving to another
 
 **What we do.** Participants have no `delete` on `seats`, and the CRD makes
-`seatingPlanRef`, `row`, `column` and `displayName` immutable. Only colour and
+`seatingPlanRef`, `row`, `column` and `claimedBy` immutable. Only colour and
 emoji change.
 
 **What we gave up.** Someone who claimed the wrong seat keeps it for the talk.

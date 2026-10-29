@@ -34,6 +34,16 @@ const initial = computed(() => displayName.value.slice(0, 1) || '?')
 const kubeUsername = computed(
   () => whoami.value?.userInfo.username?.trim() ?? '',
 )
+// Where the Kubernetes name came from, said for this sign-in: Room Pass makes
+// it from the subject, GitHub and LinkedIn from the email they vouch for.
+const viaRoomPass = computed(() => canVote(session.value))
+const provider = computed(() => {
+  const connector = session.value?.connector ?? ''
+  if (viaRoomPass.value) return 'Room Pass'
+  if (connector === 'github') return 'GitHub'
+  if (connector === 'linkedin') return 'LinkedIn'
+  return connector || 'your sign-in'
+})
 
 function formatExpiry(timestamp: string): string {
   const when = new Date(timestamp)
@@ -149,7 +159,7 @@ onMounted(async () => {
       <p class="identity-card__note">
         Your display name is just a label. Kubernetes knows you by the name next
         to it. That one is on everything you do here, and RBAC checks it. It
-        came from Room Pass through Dex, not from this browser.
+        came from {{ provider }} through Dex, not from this browser.
       </p>
     </section>
 
@@ -159,8 +169,9 @@ onMounted(async () => {
       </div>
       <p class="hero-copy">
         Everything <code class="inline-code">/auth/session</code> returned. Your
-        Kubernetes name is built from the subject below, not from your display
-        name, so nobody can become you by typing your name at the door.
+        Kubernetes name is built from
+        {{ viaRoomPass ? 'the subject below' : `your ${provider} email` }}, not
+        from your display name, so nobody can become you by typing your name.
       </p>
       <dl class="tech-facts">
         <div

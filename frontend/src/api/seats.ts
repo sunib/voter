@@ -70,10 +70,18 @@ export interface Seat {
     seatingPlanRef: { name: string; group?: string; kind?: string }
     row: number
     column: number
-    displayName: string
+    claimedBy: ClaimedBy
     color: string
     emoji: string
   }
+}
+
+/** Who claimed a seat. The username is the identity, as the API server makes
+ *  it of the token -- demo:<id>, github:<email> -- and admission holds it to
+ *  the requester's. The display name is what the map shows. */
+export interface ClaimedBy {
+  displayName: string
+  username: string
 }
 
 /** A seat's name is its place on its plan, so the API server is the lock: a
@@ -93,7 +101,7 @@ export function buildSeat(
   plan: string,
   row: number,
   column: number,
-  displayName: string,
+  claimedBy: ClaimedBy,
   color: string,
   emoji: string,
 ): Seat {
@@ -104,7 +112,6 @@ export function buildSeat(
       name: seatName(plan, row, column),
       namespace: appConfig().namespace,
       labels: {
-        [`${LABEL}/submitter`]: displayName,
         [`${LABEL}/seatingplan`]: plan,
         [`${LABEL}/row`]: twoDigits(row),
         [`${LABEL}/column`]: twoDigits(column),
@@ -114,7 +121,7 @@ export function buildSeat(
       seatingPlanRef: { name: plan },
       row,
       column,
-      displayName,
+      claimedBy,
       color,
       emoji,
     },
@@ -160,14 +167,20 @@ export async function listSeats(): Promise<Seat[]> {
   return await listObjects<Seat>(SEATS)
 }
 
-/** This person's seat on the active plan, or null. Asked of the API server by
- *  label, so it is one small answer however full the room is. */
-export async function findMySeat(displayName: string): Promise<Seat | null> {
-  const mine = await listObjects<Seat>(
-    SEATS,
-    undefined,
-    `${LABEL}/submitter=${displayName}`,
-  )
+/** A value as a field selector reads it: only these three are special. */
+function fieldSelectorValue(value: string): string {
+  return value.replace(/[\\,=]/g, (c) => `\\${c}`)
+}
+
+/** This person's seat on the active plan, or null. The API server answers it
+ *  itself: the CRD makes spec.claimedBy.username a selectable field, and
+ *  admission holds that field to whoever claimed the seat, so the answer is
+ *  one small, trustworthy list however full the room is. */
+export async function findMySeat(username: string): Promise<Seat | null> {
+  if (username === '') return null
+  const mine = await listObjects<Seat>(SEATS, undefined, {
+    fieldSelector: `spec.claimedBy.username=${fieldSelectorValue(username)}`,
+  })
   const plan = appConfig().seatingPlanName
   return mine.find((seat) => seat.spec.seatingPlanRef.name === plan) ?? null
 }
@@ -193,7 +206,7 @@ async function passOnWhy(prefix: string, why: string): Promise<boolean> {
 export async function claimSeat(
   row: number,
   column: number,
-  displayName: string,
+  claimedBy: ClaimedBy,
   color: string,
   emoji: string,
   why: string,
@@ -201,7 +214,7 @@ export async function claimSeat(
   const plan = appConfig().seatingPlanName
   const seat = await createObject<Seat>(
     SEATS,
-    buildSeat(plan, row, column, displayName, color, emoji),
+    buildSeat(plan, row, column, claimedBy, color, emoji),
   )
   return { seat, whyLost: await passOnWhy('seat-claim-', why) }
 }

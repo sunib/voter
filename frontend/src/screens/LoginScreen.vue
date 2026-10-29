@@ -57,7 +57,7 @@ onMounted(() => {
       <h1>Signed out</h1>
       <p>
         The application's session cookie is gone. Your Dex login is not, and
-        neither is a Room Pass enrolment — this demo cannot revoke either — so signing in
+        neither is a Room Pass enrolment: this demo cannot revoke either. Signing in
         again will normally return you to the same participant without a code.
       </p>
       <p>

@@ -23,6 +23,7 @@ import {
   seatErrorMessage,
 } from '../api/seats'
 import { currentSession } from '../api/session'
+import { currentUsername } from '../api/whoami'
 import { markSeated } from '../seatOnboarding'
 
 const router = useRouter()
@@ -32,6 +33,9 @@ const selected = ref<{ row: number; column: number } | null>(null)
 const color = ref<string>(pickRandom(SEAT_COLORS).hex)
 const emoji = ref<string>(pickRandom(SEAT_EMOJIS))
 const why = ref('')
+// Who this is to Kubernetes: what a seat is claimed as, and how this page
+// knows its own claim's echo from someone else's.
+const username = ref('')
 
 const tried = ref(false)
 const busy = ref(false)
@@ -55,7 +59,6 @@ function select(row: number, column: number) {
 // so now, rather than letting the claim find out.
 watch(seats, (now) => {
   const place = selected.value
-  const me = currentSession()?.displayName
   if (
     place &&
     now.some(
@@ -63,7 +66,7 @@ watch(seats, (now) => {
         s.spec.row === place.row &&
         s.spec.column === place.column &&
         // Your own claim's echo can arrive before the page moves on.
-        s.spec.displayName !== me,
+        s.spec.claimedBy?.username !== username.value,
     )
   ) {
     selected.value = null
@@ -88,13 +91,16 @@ async function claim() {
   failure.value = ''
   const place = selected.value
   if (place === null || checkWhy(why.value) !== '') return
-  const displayName = currentSession()?.displayName ?? ''
   busy.value = true
   try {
+    username.value = await currentUsername()
     const receipt = await claimSeat(
       place.row,
       place.column,
-      displayName,
+      {
+        displayName: currentSession()?.displayName ?? '',
+        username: username.value,
+      },
       color.value,
       emoji.value,
       why.value,
@@ -118,10 +124,9 @@ async function claim() {
 
 // Somebody who already has a seat has nothing to claim: this page is once.
 onMounted(async () => {
-  const displayName = currentSession()?.displayName
-  if (!displayName) return
   try {
-    if ((await findMySeat(displayName)) !== null) {
+    username.value = await currentUsername()
+    if ((await findMySeat(username.value)) !== null) {
       markSeated()
       await router.replace({ name: 'seat-mine' })
     }

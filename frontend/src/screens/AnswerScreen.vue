@@ -228,7 +228,7 @@ async function submit() {
               </h1>
               <p class="text-sm text-[rgb(var(--muted))]">
                 You are signed in as an operator, so you can open and close
-                rounds and read the results — but a ballot has to belong to
+                rounds and read the results. A ballot has to belong to
                 someone who came through the door. Scan the room's QR code to
                 join as a participant.
               </p>

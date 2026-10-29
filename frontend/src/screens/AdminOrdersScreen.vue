@@ -63,7 +63,7 @@ function timeOf(submittedAt: string): string {
       <p class="hero-copy">
         The Config tab edits a <code>CoffeeConfig</code>, and every change to it
         becomes a Git commit. None of this does. Orders are an array in this
-        pod's memory — no custom resource, no commit, nothing after a restart.
+        pod's memory: no custom resource, no commit, nothing after a restart.
       </p>
       <div class="hero-actions">
         <AdminNav />
@@ -115,7 +115,7 @@ function timeOf(submittedAt: string): string {
           <ul v-if="order.items?.length" class="inline-list">
             <li v-for="item in order.items" :key="`${order.seq}-${item.sku}`">
               {{ item.name }} × {{ item.quantity }}
-              <span v-if="item.voucherApplied"> — voucher applied</span>
+              <span v-if="item.voucherApplied">, voucher applied</span>
             </li>
           </ul>
 
@@ -141,7 +141,7 @@ function timeOf(submittedAt: string): string {
       </div>
 
       <p v-if="scope" class="metadata-copy feed-scope">
-        This replica, since its last restart — the last {{ capacity }} orders,
+        This replica, since its last restart: the last {{ capacity }} orders,
         and nothing older.
       </p>
     </section>

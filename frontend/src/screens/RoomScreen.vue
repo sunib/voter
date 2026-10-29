@@ -276,7 +276,7 @@ function signInAsOperator() {
       <h2 class="panel-title">You cannot run this room</h2>
       <p class="hero-copy">
         Your identity may read and answer the quizzes, but not read this room.
-        The join code is credential material, so Kubernetes refuses it — that
+        The join code is credential material, so Kubernetes refuses it. That
         refusal is the demo working, not a bug.
       </p>
       <p class="hero-copy">
@@ -295,7 +295,7 @@ function signInAsOperator() {
     <section v-else-if="roomExpired" class="panel panel--danger">
       <h2 class="panel-title">Your session has expired</h2>
       <p class="hero-copy">
-        Nothing is wrong with your permissions — the token this page was using
+        Nothing is wrong with your permissions. The token this page was using
         has run out. Signing in again picks up where you left off.
       </p>
       <div class="hero-actions">
@@ -313,7 +313,7 @@ function signInAsOperator() {
         This is not a permissions problem: Kubernetes did not refuse you, the
         stream failed. The most common cause is the application's own
         ServiceAccount lacking <code>list</code>/<code>watch</code> on this
-        resource — the shared watch is opened as the application, and only then
+        resource: the shared watch is opened as the application, and only then
         is each subscriber authorized as itself.
       </p>
       <div class="hero-actions">
@@ -334,7 +334,7 @@ function signInAsOperator() {
       </div>
       <p class="hero-copy">
         Point a projector at this. The code rotates on its own and the QR
-        follows it over the same watch — nothing here polls, and nobody has to
+        follows it over the same watch. Nothing here polls, and nobody has to
         refresh.
       </p>
       <div v-if="qrSvg" class="room-qr">
@@ -368,8 +368,8 @@ function signInAsOperator() {
       <p class="hero-copy">
         The room can always read the coffee menu. This grants them
         <code class="inline-code">patch</code> on it as well, by creating a
-        RoleBinding — so the admin page stops refusing them, live, without
-        anyone signing in again.
+        RoleBinding. Their admin page stops refusing them, live, without anyone
+        signing in again.
       </p>
       <p v-if="grantError" role="alert" class="error-copy">{{ grantError }}</p>
       <label class="grant-switch">
@@ -393,7 +393,7 @@ function signInAsOperator() {
         </span>
       </label>
       <p class="metadata-copy">
-        Not a Flux resource, on purpose — Flux would recreate whatever this
+        Not a Flux resource, on purpose: Flux would recreate whatever this
         deletes. gitops-reverser mirrors it to the audit trail, so the grant
         arrives in Git as a commit in your name.
       </p>

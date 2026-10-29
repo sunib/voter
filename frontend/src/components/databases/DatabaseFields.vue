@@ -113,7 +113,7 @@ function setList(field: FieldSpec, raw: string) {
 
 function optionLabel(field: FieldSpec, option: string): string {
   const hint = field.hints?.[option]
-  return hint ? `${option} — ${hint}` : option
+  return hint ? `${option}: ${hint}` : option
 }
 
 /** The marker is only meaningful where there is a server to disagree with. */

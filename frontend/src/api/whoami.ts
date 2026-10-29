@@ -21,3 +21,20 @@ export interface WhoAmI {
 export async function getWhoAmI(): Promise<WhoAmI> {
   return await requestJson<WhoAmI>('/auth/whoami')
 }
+
+let username: Promise<string> | null = null
+
+/** This person's Kubernetes username -- demo:<id>, github:<email> -- asked
+ *  once per page load: it is what a seat is claimed as, and it does not change
+ *  while the session lasts. A failure is not kept, so the next caller asks
+ *  again. */
+export function currentUsername(): Promise<string> {
+  username ??= getWhoAmI().then(
+    (who) => who.userInfo.username ?? '',
+    (cause: unknown) => {
+      username = null
+      throw cause
+    },
+  )
+  return username
+}

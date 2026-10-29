@@ -7,6 +7,7 @@
 
 import { canVote, type Session } from './api/session'
 import { findMySeat, getSeatingPlan } from './api/seats'
+import { currentUsername } from './api/whoami'
 
 // Once this browser has seen the person's seat, it stops asking: a seat is
 // never deleted by its owner, so the answer does not go back.
@@ -26,7 +27,7 @@ export function markSeated(): void {
 export async function needsSeat(session: Session | null): Promise<boolean> {
   if (seated || offered || session === null || !canVote(session)) return false
   try {
-    if ((await findMySeat(session.displayName)) !== null) {
+    if ((await findMySeat(await currentUsername())) !== null) {
       seated = true
       return false
     }

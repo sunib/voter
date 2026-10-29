@@ -75,7 +75,7 @@ const satisfied = computed(() => missing.value.length === 0)
       Kubernetes grants your identity
       <strong>{{ held.length }} of {{ checked.length }}</strong>
       of the permissions this page uses. The missing ones are not enforced by
-      this application — the API server refuses them, and it will refuse them
+      this application. The API server refuses them, and it will refuse them
       again if you press the button anyway.
     </p>
 
@@ -139,7 +139,7 @@ const satisfied = computed(() => missing.value.length === 0)
     <p class="hero-copy">
       Nothing here needs a new sign-in. If someone grants your group what is
       missing while you are on this page, these lines turn green and the page
-      starts working — within a few seconds, without a reload.
+      starts working within a few seconds, without a reload.
     </p>
 
     <slot />

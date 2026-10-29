@@ -17,6 +17,9 @@ import { useTestAppConfig } from './testAppConfig'
 
 // The enum in voter/config/crd/seats.yaml, which the API server holds; the
 // phone must offer exactly these.
+const ALICE = { displayName: 'Alice', username: 'demo:CgVhbGljZQ' }
+const BOB = { displayName: 'Bob', username: 'demo:CgNib2I' }
+
 const CRD_EMOJIS = ["🦊","🐙","🦄","🐝","🐢","🦉","🐳","🦖","🐧","🦀","🐸","🐼",
   "🚀","🌵","🍄","🌈","⚡","🔥","🍕","🧇","☕","🎸","🎲","👾"]
 
@@ -30,22 +33,22 @@ describe('a seat', () => {
   })
 
   it('is labelled as admission requires: padded row and column', () => {
-    const seat = buildSeat('mission2', 3, 17, 'alice', '#e4572e', '🦊')
+    const seat = buildSeat('mission2', 3, 17, ALICE, '#e4572e', '🦊')
     expect(seat.metadata).toMatchObject({
       name: 'mission2-3-17',
       namespace: 'voter',
       labels: {
-        'voter.configbutler.ai/submitter': 'alice',
         'voter.configbutler.ai/seatingplan': 'mission2',
         'voter.configbutler.ai/row': '03',
         'voter.configbutler.ai/column': '17',
       },
     })
+    expect(Object.keys(seat.metadata.labels ?? {})).toHaveLength(3)
     expect(seat.spec).toEqual({
       seatingPlanRef: { name: 'mission2' },
       row: 3,
       column: 17,
-      displayName: 'alice',
+      claimedBy: ALICE,
       color: '#e4572e',
       emoji: '🦊',
     })
@@ -81,8 +84,8 @@ describe('checkWhy', () => {
 
 describe('seatGrid', () => {
   it('draws row 1 first, and leaves out a seat outside the plan', () => {
-    const inside = buildSeat('mission2', 2, 3, 'alice', '#e4572e', '🦊')
-    const outside = buildSeat('mission2', 9, 1, 'bob', '#e4572e', '🐙')
+    const inside = buildSeat('mission2', 2, 3, ALICE, '#e4572e', '🦊')
+    const outside = buildSeat('mission2', 9, 1, BOB, '#e4572e', '🐙')
     const grid = seatGrid({ rows: 2, columns: 3 }, [inside, outside])
     expect(grid).toHaveLength(2)
     expect(grid[0]).toHaveLength(3)
@@ -163,7 +166,7 @@ describe('writing a seat', () => {
     stubFetch((call) =>
       json(call.method === 'POST' ? { ...(call.body as object), metadata: { name: 'made' } } : {}),
     )
-    const receipt = await claimSeat(3, 7, 'alice', '#e4572e', '🦊', '  by the door ')
+    const receipt = await claimSeat(3, 7, ALICE, '#e4572e', '🦊', '  by the door ')
     expect(receipt.whyLost).toBe(false)
     expect(calls.map((c) => [c.method, c.url])).toEqual([
       ['POST', '/k8s/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/seats?fieldManager=voter'],
@@ -178,7 +181,7 @@ describe('writing a seat', () => {
   it('sends nothing else when the claim is refused', async () => {
     stubFetch(() => json({ reason: 'AlreadyExists', message: 'exists' }, 409))
     await expect(
-      claimSeat(3, 7, 'alice', '#e4572e', '🦊', 'by the door'),
+      claimSeat(3, 7, ALICE, '#e4572e', '🦊', 'by the door'),
     ).rejects.toMatchObject({ status: 409 })
     expect(calls).toHaveLength(1)
   })
@@ -187,13 +190,13 @@ describe('writing a seat', () => {
     stubFetch((call) =>
       call.url.includes('commitrequests') ? json({ message: 'no' }, 500) : json({}),
     )
-    const receipt = await claimSeat(3, 7, 'alice', '#e4572e', '🦊', 'by the door')
+    const receipt = await claimSeat(3, 7, ALICE, '#e4572e', '🦊', 'by the door')
     expect(receipt.whyLost).toBe(true)
   })
 
   it('changes colour and emoji, and nothing else', async () => {
     stubFetch(() => json({ metadata: { name: 'made' } }))
-    const seat = buildSeat('mission2', 3, 7, 'alice', '#e4572e', '🦊')
+    const seat = buildSeat('mission2', 3, 7, ALICE, '#e4572e', '🦊')
     await changeSeat(seat, '#2ec4b6', '🐙', 'teal is calmer')
     expect(calls[0]).toMatchObject({
       method: 'PATCH',
@@ -206,15 +209,34 @@ describe('writing a seat', () => {
     })
   })
 
-  it('finds your seat by label, on the active plan only', async () => {
-    const other = buildSeat('elsewhere', 1, 1, 'alice', '#e4572e', '🦊')
-    const mine = buildSeat('mission2', 3, 7, 'alice', '#e4572e', '🦊')
+  it('asks the API server for your seat by username, on the active plan only', async () => {
+    const other = buildSeat('elsewhere', 1, 1, ALICE, '#e4572e', '🦊')
+    const mine = buildSeat('mission2', 3, 7, ALICE, '#e4572e', '🦊')
     stubFetch(() =>
       json({ apiVersion: 'examples.configbutler.ai/v1alpha1', kind: 'SeatList', items: [other, mine] }),
     )
-    expect((await findMySeat('alice'))?.metadata.name).toBe('mission2-3-7')
-    expect(calls[0]?.url).toBe(
-      '/k8s/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/seats?labelSelector=voter.configbutler.ai%2Fsubmitter%3Dalice',
+    expect((await findMySeat(ALICE.username))?.metadata.name).toBe('mission2-3-7')
+    const url = new URL(calls[0]?.url ?? '', 'https://app.test')
+    expect(url.pathname).toBe('/k8s/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/seats')
+    expect(url.searchParams.get('fieldSelector')).toBe('spec.claimedBy.username=demo:CgVhbGljZQ')
+  })
+
+  it('takes any username, escaping what a field selector reads as syntax', async () => {
+    stubFetch(() =>
+      json({ apiVersion: 'examples.configbutler.ai/v1alpha1', kind: 'SeatList', items: [] }),
     )
+    expect(await findMySeat('github:simon koudijs@example.com')).toBeNull()
+    await findMySeat('github:a=b,c\\d')
+    const asked = calls.map((c) => new URL(c.url, 'https://app.test').searchParams.get('fieldSelector'))
+    expect(asked).toEqual([
+      'spec.claimedBy.username=github:simon koudijs@example.com',
+      'spec.claimedBy.username=github:a\\=b\\,c\\\\d',
+    ])
+  })
+
+  it('has no seat to find without a username', async () => {
+    stubFetch(() => json({}, 500))
+    expect(await findMySeat('')).toBeNull()
+    expect(calls).toHaveLength(0)
   })
 })

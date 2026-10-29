@@ -67,8 +67,14 @@ test('a participant takes a seat once, with a why, and changes its look with ano
     await expect(alice.getByRole('heading', { name: 'Row 3, seat 7' })).toBeVisible();
     await expect(alice.getByText("You're in.")).toBeVisible();
     const claimed = JSON.parse(kube('get', 'seat', 'mission2-3-7', '-o', 'json'));
-    expect(claimed.spec).toMatchObject({ seatingPlanRef: { name: 'mission2' }, row: 3, column: 7, displayName: `${run}-alice`, color: '#2ec4b6', emoji: '🦊' });
+    // Claimed as the Kubernetes identity, which admission checked against the
+    // token, with the chosen name beside it for the map.
+    const aliceUser = await alice.evaluate(async () => (await (await fetch('/auth/whoami')).json()).userInfo.username);
+    expect(aliceUser).toMatch(/^demo:/);
+    expect(claimed.spec).toMatchObject({ seatingPlanRef: { name: 'mission2' }, row: 3, column: 7, claimedBy: { displayName: `${run}-alice`, username: aliceUser }, color: '#2ec4b6', emoji: '🦊' });
     expect(claimed.metadata.labels).toMatchObject({ 'voter.configbutler.ai/row': '03', 'voter.configbutler.ai/column': '07' });
+    // And the API server finds it by that identity, as the page does.
+    expect(kube('get', 'seats', '--field-selector', `spec.claimedBy.username=${aliceUser}`, '-o', 'name').trim()).toBe('seat.examples.configbutler.ai/mission2-3-7');
 
     // Bob sees Alice's seat taken, and a seat taken under his finger is let go
     // of with the reason, before he presses anything.
@@ -78,11 +84,26 @@ test('a participant takes a seat once, with a why, and changes its look with ano
     await seat(bob, 'Row 3, seat 8, free').click();
     kube('create', '-f', '-', { input: JSON.stringify({
       apiVersion: 'examples.configbutler.ai/v1alpha1', kind: 'Seat',
-      metadata: { name: 'mission2-3-8', namespace: 'voter', labels: { 'voter.configbutler.ai/submitter': `${run}-carol` } },
-      spec: { seatingPlanRef: { name: 'mission2' }, row: 3, column: 8, displayName: `${run}-carol`, color: '#e4572e', emoji: '🐙' },
+      metadata: { name: 'mission2-3-8', namespace: 'voter' },
+      spec: { seatingPlanRef: { name: 'mission2' }, row: 3, column: 8, claimedBy: { displayName: `${run}-carol`, username: `demo:${run}-carol` }, color: '#e4572e', emoji: '🐙' },
     }) });
     await expect(bob.getByText('Someone just took that seat. Pick one close by.')).toBeVisible();
     await expect(seat(bob, 'Row 3, seat 8, taken')).toBeVisible();
+
+    // RBAC lets Bob patch any seat; admission lets him change only his own.
+    // Straight at /k8s, as anyone with the page's session could.
+    const steal = await bob.evaluate(async () => {
+      const s = await (await fetch('/auth/session')).json();
+      const res = await fetch('/k8s/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/seats/mission2-3-7', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/merge-patch+json', [s.csrfHeader]: s.csrfToken },
+        body: JSON.stringify({ spec: { emoji: '🔥' } }),
+      });
+      return { status: res.status, message: (await res.json()).message };
+    });
+    expect(steal.status).toBe(403);
+    expect(steal.message).toContain("This is someone else's seat.");
+    expect(JSON.parse(kube('get', 'seat', 'mission2-3-7', '-o', 'json')).spec.emoji).toBe('🦊');
 
     // Alice changes her emoji: a why again, and nothing else of the seat moves.
     await alice.getByRole('button', { name: 'Change', exact: true }).click();
@@ -117,6 +138,24 @@ test('a participant takes a seat once, with a why, and changes its look with ano
     await expect(alice).toHaveURL(`${APP}/`);
     await alice.goto(`${APP}/seat`);
     await alice.waitForURL(`${APP}/seat/mine`);
+
+    // The operator, signed in with GitHub as "Kilgore Trout": a display name no
+    // label can carry, which once made the Seat tab a 400. Their seat is found
+    // by their username, and they may take one like anybody.
+    const operatorContext = await browser.newContext({ ignoreHTTPSErrors: true });
+    contexts.push(operatorContext);
+    const operator = await operatorContext.newPage();
+    operator.on('pageerror', error => { throw error; });
+    await operator.goto(`${APP}/login?next=%2Fseat%2Fmine&connector=github`);
+    await operator.waitForURL(`${APP}/seat`);
+    await expect(operator.getByRole('heading', { name: 'Where are you sitting?' })).toBeVisible();
+    await seat(operator, 'Row 1, seat 1, free').click();
+    await operator.getByLabel('Why this seat, this colour and this emoji?').fill('Front row, to keep an eye on things');
+    await operator.getByRole('button', { name: 'Claim', exact: true }).click();
+    await operator.waitForURL(`${APP}/seat/mine?claimed=1`);
+    await expect(operator.getByRole('heading', { name: 'Row 1, seat 1' })).toBeVisible();
+    expect(JSON.parse(kube('get', 'seat', 'mission2-1-1', '-o', 'json')).spec.claimedBy)
+      .toEqual({ displayName: 'Kilgore Trout', username: 'github:kilgore@kilgore.trout' });
   } finally {
     for (const context of contexts) await context.close();
     kube('delete', 'seats', '--all', '--ignore-not-found');

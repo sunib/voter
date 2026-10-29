@@ -142,16 +142,18 @@ export async function getObject<T>(
 
 /** Every object of a kind in the namespace, projected. A list's items carry no
  *  apiVersion or kind of their own for every type, so they are filled in from
- *  the list's, which is what a stream event would carry. A label selector, when
- *  given, narrows it on the API server. */
+ *  the list's, which is what a stream event would carry. A label or field
+ *  selector, when given, narrows it on the API server. */
 export async function listObjects<T>(
   ref: ResourceRef,
   namespace?: string,
-  labelSelector?: string,
+  selectors: { labelSelector?: string; fieldSelector?: string } = {},
 ): Promise<T[]> {
-  const query = labelSelector
-    ? `?labelSelector=${encodeURIComponent(labelSelector)}`
-    : ''
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(selectors)) {
+    if (value) params.set(key, value)
+  }
+  const query = params.toString() ? `?${params}` : ''
   const list = await requestJson<{
     apiVersion: string
     kind: string

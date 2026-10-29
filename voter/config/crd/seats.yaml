@@ -15,9 +15,12 @@
 # another.
 #
 # Where a seat is and whose it is never changes once it exists; its colour and
-# emoji may. Labels (submitter, seatingplan, row, column) are held equal to the
-# spec by admission (admission/seat-policy.yaml), since a CRD rule cannot see
-# labels.
+# emoji may. Whose it is, is the Kubernetes username of whoever claimed it
+# (spec.claimedBy.username), held to the requester by admission
+# (admission/seat-policy.yaml), and selectable, so "which seat is mine?" is one
+# field selector. Labels (seatingplan, row, column) are held equal to the spec
+# by admission too, since a CRD rule cannot see labels. docs/seat-claimed-by.md
+# is the design.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -45,7 +48,7 @@ spec:
         # two NAME columns read as one repeated.
         - name: Owner
           type: string
-          jsonPath: .spec.displayName
+          jsonPath: .spec.claimedBy.displayName
         - name: Emoji
           type: string
           jsonPath: .spec.emoji
@@ -55,6 +58,11 @@ spec:
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
+      # The API server answers "which seat is mine?" itself:
+      # ?fieldSelector=spec.claimedBy.username=<username>, or kubectl's
+      # --field-selector. Stable since Kubernetes 1.32.
+      selectableFields:
+        - jsonPath: .spec.claimedBy.username
       schema:
         openAPIV3Schema:
           type: object
@@ -85,7 +93,7 @@ spec:
                 - seatingPlanRef
                 - row
                 - column
-                - displayName
+                - claimedBy
                 - color
                 - emoji
               properties:
@@ -136,18 +144,32 @@ spec:
                   x-kubernetes-validations:
                     - rule: "self == oldSelf"
                       message: "A seat does not move: column is immutable."
-                displayName:
-                  type: string
-                  minLength: 1
-                  # A label value too (voter.configbutler.ai/submitter), so no
-                  # longer than one may be.
-                  maxLength: 63
+                claimedBy:
+                  type: object
                   description: >-
-                    Who claimed the seat: their display name from Room Pass.
-                    Fixed once the seat is claimed.
+                    Who claimed the seat. Fixed once the seat is claimed.
+                  required:
+                    - displayName
+                    - username
+                  properties:
+                    displayName:
+                      type: string
+                      minLength: 1
+                      maxLength: 128
+                      description: >-
+                        The name shown on the map: the one chosen at Room
+                        Pass's join page, or a GitHub or LinkedIn profile's.
+                    username:
+                      type: string
+                      minLength: 1
+                      maxLength: 256
+                      description: >-
+                        The Kubernetes username of whoever claimed the seat,
+                        as the API server makes it of their token, e.g.
+                        demo:<id> or github:<email>. The identity; selectable.
                   x-kubernetes-validations:
                     - rule: "self == oldSelf"
-                      message: "A seat keeps its owner: displayName is immutable."
+                      message: "A seat keeps its owner: claimedBy is immutable."
                 color:
                   type: string
                   pattern: "^#[0-9a-fA-F]{6}$"

@@ -75,7 +75,7 @@ export const DATABASE_FORM: FieldGroup[] = [
         label: 'Engine version',
         kind: 'text',
         placeholder: '16',
-        help: 'Major version. Leave it out and you get the current platform default — which means you also get the upgrade when the platform moves.',
+        help: 'Major version. Leave it out and you get the current platform default, and with it the upgrade when the platform moves.',
       },
       {
         path: 'spec.tier',

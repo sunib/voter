@@ -5,11 +5,17 @@
 # is true of every Seat: its name is its place, and its plan, row, column and
 # owner never change. This adds what is true of a PARTICIPANT's Seat:
 #
-#   - CREATE: it is claimed in their own display name, and its labels say the
-#     same as its spec -- submitter, seatingplan, and row and column padded to
-#     two digits, so they sort in Git and in kubectl.
+#   - CREATE: it is claimed as themselves -- spec.claimedBy.username is the
+#     username the API server made of their token, and claimedBy.displayName
+#     the name in it -- and its labels say the same as its spec: seatingplan,
+#     and row and column padded to two digits, so they sort in Git and in
+#     kubectl.
 #   - UPDATE: only their own Seat, and only spec.color and spec.emoji. The
 #     CRD keeps the rest of spec; this keeps metadata: no relabelling.
+#
+# The username, not the display name, is what says whose a seat is: it is what
+# RBAC, audit and Git attribution know a person by, and it is unique where a
+# display name need not be. docs/seat-claimed-by.md is the design.
 #
 # Room Pass participants only (`demo:`). Operators are not restricted, and
 # whether a Seat fits the room is voter-seat-in-plan's, for everyone.
@@ -50,25 +56,25 @@ spec:
     - expression: "variables.displayName != ''"
       message: Your sign-in carries no display name, so a seat cannot be claimed in it.
       reason: Forbidden
-    # Claim in your own name.
+    # Claim as yourself.
     - expression: >-
-        request.operation != 'CREATE' || object.spec.displayName == variables.displayName
-      messageExpression: "'A seat is claimed in your own name: ' + variables.displayName + '.'"
+        request.operation != 'CREATE' || (
+          object.spec.claimedBy.username == request.userInfo.username
+          && object.spec.claimedBy.displayName == variables.displayName)
+      messageExpression: "'A seat is claimed as yourself: ' + variables.displayName + '.'"
       reason: Forbidden
     - expression: >-
         request.operation != 'CREATE' || (
-          variables.labels[?'voter.configbutler.ai/submitter'].orValue('') == variables.displayName
-          && variables.labels[?'voter.configbutler.ai/seatingplan'].orValue('') == object.spec.seatingPlanRef.name
+          variables.labels[?'voter.configbutler.ai/seatingplan'].orValue('') == object.spec.seatingPlanRef.name
           && variables.labels[?'voter.configbutler.ai/row'].orValue('') == variables.row
           && variables.labels[?'voter.configbutler.ai/column'].orValue('') == variables.column)
       messageExpression: >-
-        'A seat is labelled with who claimed it and where: submitter ' + variables.displayName
-          + ', seatingplan ' + object.spec.seatingPlanRef.name
+        'A seat is labelled with where it is: seatingplan ' + object.spec.seatingPlanRef.name
           + ', row ' + variables.row + ', column ' + variables.column + '.'
       reason: Forbidden
     # Change only your own, and only its colour and emoji.
     - expression: >-
-        request.operation != 'UPDATE' || oldObject.spec.displayName == variables.displayName
+        request.operation != 'UPDATE' || oldObject.spec.claimedBy.username == request.userInfo.username
       message: This is someone else's seat. Pick a free one on the map.
       reason: Forbidden
     - expression: >-

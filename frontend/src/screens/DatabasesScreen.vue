@@ -96,7 +96,7 @@ onMounted(refresh)
       <p class="hero-copy">
         Every <code>Database</code> object in this namespace: what each team has
         asked the platform team for, in their own words. Nothing reconciles
-        these yet — the declared intent is the whole of it, and that is the
+        these yet. The declared intent is the whole of it, and that is the
         point.
       </p>
       <div class="hero-actions">

@@ -42,7 +42,7 @@ export function useLiveDatabase(namespace: string, name: string) {
       alreadyDone:
         'Somebody else had already asked for this change. There is nothing left to save.',
       lostTheRace:
-        'Somebody else is editing this request too, and their save landed first each time. Your edits are kept — press Save again.',
+        'Somebody else is editing this request too, and their save landed first each time. Your edits are kept. Press Save again.',
     },
   })
 }

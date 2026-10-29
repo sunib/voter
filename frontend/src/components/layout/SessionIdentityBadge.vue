@@ -52,7 +52,7 @@ watch(
     v-if="visible"
     to="/me"
     class="session-badge session-badge--link"
-    :title="`Signed in as ${displayName} — open your identity`"
+    :title="`Signed in as ${displayName}. Open your identity.`"
     aria-label="Your identity"
   >
     <span class="session-badge__icon-wrap" aria-hidden="true">

@@ -253,10 +253,13 @@ everyone.
   "Nobody pays more than €10 for a coffee: Flat White." It is a 422 (`Invalid`), not a 403: the person may make the
   change, the change does not make sense. The editor shows the sentence in its "Admin
   request failed" panel.
-- **`voter-seat`**: a participant claims a Seat in their own display name, labelled
-  with it and with the Seat's plan, row and column (two digits); afterwards they may
-  change only their own Seat's colour and emoji. The CRD already holds for everyone
-  that a Seat is named `<plan>-<row>-<column>` and never moves or changes owner.
+- **`voter-seat`**: a participant claims a Seat as themselves -- `spec.claimedBy`
+  carries the username the API server made of their token and the display name in
+  it -- labelled with the Seat's plan, row and column (two digits); afterwards they
+  may change only the colour and emoji of a Seat whose `claimedBy.username` is
+  theirs. The CRD already holds for everyone that a Seat is named
+  `<plan>-<row>-<column>` and never moves or changes owner.
+  [docs/seat-claimed-by.md](docs/seat-claimed-by.md) is the design.
 - **`voter-seat-in-plan`**, for everyone: a Seat names the active SeatingPlan, the one
   the binding's `paramRef.name` and Voter's `SEATING_PLAN_NAME` both name, and a new
   one fits inside it. No plan, no Seat writes at all. "This room has 8 rows of 12
@@ -337,7 +340,12 @@ emoji, again with a why.
 
 A claim is a Seat the participant creates through `/k8s`, named
 `<plan>-<row>-<column>`, so two phones claiming one seat get one 201 and one 409
-AlreadyExists: "Someone just took that seat. Pick one close by." A change is a merge
+AlreadyExists: "Someone just took that seat. Pick one close by." Whose it is, is
+`spec.claimedBy`: the Kubernetes username from `/auth/whoami`, asked once per page
+load, and the display name for the map. The CRD makes the username a selectable
+field, so "which seat is mine?" is the API server's answer to
+`?fieldSelector=spec.claimedBy.username=<username>`, for any sign-in, a GitHub
+"Kilgore Trout" as much as a Room Pass `Kilgore-Trout`. A change is a merge
 patch of `spec.color` and `spec.emoji`. After either write the browser creates a
 CommitRequest for `CONFIGBUTLER_SEAT_GIT_TARGET_NAME` with the why as its message,
 so the commit is the participant's, in their words; if the seat write fails nothing

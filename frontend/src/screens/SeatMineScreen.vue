@@ -16,13 +16,11 @@ import {
   seatErrorMessage,
   type Seat,
 } from '../api/seats'
-import { currentSession } from '../api/session'
+import { currentUsername } from '../api/whoami'
 
 const route = useRoute()
 const router = useRouter()
 const { plan, seats, error: loadError } = useSeatMap()
-
-const displayName = currentSession()?.displayName ?? ''
 
 // Read once to know which seat is yours; after that the stream keeps it
 // current, so a change made on another phone shows here too.
@@ -95,7 +93,7 @@ async function change() {
 
 onMounted(async () => {
   try {
-    found.value = await findMySeat(displayName)
+    found.value = await findMySeat(await currentUsername())
   } catch (e) {
     failure.value = seatErrorMessage(e)
     return
