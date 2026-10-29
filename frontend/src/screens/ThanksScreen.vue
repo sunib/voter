@@ -4,7 +4,6 @@ import { RouterLink } from 'vue-router'
 import AppShell from '../components/layout/AppShell.vue'
 import { formatMoney } from '../api/coffee'
 import { useCartStore } from '../stores/cart'
-import { shopOnly } from '../shopOnly'
 
 const cart = useCartStore()
 
@@ -25,8 +24,7 @@ const order = computed(() => cart.lastOrder)
         </template>
       </p>
       <div class="hero-actions">
-        <RouterLink class="button" to="/coffee">Order another coffee</RouterLink>
-        <RouterLink v-if="!shopOnly()" class="button button--secondary" to="/">Back to quizzes</RouterLink>
+        <RouterLink class="button" to="/coffee">Back to the coffee bar</RouterLink>
       </div>
     </section>
   </AppShell>

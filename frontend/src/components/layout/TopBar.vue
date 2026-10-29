@@ -35,15 +35,18 @@ const tabs = production ? allTabs.filter((tab) => tab.key === 'coffee') : allTab
 // By route name, not by path prefix: /answer/:session and /thanks live at the
 // root but belong to a half each, and RouterLink's own active matching would
 // light up "Quizzes" for every route in the app because its path is "/".
+// A page in none of them -- who you are, under your name -- lights up nothing.
 const coffeeRoutes = new Set(['order', 'thanks', 'admin', 'admin-orders'])
 const databaseRoutes = new Set(['databases', 'database-new', 'database-edit'])
+const quizRoutes = new Set(['home', 'answer', 'vote-results'])
 const activeTab = computed(() => {
   const name = String(route.name ?? '')
   if (name === 'room') return 'room'
   if (name === 'build-info') return 'build'
   if (name === 'seat-claim' || name === 'seat-mine') return 'seat'
   if (databaseRoutes.has(name)) return 'databases'
-  return coffeeRoutes.has(name) ? 'coffee' : 'quizzes'
+  if (coffeeRoutes.has(name)) return 'coffee'
+  return quizRoutes.has(name) ? 'quizzes' : ''
 })
 
 const notTodayActive = computed(() =>
