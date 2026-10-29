@@ -40,7 +40,10 @@ export function readCommitOutcome(object: unknown): {
   const status = (object as { status?: Record<string, unknown> })?.status
   const conditions = (status?.conditions as Condition[] | undefined) ?? []
   const of = (type: string) => conditions.find((c) => c?.type === type)
-  const sha = typeof status?.sha === 'string' ? status.sha : ''
+  // gitops-reverser 0.50.0 renamed status.sha to status.commit; read both, so
+  // the app works on either side of an operator upgrade.
+  const commit = status?.commit ?? status?.sha
+  const sha = typeof commit === 'string' ? commit : ''
 
   const stalled = of('Stalled')
   if (stalled?.status === 'True') {

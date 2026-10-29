@@ -41,6 +41,14 @@ describe('readCommitOutcome', () => {
     expect(outcome.sha).toBe('d82837fe657832ddf7f04c24b3a268eeaa16cd96')
   })
 
+  // gitops-reverser 0.50.0 and later report the commit as status.commit.
+  it('reads the commit from status.commit', () => {
+    const { sha, ...rest } = committed.status
+    const outcome = readCommitOutcome({ status: { ...rest, commit: sha } })
+    expect(outcome.state).toBe('committed')
+    expect(outcome.sha).toBe(sha)
+  })
+
   // The first event after a create has no conditions at all. Reading that as
   // anything but "still going" is how a working save reports a failure.
   it('treats an object with no conditions yet as pending', () => {
