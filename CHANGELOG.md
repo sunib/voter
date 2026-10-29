@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.5.0](https://github.com/sunib/voter/compare/v2.4.2...v2.5.0) (2026-10-29)
+
+
+### Features
+
+* let's do some funny things last night before ([20ae002](https://github.com/sunib/voter/commit/20ae0027e487b3d813eaa68ed82b29a28be8c3fc))
+
+
+### Bug Fixes
+
+* send a save's CommitRequest before its write, so a full room keeps its messages ([dbd0846](https://github.com/sunib/voter/commit/dbd08467ac5c9df168708d4c443892592cd1fa9b))
+
 ## [2.4.2](https://github.com/sunib/voter/compare/v2.4.1...v2.4.2) (2026-10-29)
 
 
