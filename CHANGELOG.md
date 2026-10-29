@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.6.0](https://github.com/sunib/voter/compare/v2.5.0...v2.6.0) (2026-10-29)
+
+
+### Features
+
+* watch the RoleBindings in voter instead of polling permissions ([#46](https://github.com/sunib/voter/issues/46)) ([80d2a0a](https://github.com/sunib/voter/commit/80d2a0a34fa9031d5b04e5c961c4a1fa6ccdc9dd))
+
 ## [2.5.0](https://github.com/sunib/voter/compare/v2.4.2...v2.5.0) (2026-10-29)
 
 
