@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.4.1](https://github.com/sunib/voter/compare/v2.4.0...v2.4.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* Let's get the page simpler and let's redirect to the coffee ordering ([219acff](https://github.com/sunib/voter/commit/219acff01719d4c0e8c91dfcd1c613f711ca3b14))
+
 ## [2.4.0](https://github.com/sunib/voter/compare/v2.3.0...v2.4.0) (2026-10-29)
 
 
