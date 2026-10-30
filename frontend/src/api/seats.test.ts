@@ -180,7 +180,10 @@ describe('writing a seat', () => {
       ['POST', '/k8s/apis/examples.configbutler.ai/v1alpha1/namespaces/voter/seats?fieldManager=voter'],
     ])
     expect(calls[0]?.body).toMatchObject({
-      metadata: { generateName: 'seat-claim-' },
+      metadata: {
+        generateName: 'seat-claim-',
+        labels: { 'voter.configbutler.ai/seat': 'mission2-3-7' },
+      },
       spec: { gitTargetRef: { name: 'seats' }, message: 'by the door' },
     })
   })
@@ -216,7 +219,10 @@ describe('writing a seat', () => {
       body: { spec: { color: '#2ec4b6', emoji: '🐙' } },
     })
     expect(calls[0]?.body).toMatchObject({
-      metadata: { generateName: 'seat-change-' },
+      metadata: {
+        generateName: 'seat-change-',
+        labels: { 'voter.configbutler.ai/seat': 'mission2-3-7' },
+      },
       spec: { message: 'teal is calmer' },
     })
   })

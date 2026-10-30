@@ -255,8 +255,9 @@ export async function writeWithCommit<T>(
   generateName: string,
   reason: string,
   write: () => Promise<T>,
+  labels?: Record<string, string>,
 ): Promise<{ result: T; receipt: CommitReceipt }> {
-  const receipt = await requestCommitAhead(target, generateName, reason)
+  const receipt = await requestCommitAhead(target, generateName, reason, labels)
   return { result: await write(), receipt }
 }
 
@@ -267,8 +268,9 @@ export async function requestCommitAhead(
   target: string,
   generateName: string,
   reason: string,
+  labels?: Record<string, string>,
 ): Promise<CommitReceipt> {
-  const receipt = await requestCommit(target, generateName, reason)
+  const receipt = await requestCommit(target, generateName, reason, labels)
   const lead = appConfig().commitLeadMillis
   if (receipt.commitRequested && lead > 0) {
     await new Promise((resolve) => setTimeout(resolve, lead))
@@ -279,7 +281,8 @@ export async function requestCommitAhead(
 /** Asks ConfigButler to commit this person's next write: a CommitRequest
  *  naming the GitTarget, with the editor's reason as the commit message. An
  *  empty target means the deployment has none, and nothing is asked. Use
- *  writeWithCommit, which orders it before the write.
+ *  writeWithCommit, which orders it before the write. `labels` say what the
+ *  request is for, to whoever reads it back (a seat's, seats.ts).
  *
  *  The save and this are two Kubernetes writes. If this one fails the save
  *  still happens, so it reports PARTIAL success rather than an error. */
@@ -287,6 +290,7 @@ export async function requestCommit(
   target: string,
   generateName: string,
   reason: string,
+  labels?: Record<string, string>,
 ): Promise<CommitReceipt> {
   if (target === '') return {}
   const config = appConfig()
@@ -308,7 +312,7 @@ export async function requestCommit(
       {
         apiVersion: 'configbutler.ai/v1alpha3',
         kind: 'CommitRequest',
-        metadata: { generateName, namespace },
+        metadata: { generateName, namespace, ...(labels ? { labels } : {}) },
         spec,
       },
       namespace,
