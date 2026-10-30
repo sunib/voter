@@ -9,9 +9,11 @@ kind: Role
 metadata:
   name: voter
   namespace: voter
-# Must mirror the platform repo's voter Role. Voter acts as itself for two
-# things only: the storefront reads the one CoffeeConfig, and the tally
-# reconciler reads rounds and ballots and writes a round's status. Everything a
+# Must mirror the platform repo's voter Role. Voter acts as itself for three
+# things only: the storefront reads the one CoffeeConfig, the tally reconciler
+# reads rounds and ballots and writes a round's status, and the seat reconciler
+# reads seats and their CommitRequests and writes a seat's status (idle here:
+# the fixture sets no seat GitTarget). Everything a
 # person does goes through krm-foyer's /k8s with their own token, and live
 # streams are krm-foyer's, with shared watches of its own.
 rules:
@@ -32,6 +34,18 @@ rules:
   - apiGroups: [examples.configbutler.ai]
     resources: [quizsessions/status]
     verbs: [get, patch]
+  # A seat's last why (seat_reconciler.go): read the seats and the requests
+  # that carry their whys, and write the why to the seat's STATUS only. Never
+  # the seat itself, which is its owner's.
+  - apiGroups: [examples.configbutler.ai]
+    resources: [seats]
+    verbs: [list, watch]
+  - apiGroups: [configbutler.ai]
+    resources: [commitrequests]
+    verbs: [list, watch]
+  - apiGroups: [examples.configbutler.ai]
+    resources: [seats/status]
+    verbs: [patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

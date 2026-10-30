@@ -264,8 +264,15 @@ the gateway, is in [shared-streams.md](shared-streams.md).
 Writes never go through the shared identity: a vote, a menu save, a Database
 request and a CommitRequest are the person's own request through `/k8s`, so
 audit events — and gitops-reverser's commits — name the person. Voter's own
-ServiceAccount no longer streams anything; its grants are the tally reconciler's
-and `get` on `coffeeconfigs/demo-coffee` for the storefront.
+ServiceAccount no longer streams anything; its grants are the tally reconciler's,
+the seat reconciler's and `get` on `coffeeconfigs/demo-coffee` for the storefront.
+
+The seat reconciler shows why the label on a CommitRequest can be the phone's
+word. A seat's request carries `voter.configbutler.ai/seat: <seat>`, which
+anyone could set to anyone's seat. Voter copies the request's message onto that
+Seat's `status.lastCommit` only when the request's `status.author`, which
+gitops-reverser takes from the audit event, is the seat's
+`spec.claimedBy.username`.
 
 ### Revocation timing and the cached subject
 

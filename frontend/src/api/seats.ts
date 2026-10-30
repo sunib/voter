@@ -9,7 +9,9 @@
 //
 // The why is the commit message: after a seat is written, a CommitRequest
 // carries it, so the change is recorded in the participant's name and words.
-// None of that is named on the page.
+// The request is labelled with its seat, and once it has committed Voter copies
+// the why onto the Seat's status.lastCommit (voter/seat_reconciler.go). None of
+// that is named on the page.
 
 import { appConfig } from './appConfig'
 import type { ApiError } from './http'
@@ -49,6 +51,11 @@ export const SEAT_COLORS = [
 
 const LABEL = 'voter.configbutler.ai'
 
+/** On a seat's CommitRequest: the Seat it is for. Read back by Voter, which
+ *  copies a committed why onto that Seat's status. Anyone may write any seat
+ *  here; Voter believes it only when the request's author owns the seat. */
+export const SEAT_COMMIT_LABEL = `${LABEL}/seat`
+
 export interface SeatingPlan {
   apiVersion?: string
   kind?: string
@@ -73,6 +80,15 @@ export interface Seat {
     claimedBy: ClaimedBy
     color: string
     emoji: string
+  }
+  /** Kept by Voter, never written from here (voter/seat_reconciler.go). */
+  status?: {
+    lastCommit?: {
+      message?: string
+      commit?: string
+      committedAt?: string
+      commitRequest?: string
+    }
   }
 }
 
@@ -195,6 +211,7 @@ export interface SeatReceipt {
 /** Writes the seat with its why passed on first (kube.ts, writeWithCommit). */
 async function withWhy(
   prefix: string,
+  seat: string,
   why: string,
   write: () => Promise<Seat>,
 ): Promise<SeatReceipt> {
@@ -203,6 +220,7 @@ async function withWhy(
     prefix,
     whyText(why),
     write,
+    { [SEAT_COMMIT_LABEL]: seat },
   )
   return { seat: result, whyLost: receipt.commitRequested === false }
 }
@@ -218,7 +236,7 @@ export async function claimSeat(
   why: string,
 ): Promise<SeatReceipt> {
   const plan = appConfig().seatingPlanName
-  return withWhy('seat-claim-', why, () =>
+  return withWhy('seat-claim-', seatName(plan, row, column), why, () =>
     createObject<Seat>(SEATS, buildSeat(plan, row, column, claimedBy, color, emoji)),
   )
 }
@@ -231,7 +249,7 @@ export async function changeSeat(
   emoji: string,
   why: string,
 ): Promise<SeatReceipt> {
-  return withWhy('seat-change-', why, () =>
+  return withWhy('seat-change-', seat.metadata.name ?? '', why, () =>
     mergePatch<Seat>(SEATS, seat.metadata.name ?? '', { spec: { color, emoji } }),
   )
 }

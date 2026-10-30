@@ -10,7 +10,7 @@
 # The seat is in the NAME, <plan>-<row>-<column>, and that is the whole
 # locking story: two phones claiming the same seat send two creates for one
 # name, and the API server answers the second with 409 AlreadyExists. No
-# controller, no status, no race. The rule below holds the name for everyone,
+# controller in the claim, and no race. The rule below holds the name for everyone,
 # operators included, so no Seat can sit at one place and be named after
 # another.
 #
@@ -21,6 +21,11 @@
 # field selector. Labels (seatingplan, row, column) are held equal to the spec
 # by admission too, since a CRD rule cannot see labels. docs/seat-claimed-by.md
 # is the design.
+#
+# The status is a record, not a lock: status.lastCommit is the last why that
+# reached Git for this seat, copied there by Voter from the seat's committed
+# CommitRequest (voter/seat_reconciler.go). Only Voter's ServiceAccount may
+# write seats/status, and a participant's patch of the seat cannot touch it.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -55,6 +60,9 @@ spec:
         - name: Color
           type: string
           jsonPath: .spec.color
+        - name: Why
+          type: string
+          jsonPath: .status.lastCommit.message
         - name: Age
           type: date
           jsonPath: .metadata.creationTimestamp
@@ -63,6 +71,10 @@ spec:
       # --field-selector. Stable since Kubernetes 1.32.
       selectableFields:
         - jsonPath: .spec.claimedBy.username
+      # Voter writes status.lastCommit; with the subresource, nobody writing the
+      # seat itself can, and a status write moves no generation.
+      subresources:
+        status: {}
       schema:
         openAPIV3Schema:
           type: object
@@ -187,3 +199,33 @@ spec:
                   # The phone offers exactly these (frontend/src/api/seats.ts).
                   enum: ["🦊","🐙","🦄","🐝","🐢","🦉","🐳","🦖","🐧","🦀","🐸","🐼",
                          "🚀","🌵","🍄","🌈","⚡","🔥","🍕","🧇","☕","🎸","🎲","👾"]
+            status:
+              type: object
+              description: >-
+                Kept by Voter. Nothing here is written by the person sitting
+                in the seat.
+              properties:
+                lastCommit:
+                  type: object
+                  description: >-
+                    The last change to this seat that reached Git with its
+                    owner's why, read off the seat's committed CommitRequest.
+                    A change made without one (kubectl, say) leaves it as it
+                    was.
+                  properties:
+                    message:
+                      type: string
+                      maxLength: 1024
+                      description: The why, as committed.
+                    commit:
+                      type: string
+                      maxLength: 64
+                      description: The commit's sha in the audit trail.
+                    committedAt:
+                      type: string
+                      format: date-time
+                      description: When the CommitRequest reported the commit.
+                    commitRequest:
+                      type: string
+                      maxLength: 253
+                      description: The CommitRequest it was read from.

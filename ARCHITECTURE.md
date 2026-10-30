@@ -14,7 +14,7 @@ the krm-foyer cutover was **2026-10-06**. How it got here is
 | Component | Owns | Boundary |
 | --- | --- | --- |
 | Voter Vue app | Coffee/voting screens, cart, field presentation, save intent; its own writes through `/k8s` (ballots, saves, CommitRequests, round state, the audience grant) | Renders what Kubernetes answers; decides no permission |
-| Voter Go backend | The SPA's files, `/config.json`, the QR join endpoint, coffee pricing/orders/vouchers, the QuizSession tally reconciler | Holds nobody's token and has no session, CSRF or OIDC code; learns who is asking only from krm-foyer's identity header |
+| Voter Go backend | The SPA's files, `/config.json`, the QR join endpoint, coffee pricing/orders/vouchers, the QuizSession tally reconciler, the Seat last-why reconciler | Holds nobody's token and has no session, CSRF or OIDC code; learns who is asking only from krm-foyer's identity header |
 | krm-foyer | OIDC client (Dex), sealed session cookie, CSRF, the `/k8s` proxy with the person's own token, the `/stream/v1` gateway with shared watches, the identity check for `/public/` | No coffee or voting semantics |
 | krm-stream | Watch-to-SSE protocol, snapshots, browser store, drafts/conflicts and patch generation (npm `@configbutler/krm-stream` 0.10.0) | No application credentials, login UI or Git commit workflow |
 | Room Pass | Room lifecycle, rotating codes, browser enrollment, stable participant identity, bound handoff to Dex | No application grants or token signing; no Voter dependency |
@@ -289,7 +289,9 @@ the menu needs the operator's live grant (patch and update on coffeeconfigs).
 
 Voter's ServiceAccount may get `coffeeconfigs/demo-coffee` for storefront prices,
 get/list/watch quizsessions, list/watch quizsubmissions, and get/patch
-`quizsessions/status` for the tally. Nothing else. Any signed-in person can see the
+`quizsessions/status` for the tally; and list/watch seats and commitrequests and
+patch `seats/status`, for the seat reconciler, which copies a seat's last
+committed why onto `status.lastCommit` (`voter/seat_reconciler.go`). Nothing else. Any signed-in person can see the
 storefront now, since Voter reads the menu as itself.
 
 ## Live streams

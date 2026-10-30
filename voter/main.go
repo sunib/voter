@@ -23,6 +23,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -88,6 +89,16 @@ func main() {
 	// may not read them.
 	if !cfg.ShopOnly {
 		go newQuizReconciler(serviceAccount, deps.defaultNS).Run(context.Background())
+	}
+	// A seat's last why, from its committed CommitRequest onto its status
+	// (seat_reconciler.go). Only with a seats GitTarget: without one there are
+	// no requests to read, and perhaps no CommitRequest type to list either.
+	if target := strings.TrimSpace(cfg.ConfigButlerSeatGitTargetName); !cfg.ShopOnly && target != "" {
+		requestNS := strings.TrimSpace(cfg.ConfigButlerCommitRequestNamespace)
+		if requestNS == "" {
+			requestNS = deps.defaultNS
+		}
+		go newSeatReconciler(serviceAccount, deps.defaultNS, requestNS, target).Run(context.Background())
 	}
 
 	addr := net.JoinHostPort(cfg.Host, cfg.Port)
