@@ -60,7 +60,7 @@ export interface SeatingPlan {
   apiVersion?: string
   kind?: string
   metadata: { name?: string; uid?: string; resourceVersion?: string }
-  spec: { title?: string; rows: number; columns: number }
+  spec: { title?: string; rows: number; columns: number; aisles?: number[] }
 }
 
 export interface Seat {

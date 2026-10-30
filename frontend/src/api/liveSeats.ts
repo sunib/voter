@@ -22,20 +22,25 @@ export interface SeatCell {
   row: number
   column: number
   seat?: Seat
+  /** A walkway runs to its right: the plan's aisles name this column. */
+  aisleAfter: boolean
 }
 
 /** The plan as rows of cells, row 1 first, column 1 first. A seat outside the
- *  plan -- claimed before it shrank -- is not drawn. */
+ *  plan -- claimed before it shrank -- is not drawn, and neither is an aisle
+ *  past the last column. */
 export function seatGrid(
-  plan: Pick<SeatingPlan['spec'], 'rows' | 'columns'>,
+  plan: Pick<SeatingPlan['spec'], 'rows' | 'columns' | 'aisles'>,
   seats: Seat[],
 ): SeatCell[][] {
   const taken = new Map(seats.map((s) => [`${s.spec.row}-${s.spec.column}`, s]))
+  const aisles = new Set(plan.aisles ?? [])
   return Array.from({ length: plan.rows }, (_, r) =>
     Array.from({ length: plan.columns }, (_, c) => ({
       row: r + 1,
       column: c + 1,
       seat: taken.get(`${r + 1}-${c + 1}`),
+      aisleAfter: c + 1 < plan.columns && aisles.has(c + 1),
     })),
   )
 }

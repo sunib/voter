@@ -1982,6 +1982,8 @@ p {
   /* Small enough that twelve or so columns fit a phone; past that the map
    * scrolls inside itself. */
   --seat-size: minmax(1.15rem, 1fr);
+  --seat-aisle: 0.7rem;
+  --seat-number: 1.4rem;
 }
 
 /* The page never scrolls sideways; a wide room scrolls inside its map. */
@@ -1992,14 +1994,15 @@ p {
 
 .seat-map__grid {
   display: grid;
-  grid-template-columns: 1.4rem repeat(var(--seat-columns), var(--seat-size));
   gap: 0.2rem;
   align-items: center;
   min-width: min-content;
 }
 
 .seat-map__stage {
-  grid-column: 2 / -1;
+  /* Over the seats only; a corner fills each end, so no cell shifts. */
+  grid-row: 1;
+  grid-column: 2 / -2;
   padding: 0.3rem;
   border-radius: 8px 8px 18px 18px;
   background: rgb(var(--ink) / 0.85);
@@ -2009,6 +2012,14 @@ p {
   letter-spacing: 0.3em;
   text-transform: uppercase;
   margin-bottom: 0.3rem;
+}
+
+/* A walkway: not a seat, and never a free one. */
+.seat-map__aisle {
+  align-self: stretch;
+  margin: -0.1rem 0;
+  border-radius: 3px;
+  background: rgb(var(--line) / 0.12);
 }
 
 .seat-map__number {

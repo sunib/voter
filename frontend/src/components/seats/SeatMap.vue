@@ -5,7 +5,11 @@
 //
 // Names are not drawn: a seat is its colour and emoji. Whose it is shows in an
 // accessible label, never on the map itself.
-import { computed } from 'vue'
+//
+// A hall wider than the phone scrolls inside the map, and opens on its middle:
+// both blocks show a little, so it is plain there is more on either side. Row
+// numbers stand on both edges, so the far block still says which row it is.
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 import { seatGrid, type SeatCell } from '../../api/liveSeats'
 import type { Seat, SeatingPlan } from '../../api/seats'
@@ -34,8 +38,33 @@ const emit = defineEmits<{ select: [row: number, column: number] }>()
 
 const grid = computed(() => seatGrid(props.plan.spec, props.seats))
 
-const columnNumbers = computed(() =>
-  Array.from({ length: props.plan.spec.columns }, (_, i) => i + 1),
+/** The header: each column's number, and whether an aisle follows it. */
+const header = computed(() => grid.value[0] ?? [])
+
+/** One track per seat, a narrower one per aisle, a row number either side. */
+const tracks = computed(() =>
+  [
+    'var(--seat-number)',
+    ...header.value.flatMap((cell) =>
+      cell.aisleAfter
+        ? ['var(--seat-size)', 'var(--seat-aisle)']
+        : ['var(--seat-size)'],
+    ),
+    'var(--seat-number)',
+  ].join(' '),
+)
+
+const scroller = ref<HTMLElement>()
+
+async function centre() {
+  await nextTick()
+  const el = scroller.value
+  if (el) el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2
+}
+onMounted(centre)
+watch(
+  () => [props.plan.spec.columns, props.plan.spec.aisles?.join(',')],
+  centre,
 )
 
 function isSelected(cell: SeatCell): boolean {
@@ -54,7 +83,8 @@ function canPick(cell: SeatCell): boolean {
 
 /** What the seat looks like: its owner's choice, or the one being made. */
 function look(cell: SeatCell): { color: string; emoji: string } | undefined {
-  if (cell.seat) return { color: cell.seat.spec.color, emoji: cell.seat.spec.emoji }
+  if (cell.seat)
+    return { color: cell.seat.spec.color, emoji: cell.seat.spec.emoji }
   if (isSelected(cell) && props.preview) return props.preview
   return undefined
 }
@@ -70,42 +100,55 @@ function label(cell: SeatCell): string {
 
 <template>
   <div class="seat-map">
-    <div class="seat-map__scroll">
-      <div
-        class="seat-map__grid"
-        :style="{ '--seat-columns': plan.spec.columns }"
-      >
+    <div ref="scroller" class="seat-map__scroll">
+      <div class="seat-map__grid" :style="{ gridTemplateColumns: tracks }">
+        <span class="seat-map__corner" aria-hidden="true" />
         <div class="seat-map__stage" aria-hidden="true">Stage</div>
         <span class="seat-map__corner" aria-hidden="true" />
-        <span
-          v-for="column in columnNumbers"
-          :key="`c${column}`"
-          class="seat-map__number"
-          aria-hidden="true"
-          >{{ column }}</span
-        >
-        <template v-for="cells in grid" :key="`r${cells[0]?.row}`">
-          <span class="seat-map__number seat-map__number--row" aria-hidden="true">{{
-            cells[0]?.row
+        <span class="seat-map__corner" aria-hidden="true" />
+        <template v-for="cell in header" :key="`c${cell.column}`">
+          <span class="seat-map__number" aria-hidden="true">{{
+            cell.column
           }}</span>
-          <component
-            :is="canPick(cell) ? 'button' : 'span'"
-            v-for="cell in cells"
-            :key="`${cell.row}-${cell.column}`"
-            :type="canPick(cell) ? 'button' : undefined"
-            class="seat-cell"
-            :class="{
-              'seat-cell--taken': cell.seat !== undefined,
-              'seat-cell--mine': isMine(cell),
-              'seat-cell--selected': isSelected(cell),
-              'seat-cell--free': cell.seat === undefined && !isSelected(cell),
-            }"
-            :style="look(cell) ? { '--seat-color': look(cell)?.color } : undefined"
-            :aria-label="label(cell)"
-            :aria-pressed="canPick(cell) ? isSelected(cell) : undefined"
-            :role="canPick(cell) ? undefined : 'img'"
-            @click="canPick(cell) && emit('select', cell.row, cell.column)"
-            >{{ look(cell)?.emoji ?? '' }}</component
+          <span v-if="cell.aisleAfter" aria-hidden="true" />
+        </template>
+        <span class="seat-map__corner" aria-hidden="true" />
+        <template v-for="cells in grid" :key="`r${cells[0]?.row}`">
+          <span
+            class="seat-map__number seat-map__number--row"
+            aria-hidden="true"
+            >{{ cells[0]?.row }}</span
+          >
+          <template v-for="cell in cells" :key="`${cell.row}-${cell.column}`">
+            <component
+              :is="canPick(cell) ? 'button' : 'span'"
+              :type="canPick(cell) ? 'button' : undefined"
+              class="seat-cell"
+              :class="{
+                'seat-cell--taken': cell.seat !== undefined,
+                'seat-cell--mine': isMine(cell),
+                'seat-cell--selected': isSelected(cell),
+                'seat-cell--free': cell.seat === undefined && !isSelected(cell),
+              }"
+              :style="
+                look(cell) ? { '--seat-color': look(cell)?.color } : undefined
+              "
+              :aria-label="label(cell)"
+              :aria-pressed="canPick(cell) ? isSelected(cell) : undefined"
+              :role="canPick(cell) ? undefined : 'img'"
+              @click="canPick(cell) && emit('select', cell.row, cell.column)"
+              >{{ look(cell)?.emoji ?? '' }}</component
+            >
+            <span
+              v-if="cell.aisleAfter"
+              class="seat-map__aisle"
+              aria-hidden="true"
+            />
+          </template>
+          <span
+            class="seat-map__number seat-map__number--row"
+            aria-hidden="true"
+            >{{ cells[0]?.row }}</span
           >
         </template>
       </div>

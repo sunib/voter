@@ -76,3 +76,18 @@ spec:
                   description: >-
                     How many seats in each row, counted from the left as seen
                     from the audience, facing the stage.
+                aisles:
+                  type: array
+                  maxItems: 10
+                  # A set: the map draws one walkway per number.
+                  x-kubernetes-list-type: set
+                  items:
+                    type: integer
+                    minimum: 1
+                  description: >-
+                    Where the walkways run: after these columns. A hall of two
+                    blocks of 8 is columns 16, aisles [8]. Only drawn; seats
+                    keep counting 1 to columns across them. Optional.
+              x-kubernetes-validations:
+                - rule: "!has(self.aisles) || self.aisles.all(a, a < self.columns)"
+                  message: "An aisle runs between two columns: each must be below columns."
