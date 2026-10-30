@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.7.0](https://github.com/sunib/voter/compare/v2.6.0...v2.7.0) (2026-10-30)
+
+
+### Features
+
+* open and close seats live from /room ([#48](https://github.com/sunib/voter/issues/48)) ([497277f](https://github.com/sunib/voter/commit/497277f90a3c7c0f7640dba525f1ffdc85972302))
+
 ## [2.6.0](https://github.com/sunib/voter/compare/v2.5.0...v2.6.0) (2026-10-29)
 
 
