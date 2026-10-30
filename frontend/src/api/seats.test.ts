@@ -92,6 +92,15 @@ describe('seatGrid', () => {
     expect(grid[0]?.[0]).toMatchObject({ row: 1, column: 1, seat: undefined })
     expect(grid[1]?.[2]?.seat).toBe(inside)
     expect(grid.flat().filter((cell) => cell.seat)).toHaveLength(1)
+    expect(grid.flat().some((cell) => cell.aisleAfter)).toBe(false)
+  })
+
+  it('runs an aisle after the columns the plan names, and none past the edge', () => {
+    const grid = seatGrid({ rows: 2, columns: 16, aisles: [8, 16] }, [])
+    for (const cells of grid) {
+      expect(cells).toHaveLength(16)
+      expect(cells.filter((c) => c.aisleAfter).map((c) => c.column)).toEqual([8])
+    }
   })
 })
 

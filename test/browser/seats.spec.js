@@ -11,10 +11,10 @@ const SHOTS = process.env.SEAT_SHOTS;
 
 // The fixture carries no SeatingPlan (test/e2e/voter.yaml says why), so this
 // spec makes the one voter-seat-in-plan's binding names, and removes it.
-const plan = (rows, columns) => JSON.stringify({
+const plan = (rows, columns, aisles = []) => JSON.stringify({
   apiVersion: 'examples.configbutler.ai/v1alpha1', kind: 'SeatingPlan',
   metadata: { name: 'mission2', namespace: 'voter' },
-  spec: { title: 'Mission 2', rows, columns },
+  spec: { title: 'Mission 2', rows, columns, aisles },
 });
 
 test('a participant takes a seat once, with a why, and changes its look with another', async ({ browser }) => {
@@ -120,10 +120,17 @@ test('a participant takes a seat once, with a why, and changes its look with ano
     await expect(seat(bob, 'Row 3, seat 7, taken')).toHaveText('🐙');
     if (SHOTS) await alice.screenshot({ path: `${SHOTS}/mine.png`, fullPage: true });
 
-    // The room grows in "Git": both phones redraw.
-    kube('patch', 'seatingplan', 'mission2', '--type=merge', '-p', '{"spec":{"rows":10,"columns":14}}');
-    await expect(seat(bob, 'Row 10, seat 14, free')).toBeVisible();
-    await expect(seat(alice, 'Row 10, seat 14, free')).toBeVisible();
+    // The room grows in "Git" to Mission 2's two blocks of 8: both phones
+    // redraw, with a walkway between the blocks.
+    kube('patch', 'seatingplan', 'mission2', '--type=merge', '-p', '{"spec":{"rows":10,"columns":16,"aisles":[8]}}');
+    await expect(seat(bob, 'Row 10, seat 16, free')).toBeAttached();
+    await expect(seat(alice, 'Row 10, seat 16, free')).toBeAttached();
+    await expect(bob.locator('.seat-map__aisle')).toHaveCount(10);
+    // Wider than the phone: the map scrolls, the page does not.
+    expect(await bob.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await seat(bob, 'Row 10, seat 16, free').scrollIntoViewIfNeeded();
+    await expect(seat(bob, 'Row 10, seat 16, free')).toBeInViewport();
+    if (SHOTS) await bob.screenshot({ path: `${SHOTS}/hall.png`, fullPage: true });
 
     // Offered once: Bob may go to the quizzes without a seat, and Alice, with
     // one, is never sent back.
