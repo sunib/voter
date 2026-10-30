@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.9.0](https://github.com/sunib/voter/compare/v2.8.1...v2.9.0) (2026-10-30)
+
+
+### Features
+
+* a seating plan can have aisles ([#54](https://github.com/sunib/voter/issues/54)) ([20f3dbf](https://github.com/sunib/voter/commit/20f3dbfe68b22e205b9c574ff27aee37e886806e))
+
 ## [2.8.1](https://github.com/sunib/voter/compare/v2.8.0...v2.8.1) (2026-10-30)
 
 
