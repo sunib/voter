@@ -110,6 +110,16 @@ Two consequences worth stating plainly:
 - While bound, any participant may `patch` the CoffeeConfig. They still cannot
   `create` or `delete` it: the object belongs to GitOps and they only amend it.
 
+**Seats work the same way, with two switches.** Taking a seat (`create`) and
+editing it (`patch`) are the Roles `voter-audience-seat-claim` and
+`voter-audience-seat-edit`, each bound live from `/room` to the audience group
+under a binding of its own name. Two, so the map can close to newcomers without
+freezing the people already on it. Unlike the coffee editor, the seat pages do
+not show the refusal: they read the rules review, rest the button, and say
+quietly that it "isn't possible at the moment". Admission still holds that a
+seat is claimed in your own name and only your own changes. With no binding
+nobody sits, so a rebuilt namespace starts with seats closed.
+
 Every identity may ask what it holds. `selfsubjectrulesreviews` is granted to
 `system:authenticated` by the stock `system:basic-user` ClusterRole, so the
 browser can POST a SelfSubjectRulesReview through `/k8s` for any participant —

@@ -42,10 +42,12 @@ An object created by hand survives until something rebuilds the namespace and
 then vanishes with no record it ever existed. Two CRDs and a GitTarget already
 had to be adopted back into Git after exactly that.
 
-The one deliberate exception is the `voter-audience-coffee-admin` RoleBinding,
-which the app creates and deletes at runtime from the operator page. It is
-documented as absent from Git in `participant-rbac.yaml`, and Flux would fight
-the demo if it were added.
+The deliberate exceptions are the RoleBindings the operator page creates and
+deletes at runtime from `/room`: `voter-audience-coffee-admin` (and its
+`-person`), `voter-audience-ballot-<group>`, `voter-audience-seat-claim` and
+`voter-audience-seat-edit`. Their Roles are in Git; the bindings are documented
+as absent from Git in `participant-rbac.yaml`, and Flux would fight the demo if
+they were added.
 
 ## Releases are cut from commit messages
 

@@ -164,3 +164,97 @@ test('a participant takes a seat once, with a why, and changes its look with ano
     kube('delete', 'seatingplan', 'mission2', '--ignore-not-found');
   }
 });
+
+// The two seat switches on /room: each a RoleBinding to its own Role, so the
+// map can close to newcomers and freeze the seated separately. The fixture
+// starts with both bound; this takes them away and puts them back.
+const seatBinding = (role) => JSON.stringify({
+  apiVersion: 'rbac.authorization.k8s.io/v1', kind: 'RoleBinding',
+  metadata: { name: role, namespace: 'voter' },
+  subjects: [{ kind: 'Group', name: 'demo:voter-audience', apiGroup: 'rbac.authorization.k8s.io' }],
+  roleRef: { kind: 'Role', name: role, apiGroup: 'rbac.authorization.k8s.io' },
+});
+
+test('the operator closes and freezes the seats, and every phone rests its button', async ({ browser }) => {
+  const run = `seat-lock-${Date.now()}`;
+  const contexts = [];
+  kube('apply', '-f', '-', { input: plan(8, 12) });
+  const bound = (role) => kube('get', 'rolebinding', role, '--ignore-not-found', '-o', 'name').trim() !== '';
+
+  async function join(label) {
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    contexts.push(context);
+    const page = await context.newPage();
+    page.on('pageerror', error => { throw error; });
+    await page.goto(`${APP}/`);
+    await page.getByLabel('Room code').fill(JSON.parse(kube('get', 'room', 'demo', '-o', 'json')).status.joinCode.code);
+    await page.getByLabel('Display name').fill(`${run}-${label}`);
+    await page.getByRole('radio', { name: 'Vue' }).check();
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    return page;
+  }
+  const seat = (page, label) => page.getByLabel(label, { exact: true });
+
+  try {
+    const alice = await join('alice');
+    await alice.waitForURL(`${APP}/seat`);
+    await seat(alice, 'Row 2, seat 2, free').click();
+    await alice.getByLabel('Why this seat, this colour and this emoji?').fill('Close to the front');
+    await alice.getByRole('button', { name: 'Claim', exact: true }).click();
+    await alice.waitForURL(`${APP}/coffee`);
+    await alice.goto(`${APP}/seat/mine`);
+    await expect(alice.getByRole('heading', { name: 'Row 2, seat 2' })).toBeVisible();
+
+    const operatorContext = await browser.newContext({ ignoreHTTPSErrors: true });
+    contexts.push(operatorContext);
+    const operator = await operatorContext.newPage();
+    operator.on('pageerror', error => { throw error; });
+    await operator.goto(`${APP}/login?next=%2Froom&connector=github`);
+    await operator.waitForURL(`${APP}/room`);
+    const claim = operator.getByRole('checkbox', { name: 'Let the room take a seat' });
+    const edit = operator.getByRole('checkbox', { name: 'Let the room edit their seat' });
+    await expect(claim).toBeChecked();
+    await expect(edit).toBeChecked();
+    await expect(edit).toBeEnabled();
+
+    // Frozen: Alice's Change rests, with one quiet line and nothing about who
+    // decided. The map is still hers to look at.
+    const change = alice.getByRole('button', { name: 'Change', exact: true });
+    await expect(change).toBeEnabled();
+    await edit.uncheck();
+    await expect.poll(() => bound('voter-audience-seat-edit')).toBe(false);
+    await expect(alice.getByText("Editing your seat isn't possible at the moment.")).toBeVisible();
+    await expect(change).toBeDisabled();
+    await expect(seat(alice, 'Row 2, seat 3, free')).toBeVisible();
+
+    // Closed: a newcomer sees the map, and Claim rests.
+    await claim.uncheck();
+    await expect.poll(() => bound('voter-audience-seat-claim')).toBe(false);
+    await expect(operator.getByTestId('seat-switches').getByText('locked', { exact: true })).toBeVisible();
+    const bob = await join('bob');
+    await bob.waitForURL(`${APP}/seat`);
+    await expect(bob.getByText("Taking a seat isn't possible at the moment.")).toBeVisible();
+    const claimButton = bob.getByRole('button', { name: 'Claim', exact: true });
+    await expect(claimButton).toBeDisabled();
+    await seat(bob, 'Row 4, seat 4, free').click();
+    await bob.getByLabel('Why this seat, this colour and this emoji?').fill('Middle of the room');
+
+    // Open again: both buttons wake without a reload, and the claim lands.
+    await claim.check();
+    await edit.check();
+    await expect.poll(() => bound('voter-audience-seat-claim') && bound('voter-audience-seat-edit')).toBe(true);
+    const claimBinding = JSON.parse(kube('get', 'rolebinding', 'voter-audience-seat-claim', '-o', 'json'));
+    expect(claimBinding.subjects).toEqual([{ kind: 'Group', apiGroup: 'rbac.authorization.k8s.io', name: 'demo:voter-audience' }]);
+    expect(claimBinding.metadata.labels['voter.configbutler.ai/grant']).toBe('seat-claim');
+    await expect(change).toBeEnabled();
+    await expect(bob.getByText("Taking a seat isn't possible at the moment.")).toHaveCount(0);
+    await claimButton.click();
+    await bob.waitForURL(`${APP}/coffee`);
+  } finally {
+    for (const context of contexts) await context.close();
+    kube('apply', '-f', '-', { input: seatBinding('voter-audience-seat-claim') });
+    kube('apply', '-f', '-', { input: seatBinding('voter-audience-seat-edit') });
+    kube('delete', 'seats', '--all', '--ignore-not-found');
+    kube('delete', 'seatingplan', 'mission2', '--ignore-not-found');
+  }
+});

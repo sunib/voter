@@ -17,6 +17,8 @@ export const TEST_CONFIG: AppConfig = {
   commitLeadMillis: 0,
   audienceCoffeeAdminRole: 'voter-audience-coffee-admin',
   audienceBallotRole: 'voter-audience-ballot',
+  audienceSeatClaimRole: 'voter-audience-seat-claim',
+  audienceSeatEditRole: 'voter-audience-seat-edit',
   shopOnly: false,
 }
 
