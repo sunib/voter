@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { Change } from '@configbutler/krm-stream'
-import { leafChanges } from './fieldChanges'
+import { leafChanges, revertTarget, serverPathFor } from './fieldChanges'
+import { coffeeConfigKeyedLists as keyed } from './liveCoffeeConfig'
 
 const menu = (price: number, name = 'Espresso') => [
   { sku: 'a', name, priceCents: price, enabled: true },
@@ -77,11 +78,9 @@ describe('leafChanges', () => {
     ).toEqual([['spec.products.2', 'add']])
   })
 
-  // Honest rather than flattering: a JSON list has no identity but position, so
-  // removing the first of two products really does rewrite index 0 and drop
-  // index 1. Pretending otherwise would mean claiming a patch this screen is
-  // not sending.
-  it('reports the shift when a product is removed', () => {
+  // Without a schema a JSON list has no identity but position, so removing the
+  // first of two products rewrites index 0 and drops index 1.
+  it('reports the shift when a product is removed from a plain list', () => {
     expect(
       leafChanges([{ ...priceEdit, old: menu(300), new: [menu(300)[1]] }]).map(
         (c) => [c.path.join('.'), c.kind],
@@ -118,5 +117,99 @@ describe('leafChanges', () => {
     expect(
       leafChanges([{ ...priceEdit, old: menu(300), new: menu(300) }]),
     ).toEqual([])
+  })
+})
+
+// Products are a keyed list (sku), which is how the store merges them; the
+// screen reopens them the same way.
+describe('leafChanges on a keyed list', () => {
+  const three = [
+    ...menu(300),
+    { sku: 'c', name: 'Mocha', priceCents: 400, enabled: true },
+  ]
+  const spec = (products: unknown[]) => ({ spec: { products } })
+
+  // The reported symptom: Remove on the first product marked every product
+  // after it as edited.
+  it('reports a removed product as one removal, named by its sku', () => {
+    expect(
+      leafChanges(
+        [{ ...priceEdit, old: three, new: three.slice(1) }],
+        keyed,
+      ).map((c) => [c.path.join('.'), c.kind]),
+    ).toEqual([['spec.products.sku=a', 'delete']])
+  })
+
+  it('reports an edit after a removal at the row the draft renders', () => {
+    const after = [three[1], { ...three[2], priceCents: 450 }]
+    expect(
+      leafChanges([{ ...priceEdit, old: three, new: after }], keyed).map(
+        (c) => [c.path.join('.'), c.old, c.new],
+      ),
+    ).toEqual([
+      ['spec.products.1.priceCents', 400, 450],
+      ['spec.products.sku=a', three[0], undefined],
+    ])
+  })
+
+  // Typing a new SKU changes the key under the cursor. That is an edit of the
+  // sku, not a product removed and another added.
+  it('reports a renamed sku as an edit of the sku', () => {
+    const after = [{ ...three[0], sku: 'a2' }, three[1], three[2]]
+    expect(
+      leafChanges([{ ...priceEdit, old: three, new: after }], keyed).map((c) =>
+        c.path.join('.'),
+      ),
+    ).toEqual(['spec.products.0.sku'])
+  })
+
+  it('finds the server value of a field by sku, not by row', () => {
+    const draft = spec(three.slice(1))
+    expect(
+      serverPathFor(
+        spec(three),
+        draft,
+        ['spec', 'products', 0, 'priceCents'],
+        keyed,
+      ),
+    ).toEqual(['spec', 'products', 1, 'priceCents'])
+    expect(
+      serverPathFor(
+        spec(menu(300)),
+        spec(three),
+        ['spec', 'products', 2, 'name'],
+        keyed,
+      ),
+    ).toBeUndefined()
+  })
+
+  it('reverts a field to the same product on the server', () => {
+    const server = spec(three)
+    const draft = spec([three[1], { ...three[2], priceCents: 450 }])
+    expect(
+      revertTarget(server, draft, ['spec', 'products', 1, 'priceCents'], keyed),
+    ).toEqual({ target: ['spec', 'products', 1, 'priceCents'], value: 400 })
+  })
+
+  it('puts a removed product back where it was', () => {
+    expect(
+      revertTarget(
+        spec(three),
+        spec([three[0], three[2]]),
+        ['spec', 'products', 'sku=b'],
+        keyed,
+      ),
+    ).toEqual({ target: ['spec', 'products'], value: three })
+  })
+
+  it('takes an added product out again', () => {
+    expect(
+      revertTarget(
+        spec(menu(300)),
+        spec(three),
+        ['spec', 'products', 2],
+        keyed,
+      ),
+    ).toEqual({ target: ['spec', 'products'], value: menu(300) })
   })
 })
