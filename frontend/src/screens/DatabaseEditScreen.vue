@@ -102,12 +102,13 @@ const saveButtonLabel = computed(() =>
         : 'No changes to save',
 )
 
+// Empty while all is well: a connected stream is the normal case and not worth
+// a pane. A lost stream's error is the page's and is said here; a save's error
+// can only happen while live, and is said by the save button.
 const connectionMessage = computed(() => {
-  if (loadError.value) return loadError.value
+  if (loadError.value && state.value.status !== 'live') return loadError.value
   if (state.value.status === 'live')
-    return draft.value
-      ? 'Live updates connected.'
-      : 'This request was removed. Go back to the list.'
+    return draft.value ? '' : 'This request was removed. Go back to the list.'
   if (state.value.status === 'terminal')
     return 'Live access ended. Sign in again or check your permissions.'
   if (state.value.status === 'exhausted')
@@ -228,8 +229,16 @@ onBeforeUnmount(() => {
       highlight="databases"
     />
 
-    <section class="panel" role="status">
-      <p>{{ connectionMessage }}</p>
+    <section
+      v-if="
+        connectionMessage ||
+        notice ||
+        (recoveryDraft && (!draft || state.status === 'terminal'))
+      "
+      class="panel"
+      role="status"
+    >
+      <p v-if="connectionMessage">{{ connectionMessage }}</p>
       <p v-if="notice">{{ notice }}</p>
       <a
         v-if="state.status === 'terminal'"
@@ -275,36 +284,6 @@ onBeforeUnmount(() => {
     </section>
 
     <template v-else-if="draft">
-      <section v-if="loadError" class="panel panel--danger" role="alert">
-        <h2>Save failed</h2>
-        <p>{{ loadError }}</p>
-      </section>
-      <!-- A commit that did NOT happen is news and keeps the panel. A commit
-           that did is a footnote, and reads as one: see .commit-trail. -->
-      <section
-        v-if="commitNotice || commitState === 'failed'"
-        class="panel panel--warning"
-      >
-        <h2>Git commit status</h2>
-        <p>{{ commitNotice || commitDetail || failedCommitCopy }}</p>
-      </section>
-      <p v-else-if="commitState === 'pending'" class="commit-trail">
-        Committing to Git…
-      </p>
-      <p v-else-if="commitState === 'committed'" class="commit-trail">
-        Committed to Git<template v-if="commitSha">
-          ·
-          <a
-            v-if="commitLink"
-            class="text-link"
-            :href="commitLink"
-            target="_blank"
-            rel="noopener noreferrer"
-            >{{ shortSha(commitSha) }}</a
-          ><template v-else>{{ shortSha(commitSha) }}</template>
-        </template>
-      </p>
-
       <section class="admin-grid">
         <div class="database-form">
           <section v-if="recordedIntent" class="panel">
@@ -417,6 +396,16 @@ onBeforeUnmount(() => {
                     placeholder="A short note so the next person understands what changed and why."
                   />
                 </label>
+                <!-- Next to the button that caused it: a refused save shown at
+                     the top of the page went unseen below a long form. -->
+                <div
+                  v-if="loadError && state.status === 'live'"
+                  class="error-copy"
+                  role="alert"
+                >
+                  <strong>Save failed</strong>
+                  <p>{{ loadError }}</p>
+                </div>
               </div>
 
               <div class="save-summary__footer">
@@ -435,6 +424,31 @@ onBeforeUnmount(() => {
                   Refresh from cluster
                 </button>
               </div>
+              <!-- A commit that did NOT happen is news and keeps the panel. A commit
+                   that did is a footnote, and reads as one: see .commit-trail. -->
+              <section
+                v-if="commitNotice || commitState === 'failed'"
+                class="panel panel--warning"
+              >
+                <h3>Git commit status</h3>
+                <p>{{ commitNotice || commitDetail || failedCommitCopy }}</p>
+              </section>
+              <p v-else-if="commitState === 'pending'" class="commit-trail">
+                Committing to Git…
+              </p>
+              <p v-else-if="commitState === 'committed'" class="commit-trail">
+                Committed to Git<template v-if="commitSha">
+                  ·
+                  <a
+                    v-if="commitLink"
+                    class="text-link"
+                    :href="commitLink"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    >{{ shortSha(commitSha) }}</a
+                  ><template v-else>{{ shortSha(commitSha) }}</template>
+                </template>
+              </p>
             </section>
           </article>
         </div>

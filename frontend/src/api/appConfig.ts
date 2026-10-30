@@ -37,6 +37,10 @@ export interface AppConfig {
   /** The Role the operator binds a group to so it may vote. Each binding is
    *  named after it and the group (authz.ts, ballotBindingName). */
   audienceBallotRole: string
+  /** The Roles the operator binds the audience to so it may take a seat
+   *  (create) and edit theirs (patch). Each names its binding too. */
+  audienceSeatClaimRole: string
+  audienceSeatEditRole: string
   /** The coffee bar alone: no editor, rounds or operator pages (shopOnly.ts). */
   shopOnly: boolean
 }

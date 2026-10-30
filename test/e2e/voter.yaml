@@ -111,11 +111,12 @@ rules:
   - apiGroups: [platform.configbutler.ai]
     resources: [databases]
     verbs: [get, list, watch, create, patch, update]
-  # As the cluster's participant-rbac.yaml: claim a seat and recolour it, never
-  # delete it; read the seating plan, never change it.
+  # As the cluster's participant-rbac.yaml: read the seats, never delete one;
+  # claiming and recolouring are the seat Roles below. Read the seating plan,
+  # never change it.
   - apiGroups: [examples.configbutler.ai]
     resources: [seats]
-    verbs: [get, list, watch, create, patch]
+    verbs: [get, list, watch]
   - apiGroups: [examples.configbutler.ai]
     resources: [seatingplans]
     verbs: [get, list, watch]
@@ -164,6 +165,59 @@ subjects:
 roleRef:
   kind: Role
   name: voter-audience-ballot
+  apiGroup: rbac.authorization.k8s.io
+---
+# Taking a seat and changing one, as in the cluster's participant-rbac.yaml: two
+# Roles the operator page binds to the room, each binding named after its Role.
+# Unlike the cluster, the fixture starts with both bound, which is what every
+# spec but the one about the switches expects; that spec takes them away and
+# puts them back.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: voter-audience-seat-claim
+  namespace: voter
+rules:
+  - apiGroups: [examples.configbutler.ai]
+    resources: [seats]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: voter-audience-seat-edit
+  namespace: voter
+rules:
+  - apiGroups: [examples.configbutler.ai]
+    resources: [seats]
+    verbs: [patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: voter-audience-seat-claim
+  namespace: voter
+subjects:
+  - kind: Group
+    name: demo:voter-audience
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: voter-audience-seat-claim
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: voter-audience-seat-edit
+  namespace: voter
+subjects:
+  - kind: Group
+    name: demo:voter-audience
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: voter-audience-seat-edit
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: rbac.authorization.k8s.io/v1

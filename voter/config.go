@@ -52,6 +52,14 @@ type config struct {
 	// group.
 	AudienceBallotRole string `envconfig:"AUDIENCE_BALLOT_ROLE" default:"voter-audience-ballot"`
 
+	// AudienceSeatClaimRole and AudienceSeatEditRole name the Roles that let
+	// the audience take a seat (create) and recolour it (patch), and the
+	// RoleBindings the operator page creates to hand each out. Two switches,
+	// so the operator can close the map to newcomers and freeze it separately.
+	// Like the coffee grant: Roles in Git, bindings made live, one name each.
+	AudienceSeatClaimRole string `envconfig:"AUDIENCE_SEAT_CLAIM_ROLE" default:"voter-audience-seat-claim"`
+	AudienceSeatEditRole  string `envconfig:"AUDIENCE_SEAT_EDIT_ROLE" default:"voter-audience-seat-edit"`
+
 	// ShopOnly turns this deployment into the coffee bar and nothing else: the
 	// production side of the demo, which Flux fills from Git and nobody edits.
 	// The page offers only the order screen, and there are no rounds to tally.

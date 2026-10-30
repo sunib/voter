@@ -238,6 +238,11 @@ export async function changeSeat(
 
 /** A failed claim or change in plain words. A refusal by admission is already
  *  the policy's own sentence (http.ts); the two that are not are named here. */
+/** What a seat page says while the operator has taking or changing a seat
+ *  switched off on /room, and what a refusal of either turns into. */
+export const SEAT_CLAIM_CLOSED = "Taking a seat isn't possible at the moment."
+export const SEAT_EDIT_CLOSED = "Editing your seat isn't possible at the moment."
+
 export function seatErrorMessage(error: unknown): string {
   const e = error as Partial<ApiError> & { message?: string }
   if (e?.status === 409 && e.code === 'AlreadyExists') {
@@ -250,6 +255,14 @@ export function seatErrorMessage(error: unknown): string {
   }
   // RBAC's refusal names a user, a verb and a resource; admission's is already
   // a sentence for a person, and passes through.
+  // Seats are two switches on /room, so the verb says which one is off. Said
+  // plainly: the room is not told who decides, yet.
+  if (e?.status === 403 && /cannot create resource "?seats/.test(e.message ?? '')) {
+    return SEAT_CLAIM_CLOSED
+  }
+  if (e?.status === 403 && /cannot patch resource "?seats/.test(e.message ?? '')) {
+    return SEAT_EDIT_CLOSED
+  }
   if (e?.status === 403 && /cannot \w+ resource/.test(e.message ?? '')) {
     return "You're not allowed to do that here."
   }
