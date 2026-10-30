@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.8.0](https://github.com/sunib/voter/compare/v2.7.0...v2.8.0) (2026-10-30)
+
+
+### Features
+
+* a seat's status carries its last why ([#50](https://github.com/sunib/voter/issues/50)) ([6d16ebe](https://github.com/sunib/voter/commit/6d16ebe943a9a472d5ad205522cd63d8322643ec))
+
 ## [2.7.0](https://github.com/sunib/voter/compare/v2.6.0...v2.7.0) (2026-10-30)
 
 
