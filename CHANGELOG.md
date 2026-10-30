@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.8.1](https://github.com/sunib/voter/compare/v2.8.0...v2.8.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* removing a product is one change, and the menu cannot be emptied ([#52](https://github.com/sunib/voter/issues/52)) ([38e3f83](https://github.com/sunib/voter/commit/38e3f83bfbf464ee1cc696c81b99056a02690fa5))
+
 ## [2.8.0](https://github.com/sunib/voter/compare/v2.7.0...v2.8.0) (2026-10-30)
 
 
