@@ -91,6 +91,10 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			"audienceCoffeeAdminRole": deps.cfg.AudienceCoffeeAdminRole,
 			// The Role the operator binds a group to, so it may vote.
 			"audienceBallotRole": deps.cfg.AudienceBallotRole,
+			// The Roles the operator binds the audience to, so it may take a
+			// seat and edit it. Each also names its binding.
+			"audienceSeatClaimRole": deps.cfg.AudienceSeatClaimRole,
+			"audienceSeatEditRole":  deps.cfg.AudienceSeatEditRole,
 			// The coffee bar alone, with no editor, rounds or operator pages.
 			"shopOnly": deps.cfg.ShopOnly,
 		})

@@ -54,6 +54,8 @@ func TestConfigEndpoint(t *testing.T) {
 		ConfigButlerCommitLeadMillis:  500,
 		AudienceCoffeeAdminRole:       "voter-audience-coffee-admin",
 		AudienceBallotRole:            "voter-audience-ballot",
+		AudienceSeatClaimRole:         "voter-audience-seat-claim",
+		AudienceSeatEditRole:          "voter-audience-seat-edit",
 	}})
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/config.json", nil))
@@ -80,6 +82,8 @@ func TestConfigEndpoint(t *testing.T) {
 		"commitLeadMillis":        float64(500),
 		"audienceCoffeeAdminRole": "voter-audience-coffee-admin",
 		"audienceBallotRole":      "voter-audience-ballot",
+		"audienceSeatClaimRole":   "voter-audience-seat-claim",
+		"audienceSeatEditRole":    "voter-audience-seat-edit",
 		"shopOnly":                false,
 	}
 	for k, v := range want {

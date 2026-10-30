@@ -26,6 +26,7 @@ import { useAuthorization } from '../api/useAuthorization'
 import { onGrantChange } from '../api/grantChanges'
 import PermissionRequirements from '../components/PermissionRequirements.vue'
 import BallotSwitches from '../components/room/BallotSwitches.vue'
+import SeatSwitches from '../components/room/SeatSwitches.vue'
 import PickSomeone from '../components/room/PickSomeone.vue'
 import { setRoundState } from '../api/quiz'
 import { currentSession, loginURL } from '../api/session'
@@ -415,6 +416,9 @@ function signInAsOperator() {
       </p>
       <PickSomeone />
     </section>
+
+    <!-- Who may take a seat, and edit theirs. Shown on the same terms. -->
+    <SeatSwitches v-if="operatorControls" />
 
     <!-- Who may cast a ballot. Shown on the same terms as the switch above. -->
     <BallotSwitches

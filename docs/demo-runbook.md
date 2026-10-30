@@ -146,6 +146,15 @@ purpose is what this one does.
       kubectl -n voter get rolebindings -o wide | grep -E 'voter-audience-(ballot|coffee-admin-person)'   # want nothing
       ```
 
+- [ ] Seats are open: tick both switches under **Seats** on `/room`. Their
+      bindings are not a Flux source (k8s-trail's `configs/rbac/` only records
+      them), so a rebuilt namespace starts with both off and every phone's
+      Claim button resting.
+
+      ```bash
+      kubectl -n voter get rolebinding voter-audience-seat-claim voter-audience-seat-edit   # want both
+      ```
+
 - [ ] Every participant joined after the door question existed: anyone who
       enrolled before it has no answer group. Clear rehearsal participants
       (`kubectl -n voter delete participants --all`) before the room opens.
@@ -484,6 +493,7 @@ The order feed needs no reset. Restarting the pod empties it.
 |---|---|
 | Nobody can join | `kubectl -n voter get rooms.room-pass.koudijs.dev demo -o yaml`, check `endsAt` and `enrollment` |
 | A phone says "This round isn't open to you. Yet." | Working as intended: flip their group (or Everyone) under **Who may vote** on `/room`. It opens within a second or two |
+| Nobody can claim or recolour a seat ("isn't possible at the moment") | Working as intended if you switched it off. Otherwise tick both under **Seats** on `/room`. Last resort: `kubectl -n voter create rolebinding voter-audience-seat-claim --role=voter-audience-seat-claim --group=demo:voter-audience` (and the same for `seat-edit`) |
 | Who-may-vote switches do nothing | `kubectl -n voter get role voter-audience-ballot`. Last resort: `kubectl -n voter create rolebinding voter-audience-ballot-voter-audience --role=voter-audience-ballot --group=demo:voter-audience` |
 | Join works, voting 403s with no card | Read the message. "This round is not open for voting." or "The round changed…" is admission, working; a reload fixes the second. Otherwise `kubectl -n voter get rolebinding voter-audience` |
 | The picked person still cannot save the menu | They joined in an earlier Room (new UID, new name). Pick again; `/room` shows the username it bound |

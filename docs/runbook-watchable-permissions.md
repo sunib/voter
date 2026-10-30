@@ -28,6 +28,8 @@ operator page creates or deletes. Today that is:
 | `voter-audience-coffee-admin` | `voter-audience-coffee-admin` | group `demo:voter-audience` | `/room`, coffee toggle |
 | `voter-audience-coffee-admin-person` | `voter-audience-coffee-admin` | one `demo:` user | `/room`, pick someone |
 | `voter-audience-ballot-<group>` | `voter-audience-ballot` | one answer group | `/room`, who may vote |
+| `voter-audience-seat-claim` | `voter-audience-seat-claim` | group `demo:voter-audience` | `/room`, seats: take one |
+| `voter-audience-seat-edit` | `voter-audience-seat-edit` | group `demo:voter-audience` | `/room`, seats: edit your seat |
 | `voter`, `room-pass`, `voter-audience` | same-named Roles | service accounts, audience group | Git (Flux) |
 
 So the browser can **watch the RoleBindings in `voter`** and ask the rules review

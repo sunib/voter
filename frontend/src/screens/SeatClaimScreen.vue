@@ -21,13 +21,23 @@ import {
   findMySeat,
   pickRandom,
   seatErrorMessage,
+  SEAT_CLAIM_CLOSED,
 } from '../api/seats'
 import { currentSession } from '../api/session'
 import { currentUsername } from '../api/whoami'
 import { markSeated } from '../seatOnboarding'
+import { missingPermissions, SEAT_CLAIM_REQUIREMENTS } from '../api/authz'
+import { useAuthorization } from '../api/useAuthorization'
 
 const router = useRouter()
 const { plan, seats, error: loadError, refresh } = useSeatMap()
+// The operator can close the map from /room. Unlike the coffee editor, this
+// page does not show the refusal: Claim rests and one quiet line says so,
+// because the seats are not where the room learns what is underneath.
+const { authz } = useAuthorization()
+const closed = computed(
+  () => missingPermissions(authz.value, SEAT_CLAIM_REQUIREMENTS).length > 0,
+)
 
 const selected = ref<{ row: number; column: number } | null>(null)
 const color = ref<string>(pickRandom(SEAT_COLORS).hex)
@@ -199,9 +209,12 @@ onMounted(async () => {
         />
 
         <p v-if="failure" role="alert" class="error-copy">{{ failure }}</p>
+        <p v-else-if="closed" class="seat-page__hint" role="status">
+          {{ SEAT_CLAIM_CLOSED }}
+        </p>
 
         <div class="seat-page__actions">
-          <button class="button" :disabled="busy" @click="claim">
+          <button class="button" :disabled="busy || closed" @click="claim">
             {{ busy ? 'Claiming…' : 'Claim' }}
           </button>
         </div>

@@ -217,3 +217,26 @@ Left for a hand clean-up (harmless; Helm does not remove them):
 kubectl delete crd clusterproviders.configbutler.ai
 kubectl -n gitops-reverser delete secret gitops-reverser-admission-server-cert
 ```
+
+## Follow-up: the CommitRequest goes first (voter 2.5.0)
+
+Found after the upgrade: a branch worker holds one open commit window at a
+time, and a write by another author finalizes it (`author-or-target-change`).
+Five of the six targets share branch `main`. A save that wrote first and sent
+its CommitRequest afterwards lost its message whenever another person's write
+landed in between. The request then ended `WindowMismatch`, and the edit
+committed under `chore(seats): 1 change`. With a room claiming seats at once,
+that would have been most claims.
+
+| Where | Commit | What |
+|---|---|---|
+| sunib/voter | `dbd0846`, released in 2.5.0 | every save sends its CommitRequest first (`window: {attach: CurrentOrNext, attachTimeout: 3s, maxDuration: 1s}`), waits `CONFIGBUTLER_COMMIT_LEAD_MS`, then writes. The live editors ask once per press of Save, not per 409 retry (a second request would be refused `SaveInProgress`). The commit trail shows `NoWindow`/`WindowMismatch`/`AuthorUnresolved` as a failure, not "Committed". `CONFIGBUTLER_CLOSE_DELAY_SECONDS` is gone |
+| external/k8s | `ce2c51f` | `app.yaml`: `CONFIGBUTLER_COMMIT_LEAD_MS: "500"` in place of the close delay |
+
+The lead is a fixed sleep, not a watch on the request's status. If seat commits
+still arrive with the default message, raise it in `app.yaml` (800–1000ms); no
+release is needed.
+
+Still to verify with two phones: simultaneous seat changes each keep their own
+why; simultaneous coffee saves (one 409 and an automatic retry) each keep their
+reason and show no `SaveInProgress`.

@@ -181,12 +181,35 @@ export interface AudienceGrant {
   group?: string
 }
 
-/** Whether the room may edit the coffee menu: does the RoleBinding exist.
+/** The room-wide switches on /room. Each is one Role in Git and one
+ *  RoleBinding of the same name, to the Room's audience group; `label` marks
+ *  the binding so the audit trail says which switch made it. */
+export interface AudienceSwitch {
+  role: string
+  label: string
+}
+
+export const coffeeAdminSwitch = (): AudienceSwitch => ({
+  role: appConfig().audienceCoffeeAdminRole,
+  label: 'coffee-admin',
+})
+export const seatClaimSwitch = (): AudienceSwitch => ({
+  role: appConfig().audienceSeatClaimRole,
+  label: 'seat-claim',
+})
+export const seatEditSwitch = (): AudienceSwitch => ({
+  role: appConfig().audienceSeatEditRole,
+  label: 'seat-edit',
+})
+
+/** Whether the room holds a switch's grant: does the RoleBinding exist.
  *  Reading it needs permission on rolebindings, which a participant does not
  *  have -- so a 403 here is the correct answer for a participant, and the
  *  caller treats it as "not an operator" rather than as a fault. */
-export async function getAudienceGrant(): Promise<AudienceGrant> {
-  const name = appConfig().audienceCoffeeAdminRole
+export async function getAudienceGrant(
+  which: AudienceSwitch = coffeeAdminSwitch(),
+): Promise<AudienceGrant> {
+  const name = which.role
   try {
     await getObject(ROLEBINDINGS, name)
     return { granted: true, name }
@@ -202,8 +225,9 @@ export async function getAudienceGrant(): Promise<AudienceGrant> {
  *  because the operator makes and unmakes it during the talk. */
 export async function setAudienceGrant(
   granted: boolean,
+  which: AudienceSwitch = coffeeAdminSwitch(),
 ): Promise<AudienceGrant> {
-  const name = appConfig().audienceCoffeeAdminRole
+  const name = which.role
   if (!granted) {
     try {
       await deleteObject(ROLEBINDINGS, name)
@@ -250,7 +274,7 @@ export async function setAudienceGrant(
         namespace: appConfig().namespace,
         labels: {
           'app.kubernetes.io/managed-by': 'voter',
-          'voter.configbutler.ai/grant': 'coffee-admin',
+          'voter.configbutler.ai/grant': which.label,
         },
         annotations: {
           'voter.configbutler.ai/description':
@@ -366,6 +390,26 @@ export const DATABASE_REQUIREMENTS: Requirement[] = [
   },
 ]
 
+/** What the seat pages use. Each verb is a switch on /room, so either can be
+ *  missing while the other holds: a closed map still lets the seated recolour,
+ *  and a frozen one still seats newcomers. */
+export const SEAT_CLAIM_REQUIREMENTS: Requirement[] = [
+  {
+    apiGroup: EXAMPLES,
+    resource: 'seats',
+    verb: 'create',
+    purpose: 'take a seat on the map',
+  },
+]
+export const SEAT_EDIT_REQUIREMENTS: Requirement[] = [
+  {
+    apiGroup: EXAMPLES,
+    resource: 'seats',
+    verb: 'patch',
+    purpose: "change your seat's colour and emoji",
+  },
+]
+
 /** What the operator page uses. The join code, the rounds, and the switch that
  *  widens what the audience may do — three separate grants, and an identity can
  *  hold some and not others. */
@@ -392,13 +436,14 @@ export const ROOM_REQUIREMENTS: Requirement[] = [
     apiGroup: RBAC,
     resource: 'rolebindings',
     verb: 'get',
-    purpose: 'see whether the audience may edit the coffee menu',
+    purpose:
+      'see whether the audience may edit the coffee menu and their seats',
   },
   {
     apiGroup: RBAC,
     resource: 'rolebindings',
     verb: 'create',
-    purpose: 'grant the audience the coffee menu, live',
+    purpose: 'grant the audience the coffee menu or their seats, live',
   },
   {
     apiGroup: RBAC,

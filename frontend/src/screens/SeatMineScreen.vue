@@ -14,13 +14,22 @@ import {
   checkWhy,
   findMySeat,
   seatErrorMessage,
+  SEAT_EDIT_CLOSED,
   type Seat,
 } from '../api/seats'
 import { currentUsername } from '../api/whoami'
+import { missingPermissions, SEAT_EDIT_REQUIREMENTS } from '../api/authz'
+import { useAuthorization } from '../api/useAuthorization'
 
 const route = useRoute()
 const router = useRouter()
 const { plan, seats, error: loadError } = useSeatMap()
+// The operator can freeze the seats from /room. As on the claim page, Change
+// rests and one quiet line says so, rather than showing the refusal.
+const { authz } = useAuthorization()
+const locked = computed(
+  () => missingPermissions(authz.value, SEAT_EDIT_REQUIREMENTS).length > 0,
+)
 
 // Read once to know which seat is yours; after that the stream keeps it
 // current, so a change made on another phone shows here too.
@@ -152,9 +161,12 @@ onMounted(async () => {
 
         <p v-if="failure" role="alert" class="error-copy">{{ failure }}</p>
         <p v-if="done" role="status" class="seat-page__done">{{ done }}</p>
+        <p v-else-if="locked && !failure" class="seat-page__hint" role="status">
+          {{ SEAT_EDIT_CLOSED }}
+        </p>
 
         <div class="seat-page__actions">
-          <button class="button" :disabled="busy" @click="change">
+          <button class="button" :disabled="busy || locked" @click="change">
             {{ busy ? 'Changing…' : 'Change' }}
           </button>
         </div>

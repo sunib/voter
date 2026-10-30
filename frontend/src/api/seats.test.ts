@@ -122,13 +122,18 @@ describe('seatErrorMessage', () => {
     expect(seatErrorMessage(err)).toMatch(/seating plan isn't set up yet/)
   })
 
-  it('turns an RBAC refusal into a sentence', () => {
+  // Taking and changing a seat are separate switches on /room, so the refusal
+  // says which one is off.
+  it.each([
+    ['create', "Taking a seat isn't possible at the moment."],
+    ['patch', "Editing your seat isn't possible at the moment."],
+    ['delete', "You're not allowed to do that here."],
+  ])('turns an RBAC refusal to %s into a sentence', (verb, sentence) => {
     const err = createApiError(403, {
       reason: 'Forbidden',
-      message:
-        'seats.examples.configbutler.ai "mission2-1-1" is forbidden: User "demo:x" cannot create resource "seats"',
+      message: `seats.examples.configbutler.ai "mission2-1-1" is forbidden: User "demo:x" cannot ${verb} resource "seats"`,
     })
-    expect(seatErrorMessage(err)).toBe("You're not allowed to do that here.")
+    expect(seatErrorMessage(err)).toBe(sentence)
   })
 })
 
