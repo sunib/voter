@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { get, isPrefix, type Path } from '@configbutler/krm-stream'
-import { leafChanges } from '../api/fieldChanges'
+import { leafChanges, revertTarget, serverPathFor } from '../api/fieldChanges'
 import { formatConflictValue, humanizePath } from '../adminFormatters'
 import { formatMoney, getVoucherUsage } from '../api/coffee'
-import { useLiveCoffeeConfig } from '../api/liveCoffeeConfig'
+import {
+  coffeeConfigKeyedLists,
+  useLiveCoffeeConfig,
+} from '../api/liveCoffeeConfig'
 import { appConfig } from '../api/appConfig'
 import { loginURL } from '../api/session'
 import { commitURL, shortSha, useCommitStatus } from '../api/commitStatus'
@@ -88,8 +91,11 @@ const currency = computed(() => draftConfig.value?.spec.currency ?? 'EUR')
 // that is what it will save. This screen counts and marks FIELDS, so it reopens
 // those containers first -- otherwise changing one price marks every field of
 // every product dirty and offers to "Save 1 Change" while the whole menu is
-// lit up. See api/fieldChanges.ts.
-const fieldChanges = computed(() => leafChanges(live.changes.value))
+// lit up. Products and vouchers are reopened by key, so removing one is one
+// change. See api/fieldChanges.ts.
+const fieldChanges = computed(() =>
+  leafChanges(live.changes.value, coffeeConfigKeyedLists),
+)
 const dirtyFieldCount = computed(() => fieldChanges.value.length)
 const conflictCount = computed(() => live.conflicts.value.length)
 const cleanDirtyCount = computed(() =>
@@ -130,13 +136,23 @@ const notWholeNumbers = computed(() => {
       value: product.priceCents,
     })),
     ...(spec?.vouchers ?? []).flatMap((voucher) => [
-      { label: `${voucher.code}: discount value`, value: voucher.discountValue },
+      {
+        label: `${voucher.code}: discount value`,
+        value: voucher.discountValue,
+      },
       { label: `${voucher.code}: maximum usage`, value: voucher.maximumUsage },
     ]),
   ].filter(
     (field) => field.value !== undefined && !Number.isInteger(field.value),
   )
 })
+// The CRD requires at least one product, and the API server's answer to an
+// empty menu -- 'spec.products in body should have at least 1 items' -- reads
+// like a bug in the page. Removing the last one while tidying up is easy, so
+// the page says it first and holds the save.
+const noProducts = computed(
+  () => !!draftConfig.value && !draftConfig.value.spec.products?.length,
+)
 // Empty while all is well: a connected stream is the normal case and not worth
 // a pane. A lost stream's error is the page's and is said here; a save's error
 // can only happen while live, and is said by the save button.
@@ -185,8 +201,21 @@ onMounted(refreshVoucherUsage)
 function updateField(path: string, value: unknown) {
   live.setValue(fieldPath(path), value)
 }
+// A conflict is the library's to resolve. A plain Revert finds the server's
+// value by key, since after a removal the same index is a different product.
 function applyServerValue(path: string) {
-  live.takeTheirs(fieldPath(path))
+  if (fieldState(path) === 'conflict') {
+    live.takeTheirs(fieldPath(path))
+  } else {
+    const { target, value } = revertTarget(
+      serverConfig.value,
+      draftConfig.value,
+      fieldPath(path),
+      coffeeConfigKeyedLists,
+    )
+    if (value === undefined) live.removeKey(target)
+    else live.setValue(target, value)
+  }
   clearArrayInputBranch(path)
 }
 function keepLocalValue(path: string) {
@@ -330,7 +359,13 @@ function serverValueFor(path: string): unknown {
   if (conflict) {
     return conflict.incomingServer
   }
-  return getPathValue(serverConfig.value, path)
+  const at = serverPathFor(
+    serverConfig.value,
+    draftConfig.value,
+    fieldPath(path),
+    coffeeConfigKeyedLists,
+  )
+  return at && get(serverConfig.value, at)
 }
 
 function isDirtyPath(path: string): boolean {
@@ -1439,6 +1474,10 @@ onBeforeUnmount(clearAllFlashes)
                   {{ field.label }} must be a whole number, not
                   {{ field.value }}. Prices are in cents: €2.50 is 250.
                 </p>
+                <p v-if="noProducts" class="error-copy" role="alert">
+                  The menu needs at least one product. Add one, or undo a
+                  removal, before saving.
+                </p>
                 <!-- Next to the button that caused it: a refused save shown at
                      the top of the page went unseen below a long menu. -->
                 <div
@@ -1457,7 +1496,8 @@ onBeforeUnmount(clearAllFlashes)
                   :disabled="
                     !canSave ||
                     dirtyFieldCount === 0 ||
-                    notWholeNumbers.length > 0
+                    notWholeNumbers.length > 0 ||
+                    noProducts
                   "
                   @click="saveConfig"
                 >
