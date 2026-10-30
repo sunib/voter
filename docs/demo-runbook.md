@@ -147,8 +147,9 @@ purpose is what this one does.
       ```
 
 - [ ] Seats are open: tick both switches under **Seats** on `/room`. Their
-      bindings are not in Git, so a rebuilt namespace starts with both off and
-      every phone's Claim button resting.
+      bindings are not a Flux source (k8s-trail's `configs/rbac/` only records
+      them), so a rebuilt namespace starts with both off and every phone's
+      Claim button resting.
 
       ```bash
       kubectl -n voter get rolebinding voter-audience-seat-claim voter-audience-seat-edit   # want both

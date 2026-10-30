@@ -45,9 +45,11 @@ had to be adopted back into Git after exactly that.
 The deliberate exceptions are the RoleBindings the operator page creates and
 deletes at runtime from `/room`: `voter-audience-coffee-admin` (and its
 `-person`), `voter-audience-ballot-<group>`, `voter-audience-seat-claim` and
-`voter-audience-seat-edit`. Their Roles are in Git; the bindings are documented
-as absent from Git in `participant-rbac.yaml`, and Flux would fight the demo if
-they were added.
+`voter-audience-seat-edit`. Their Roles are in Git; the bindings are kept out
+of `external/k8s` (see `participant-rbac.yaml`), because Flux would fight the
+demo if they were added. They are still in Git as a record: gitops-reverser
+mirrors every binding labelled `app.kubernetes.io/managed-by: voter` into
+k8s-trail's `configs/rbac/` (`git-sink-rbac.yaml`).
 
 ## Releases are cut from commit messages
 
