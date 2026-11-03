@@ -1,8 +1,9 @@
-// The two grants the operator hands out live from /room besides the room-wide
-// coffee switch (authz.ts): who may vote, and one person who may edit the
-// coffee menu before the rest of the room.
+// The grants the operator hands out live from /room besides the room-wide
+// coffee switch (authz.ts): who may vote, one person who may edit the coffee
+// menu before the rest of the room, and one person who may set the menu's mail
+// and payments keys.
 //
-// Both are RoleBindings to a Role that lives in Git, created and deleted with
+// All are RoleBindings to a Role that lives in Git, created and deleted with
 // the operator's own token, exactly like the coffee switch. The state is read
 // back from the bindings that exist, matched by the Role they bind and not by
 // the names this page gives them, so a binding made from a terminal during the
@@ -183,7 +184,7 @@ export async function announceBallotGroups(groups: Set<string>): Promise<void> {
   }
 }
 
-// --- one person on the coffee menu ------------------------------------------
+// --- one person, on the menu or its keys -----------------------------------
 
 /** The apiserver's username for a Room Pass login is `'demo:' + claims.sub`
  *  (authentication-config). */
@@ -243,14 +244,36 @@ export interface PersonGrant {
 
 const PERSON_DISPLAY_NAME = 'voter.configbutler.ai/display-name'
 
-function personBindingName(): string {
-  return `${appConfig().audienceCoffeeAdminRole}-person`
+/** A grant the operator hands to one participant: a Role in Git, bound to one
+ *  User in a binding named after the Role plus "-person". `label` marks the
+ *  binding so the audit trail says which control made it. */
+export interface PersonSwitch {
+  role: string
+  label: string
 }
 
-/** Who holds the coffee menu on their own: a binding to the coffee-admin Role
- *  that names a User. Null when nobody does. */
-export function personGrant(bindings: RoleBinding[]): PersonGrant | null {
-  const role = appConfig().audienceCoffeeAdminRole
+/** The coffee menu, before the rest of the room. */
+export const coffeeAdminPerson = (): PersonSwitch => ({
+  role: appConfig().audienceCoffeeAdminRole,
+  label: 'coffee-admin-person',
+})
+/** The menu's mail and payments keys (docs/coffee-api-keys-design.md). */
+export const coffeeKeysPerson = (): PersonSwitch => ({
+  role: appConfig().audienceCoffeeKeysRole,
+  label: 'coffee-keys-person',
+})
+
+function personBindingName(which: PersonSwitch): string {
+  return `${which.role}-person`
+}
+
+/** Who holds a one-person grant: a binding to its Role that names a User.
+ *  Null when nobody does. A room-wide binding names a Group and is not it. */
+export function personGrant(
+  bindings: RoleBinding[],
+  which: PersonSwitch = coffeeAdminPerson(),
+): PersonGrant | null {
+  const role = which.role
   for (const binding of bindings) {
     if (!bindsRole(binding, role)) continue
     const user = (binding.subjects ?? []).find((s) => s.kind === 'User')
@@ -290,20 +313,22 @@ export function pickParticipant(
   return pool[Math.floor(random() * pool.length)] ?? null
 }
 
-/** Give the coffee menu to this one participant, taking it from whoever had
- *  it. The room-wide switch is a different binding and is not touched. */
-export async function grantPerson(participant: Participant): Promise<void> {
-  await revokePerson()
-  const role = appConfig().audienceCoffeeAdminRole
+/** Give a grant to this one participant, taking it from whoever had it. The
+ *  room-wide switch is a different binding and is not touched. */
+export async function grantPerson(
+  participant: Participant,
+  which: PersonSwitch = coffeeAdminPerson(),
+): Promise<void> {
+  await revokePerson(which)
   await createObject(ROLEBINDINGS, {
     apiVersion: `${RBAC}/v1`,
     kind: 'RoleBinding',
     metadata: {
-      name: personBindingName(),
+      name: personBindingName(which),
       namespace: appConfig().namespace,
       labels: {
         'app.kubernetes.io/managed-by': 'voter',
-        'voter.configbutler.ai/grant': 'coffee-admin-person',
+        'voter.configbutler.ai/grant': which.label,
       },
       annotations: {
         [PERSON_DISPLAY_NAME]: participant.spec.displayName,
@@ -319,17 +344,19 @@ export async function grantPerson(participant: Participant): Promise<void> {
         name: participantUsername(participant.metadata.name),
       },
     ],
-    roleRef: { apiGroup: RBAC, kind: 'Role', name: role },
+    roleRef: { apiGroup: RBAC, kind: 'Role', name: which.role },
   })
 }
 
-/** Take the coffee menu back from the one person who has it. */
-export async function revokePerson(): Promise<void> {
-  const current = personGrant(await listRoleBindings())
+/** Take a grant back from the one person who has it. */
+export async function revokePerson(
+  which: PersonSwitch = coffeeAdminPerson(),
+): Promise<void> {
+  const current = personGrant(await listRoleBindings(), which)
   if (current !== null) await deleteQuietly(current.binding)
   // A binding under the page's own name that somehow names no User would
   // still block the create; it is ours, so it goes too.
-  await deleteQuietly(personBindingName())
+  await deleteQuietly(personBindingName(which))
 }
 
 async function deleteQuietly(name: string): Promise<void> {

@@ -67,6 +67,12 @@ export const PARTICIPANTS: ResourceRef = {
   version: 'v1alpha1',
   resource: 'participants',
 }
+/** Only ever patched, and only the menu's two keys (AdminScreen.vue). */
+export const SECRETS: ResourceRef = {
+  group: '',
+  version: 'v1',
+  resource: 'secrets',
+}
 export const ROLES: ResourceRef = {
   group: 'rbac.authorization.k8s.io',
   version: 'v1',

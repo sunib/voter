@@ -28,6 +28,7 @@ import PermissionRequirements from '../components/PermissionRequirements.vue'
 import BallotSwitches from '../components/room/BallotSwitches.vue'
 import SeatSwitches from '../components/room/SeatSwitches.vue'
 import PickSomeone from '../components/room/PickSomeone.vue'
+import { coffeeKeysPerson } from '../api/roomGrants'
 import { setRoundState } from '../api/quiz'
 import { currentSession, loginURL } from '../api/session'
 import { appConfig } from '../api/appConfig'
@@ -415,6 +416,13 @@ function signInAsOperator() {
         arrives in Git as a commit in your name.
       </p>
       <PickSomeone />
+      <PickSomeone
+        :which="coffeeKeysPerson()"
+        eyebrow="The menu's keys"
+        held-copy="may set a new mail and payments key: patch on two Secrets, never read them."
+        free-copy="Hand one participant, picked at random, the right to set the menu's mail and payments keys."
+        testid="pick-keys"
+      />
     </section>
 
     <!-- Who may take a seat, and edit theirs. Shown on the same terms. -->

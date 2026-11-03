@@ -240,15 +240,17 @@ export function useLiveEditableResource<T>(
         : copy.refreshed
     return !needsRead.value
   }
-  async function save(reason: string) {
-    if (!canSave.value || !available()) return
+  /** True when this call wrote the edits; false when it did not (refused,
+   *  raced, nothing to send), with the reason left in `error` or `notice`. */
+  async function save(reason: string): Promise<boolean> {
+    if (!canSave.value || !available()) return false
     saving.value = true
     error.value = ''
     clearTimeout(recoveryTimer)
     try {
       if (needsRead.value) {
         await refreshFromServer()
-        return
+        return false
       }
       let receipt: CommitReceipt | undefined
       for (let attempt = 1; ; attempt++) {
@@ -261,15 +263,15 @@ export function useLiveEditableResource<T>(
           // somebody else's hand while this editor was losing the race, which is
           // a result worth reporting rather than a silent no-op.
           if (attempt > 1) notice.value = copy.alreadyDone
-          return
+          return false
         }
         // Once, and only once there is something to send. The request then waits
         // for whichever attempt lands.
         receipt ??= await requestCommit(reason)
-        if (disposed) return
+        if (disposed) return false
         try {
           await write(intent, reason)
-          if (disposed) return
+          if (disposed) return false
           // Only a FAILURE is worth a sentence here. Acceptance is not news,
           // and saying it froze the screen on a half-truth: the commit landed
           // seconds later and nothing came back to say so. The name is the
@@ -292,25 +294,26 @@ export function useLiveEditableResource<T>(
                 error.value = (cause as Error).message
               })
           }, 1500)
-          return
+          return true
         } catch (cause) {
-          if (disposed) return
+          if (disposed) return false
           if ((cause as ApiError).status !== 409) throw cause
           // Somebody saved first. Take their version and look at what they
           // touched. refreshFromServer reports false for the cases a retry must
           // not paper over -- the object was replaced, or the live stream
           // overtook the read -- and each of those leaves its own notice.
           const reconciled = await refreshFromServer()
-          if (!reconciled || conflicts.value.length > 0) return
+          if (!reconciled || conflicts.value.length > 0) return false
           if (attempt === saveAttempts) {
             error.value = copy.lostTheRace
-            return
+            return false
           }
         }
       }
     } catch (cause) {
-      if (disposed) return
+      if (disposed) return false
       error.value = (cause as Error).message
+      return false
     } finally {
       saving.value = false
     }

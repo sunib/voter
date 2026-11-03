@@ -45,6 +45,12 @@ type config struct {
 	// deletes.
 	AudienceCoffeeAdminRole string `envconfig:"AUDIENCE_COFFEE_ADMIN_ROLE" default:"voter-audience-coffee-admin"`
 
+	// AudienceCoffeeKeysRole names the Role that lets one person set the menu's
+	// mail and payments keys: patch on the Secrets coffee-mail and
+	// coffee-payments. The operator binds it to one participant from /room, as
+	// the menu's one-person grant, in a binding named after it plus "-person".
+	AudienceCoffeeKeysRole string `envconfig:"AUDIENCE_COFFEE_KEYS_ROLE" default:"voter-audience-coffee-keys"`
+
 	// AudienceBallotRole names the Role that lets a group cast ballots. Like the
 	// coffee grant, the Role lives in Git and its RoleBindings do not: the
 	// operator page binds it to the whole room or to one answer's group of the

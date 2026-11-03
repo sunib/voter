@@ -126,3 +126,133 @@ test('a key reference names its own Secret, and only those two Secrets are publi
   expect(() => dryRun({ apiVersion: 'v1', kind: 'Secret', metadata: { name: 'coffee-settings-age', namespace: 'voter', labels: { 'voter.configbutler.ai/coffee-settings': 'true' } }, data: {} }))
     .toThrow(/coffee-settings-age cannot carry voter\.configbutler\.ai\/coffee-settings/);
 });
+
+// Demo beat 2 from the room's side: the operator hands the keys to one person
+// on /room, that person sets a new key from the menu editor, as a change saved
+// with the rest, and the operator takes the grant back. Nobody reloads
+// anything: both pages follow the bindings. Without the grant the buttons are
+// there but greyed out, and "Try anyway" gets Kubernetes' own refusal.
+test('the operator gives one person the keys from /room, and takes them back', async ({ browser }) => {
+  const displayName = `keys-holder-${Date.now()}`;
+  const contexts = [];
+  const open = async () => {
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    contexts.push(context);
+    const page = await context.newPage();
+    page.on('pageerror', error => { throw error; });
+    return page;
+  };
+  try {
+    const holder = await open();
+    await holder.goto(`${APP}/`);
+    await holder.getByLabel('Room code').fill(JSON.parse(kube('get', 'room', 'demo', '-o', 'json')).status.joinCode.code);
+    await holder.getByLabel('Display name').fill(displayName);
+    await holder.getByRole('radio', { name: 'Vue' }).check();
+    await holder.getByRole('button', { name: 'Continue', exact: true }).click();
+    await holder.waitForURL(`${APP}/`);
+    const participant = JSON.parse(kube('get', 'participants', '-o', 'json')).items.find(p => p.spec.displayName === displayName);
+
+    const room = await open();
+    await room.goto(`${APP}/login?next=%2Froom&connector=github`);
+    await room.waitForURL(`${APP}/room`);
+    const panel = room.getByTestId('pick-keys');
+    await expect(panel).toContainText('Hand one participant');
+
+    // A pick: a binding to the keys Role naming one User, and the menu's own
+    // one-person grant left alone. Picked at random, and the fixture's room
+    // may hold other people, so who it lands on is not this test's to choose.
+    await panel.getByRole('button', { name: 'Pick someone', exact: true }).click();
+    const picked = () => JSON.parse(kube('get', 'rolebinding', 'voter-audience-coffee-keys-person', '-o', 'json'));
+    await expect.poll(() => kube('get', 'rolebinding', 'voter-audience-coffee-keys-person', '--ignore-not-found', '-o', 'name').trim()).not.toBe('');
+    expect(picked().roleRef.name).toBe('voter-audience-coffee-keys');
+    expect(picked().subjects).toHaveLength(1);
+    expect(picked().subjects[0].kind).toBe('User');
+    await expect(panel.getByTestId('picked-name')).toHaveText(picked().metadata.annotations['voter.configbutler.ai/display-name']);
+    expect(kube('get', 'rolebinding', 'voter-audience-coffee-admin-person', '--ignore-not-found', '-o', 'name').trim()).toBe('');
+
+    // So the test stands in for the operator's luck: the same binding, naming
+    // this test's participant (their username is what the session reports).
+    const { subject } = await holder.evaluate(async () => (await fetch('/auth/session')).json());
+    const binding = picked();
+    binding.subjects[0].name = `demo:${subject}`;
+    binding.metadata.annotations['voter.configbutler.ai/display-name'] = displayName;
+    binding.metadata.annotations['voter.configbutler.ai/participant'] = participant.metadata.name;
+    delete binding.metadata.resourceVersion;
+    kube('delete', 'rolebinding', 'voter-audience-coffee-keys-person');
+    kube('create', '-f', '-', { input: JSON.stringify(binding) });
+    await expect(panel.getByTestId('picked-name')).toHaveText(displayName);
+
+    // The holder's menu page grows a "New mail API key" button. A key typed
+    // there is a pending change like any other: discarded with Revert, and
+    // only written by Save.
+    await holder.goto(`${APP}/admin`);
+    const newMailKey = holder.getByRole('button', { name: 'New mail API key' });
+    const dialog = holder.getByRole('dialog');
+    const summary = holder.locator('.save-summary');
+    const enterKey = async (value, button) => {
+      await newMailKey.click();
+      await dialog.getByLabel('Mail API key').fill(value);
+      await dialog.getByRole('button', { name: button }).click();
+      await expect(dialog).toBeHidden();
+    };
+    await expect(holder.getByRole('button', { name: 'New payments API key' })).toBeVisible();
+
+    await enterKey('nope', 'Cancel');
+    await expect(summary).toContainText('No pending changes');
+
+    await enterKey('taart', 'OK');
+    await expect(summary).toContainText('1 change(s) ready to save');
+    await expect(summary).toContainText('Mail API key');
+    await expect(summary).not.toContainText('taart');
+    await summary.getByRole('button', { name: 'Revert' }).click();
+    await expect(summary).toContainText('No pending changes');
+    expect(JSON.parse(kube('get', 'secret', 'coffee-mail', '-o', 'json')).data).toEqual({ apiKey: '' });
+
+    // Saved with a menu edit, the menu goes first: this holder may not edit
+    // the menu, so RBAC refuses it, and the key is not written either.
+    const banner = holder.getByLabel('Banner text');
+    const bannerBefore = await banner.inputValue();
+    await banner.fill(`${bannerBefore} (refused)`);
+    await enterKey('taart', 'OK');
+    await summary.getByRole('button', { name: 'Save 2 Changes' }).click();
+    await expect(summary.getByRole('alert')).toContainText('cannot patch resource "coffeeconfigs"');
+    await expect(summary).toContainText('2 change(s) ready to save');
+    expect(JSON.parse(kube('get', 'secret', 'coffee-mail', '-o', 'json')).data).toEqual({ apiKey: '' });
+    await summary.locator('li', { hasText: 'bannerText' }).getByRole('button', { name: 'Revert' }).click();
+    await expect(summary).toContainText('1 change(s) ready to save');
+    await expect(banner).toHaveValue(bannerBefore);
+
+    // The key on its own is saved.
+    await summary.getByRole('button', { name: 'Save 1 Change' }).click();
+    await expect.poll(() => JSON.parse(kube('get', 'secret', 'coffee-mail', '-o', 'json')).data).toEqual({ apiKey: b64('taart') });
+    await expect(summary).toContainText('No pending changes');
+
+    // The same value again is admission's refusal, in its own words, and the
+    // key stays pending.
+    await enterKey('taart', 'OK');
+    await summary.getByRole('button', { name: 'Save 1 Change' }).click();
+    await expect(summary.getByRole('alert')).toContainText('That is the mail key already set: saving it has to change it.');
+    await expect(summary).toContainText('1 change(s) ready to save');
+
+    // Taken back on /room: the binding goes, and the buttons grey out.
+    await summary.getByRole('button', { name: 'Revert' }).click();
+    await panel.getByRole('button', { name: 'Take it back' }).click();
+    await expect.poll(() => kube('get', 'rolebinding', 'voter-audience-coffee-keys-person', '--ignore-not-found', '-o', 'name').trim()).toBe('');
+    await expect(panel.getByTestId('picked-name')).toHaveCount(0);
+    await expect(newMailKey).toBeDisabled();
+
+    // "Try anyway" lifts the page's check, not Kubernetes': the key is refused
+    // on Save, by RBAC, and nothing is written.
+    await holder.getByRole('button', { name: 'Try anyway' }).click();
+    await enterKey('koek', 'OK');
+    await summary.getByRole('button', { name: 'Save 1 Change' }).click();
+    await expect(summary.getByRole('alert')).toContainText('cannot patch resource "secrets"');
+    expect(JSON.parse(kube('get', 'secret', 'coffee-mail', '-o', 'json')).data).toEqual({ apiKey: b64('taart') });
+  } finally {
+    for (const c of contexts) await c.close();
+    kube('delete', 'rolebinding', 'voter-audience-coffee-keys-person', '--ignore-not-found');
+    for (const name of ['coffee-mail', 'coffee-payments']) kube('patch', 'secret', name, '--type=merge', '-p', '{"data":{"apiKey":""}}');
+    const participants = JSON.parse(kube('get', 'participants', '-o', 'json')).items;
+    for (const p of participants) if (p.spec.displayName === displayName) kube('delete', 'participant', p.metadata.name);
+  }
+});

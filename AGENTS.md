@@ -44,7 +44,7 @@ had to be adopted back into Git after exactly that.
 
 The deliberate exceptions are the RoleBindings the operator page creates and
 deletes at runtime from `/room`: `voter-audience-coffee-admin` (and its
-`-person`), `voter-audience-ballot-<group>`, `voter-audience-seat-claim` and
+`-person`), `voter-audience-coffee-keys-person`, `voter-audience-ballot-<group>`, `voter-audience-seat-claim` and
 `voter-audience-seat-edit`. Their Roles are in Git; the bindings are kept out
 of `external/k8s` (see `participant-rbac.yaml`), because Flux would fight the
 demo if they were added. They are still in Git as a record: gitops-reverser

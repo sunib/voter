@@ -1,14 +1,16 @@
 <script setup lang="ts">
-// One person on the coffee menu before the rest of the room. A random
-// participant gets a RoleBinding of their own to the coffee-admin Role, naming
-// their Kubernetes username; the room-wide switch is a different binding and
-// keeps working as it did. Their next save is a commit in their name.
+// One person holds a grant: the coffee menu before the rest of the room, or the
+// menu's keys. A random participant gets a RoleBinding of their own to the
+// grant's Role, naming their Kubernetes username; the room-wide switch is a
+// different binding and keeps working as it did. Their next save is a commit in
+// their name.
 //
 // Nothing here polls: the binding is read again when one changes, and the
 // people to pick from are a live view of the room's Participants.
 import { computed, ref } from 'vue'
 
 import {
+  coffeeAdminPerson,
   grantPerson,
   listRoleBindings,
   personGrant,
@@ -16,8 +18,30 @@ import {
   revokePerson,
   useLiveParticipants,
   type PersonGrant,
+  type PersonSwitch,
 } from '../../api/roomGrants'
 import { onGrantChange } from '../../api/grantChanges'
+
+const props = withDefaults(
+  defineProps<{
+    which?: PersonSwitch
+    eyebrow?: string
+    /** After the holder's name: what they may do now. */
+    heldCopy?: string
+    /** While nobody holds it. */
+    freeCopy?: string
+    testid?: string
+  }>(),
+  {
+    which: () => coffeeAdminPerson(),
+    eyebrow: 'One person first',
+    heldCopy:
+      'may edit the coffee menu: a RoleBinding naming their username, nobody else’s.',
+    freeCopy:
+      'Hand the menu to one participant, picked at random, before the whole room.',
+    testid: 'pick-someone',
+  },
+)
 
 const holder = ref<PersonGrant | null>(null)
 const { live: room, participants } = useLiveParticipants()
@@ -33,7 +57,7 @@ const error = computed(
 async function refresh() {
   try {
     const bindings = await listRoleBindings()
-    if (!busy.value) holder.value = personGrant(bindings)
+    if (!busy.value) holder.value = personGrant(bindings, props.which)
     visible.value = true
     actionError.value = ''
   } catch (e) {
@@ -59,11 +83,11 @@ async function pick() {
   busy.value = true
   actionError.value = ''
   try {
-    await grantPerson(chosen)
-    holder.value = personGrant(await listRoleBindings())
+    await grantPerson(chosen, props.which)
+    holder.value = personGrant(await listRoleBindings(), props.which)
   } catch (e) {
     actionError.value =
-      e instanceof Error ? e.message : 'Could not hand out the menu.'
+      e instanceof Error ? e.message : 'Could not hand it out.'
   } finally {
     busy.value = false
   }
@@ -73,11 +97,11 @@ async function revoke() {
   busy.value = true
   actionError.value = ''
   try {
-    await revokePerson()
+    await revokePerson(props.which)
     holder.value = null
   } catch (e) {
     actionError.value =
-      e instanceof Error ? e.message : 'Could not take the menu back.'
+      e instanceof Error ? e.message : 'Could not take it back.'
   } finally {
     busy.value = false
   }
@@ -88,17 +112,13 @@ onGrantChange(() => void refresh(), 4000)
 </script>
 
 <template>
-  <div v-if="visible" class="pick-someone" data-testid="pick-someone">
-    <p class="eyebrow">One person first</p>
+  <div v-if="visible" class="pick-someone" :data-testid="testid">
+    <p class="eyebrow">{{ eyebrow }}</p>
     <p v-if="holder" class="pick-someone__name" data-testid="picked-name">
       {{ holder.displayName }}
     </p>
     <p class="hero-copy">
-      {{
-        holder
-          ? 'may edit the coffee menu: a RoleBinding naming their username, nobody else’s.'
-          : 'Hand the menu to one participant, picked at random, before the whole room.'
-      }}
+      {{ holder ? heldCopy : freeCopy }}
     </p>
     <p v-if="holder" class="metadata-copy">
       <code class="inline-code">{{ holder.username }}</code>

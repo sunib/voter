@@ -16,6 +16,7 @@ export const TEST_CONFIG: AppConfig = {
   // No lead: a test waits for nothing. kube.test covers the sleep itself.
   commitLeadMillis: 0,
   audienceCoffeeAdminRole: 'voter-audience-coffee-admin',
+  audienceCoffeeKeysRole: 'voter-audience-coffee-keys',
   audienceBallotRole: 'voter-audience-ballot',
   audienceSeatClaimRole: 'voter-audience-seat-claim',
   audienceSeatEditRole: 'voter-audience-seat-edit',
