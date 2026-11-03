@@ -67,7 +67,7 @@ export const PARTICIPANTS: ResourceRef = {
   version: 'v1alpha1',
   resource: 'participants',
 }
-/** Only ever patched, and only the menu's two keys (CoffeeKeys.vue). */
+/** Only ever patched, and only the menu's two keys (AdminScreen.vue). */
 export const SECRETS: ResourceRef = {
   group: '',
   version: 'v1',

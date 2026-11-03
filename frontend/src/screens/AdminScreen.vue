@@ -11,13 +11,13 @@ import {
 import { appConfig } from '../api/appConfig'
 import { loginURL } from '../api/session'
 import { commitURL, shortSha, useCommitStatus } from '../api/commitStatus'
-import { ADMIN_REQUIREMENTS } from '../api/authz'
+import { ADMIN_REQUIREMENTS, allowsNamed } from '../api/authz'
+import { SECRETS, mergePatch } from '../api/kube'
 import { useAuthorization } from '../api/useAuthorization'
 import AdminNav from '../components/admin/AdminNav.vue'
 import AppShell from '../components/layout/AppShell.vue'
 import PermissionRequirements from '../components/PermissionRequirements.vue'
 import FieldStateMarker from '../components/admin/FieldStateMarker.vue'
-import CoffeeKeys from '../components/admin/CoffeeKeys.vue'
 
 type FieldState = 'clean' | 'dirty' | 'conflict'
 type FieldConflict = { previousServer?: unknown; incomingServer: unknown }
@@ -97,7 +97,60 @@ const currency = computed(() => draftConfig.value?.spec.currency ?? 'EUR')
 const fieldChanges = computed(() =>
   leafChanges(live.changes.value, coffeeConfigKeyedLists),
 )
-const dirtyFieldCount = computed(() => fieldChanges.value.length)
+// The menu's mail and payments keys (docs/coffee-api-keys-design.md). Not
+// part of the CoffeeConfig: each is a Secret of its own that the menu names.
+// Only the one person /room gave the keys to may replace them (patch on those
+// two Secrets, never get), so only they see the button. A new key waits here,
+// in this page, as a change like any other, until Save writes it: after the
+// menu, so a refused menu takes the key down with it. Both writes land in the
+// same coffee-settings commit, and that commit is where the key is encrypted.
+const KEY_SLOTS = [
+  { secret: 'coffee-mail', label: 'Mail API key', button: 'New mail API key' },
+  {
+    secret: 'coffee-payments',
+    label: 'Payments API key',
+    button: 'New payments API key',
+  },
+] as const
+type KeySlot = (typeof KEY_SLOTS)[number]
+const pendingKeys = ref<Partial<Record<KeySlot['secret'], string>>>({})
+const keySlots = computed(() =>
+  KEY_SLOTS.filter((slot) =>
+    allowsNamed(authz.value, '', SECRETS.resource, 'patch', slot.secret),
+  ),
+)
+const keyChanges = computed(() =>
+  KEY_SLOTS.filter((slot) => pendingKeys.value[slot.secret] !== undefined),
+)
+const keysSaving = ref(false)
+const keyError = ref('')
+const keyDialog = ref<HTMLDialogElement | null>(null)
+const keyDialogSlot = ref<KeySlot | null>(null)
+const keyDialogValue = ref('')
+function openKeyDialog(slot: KeySlot) {
+  keyDialogSlot.value = slot
+  keyDialogValue.value = ''
+  keyDialog.value?.showModal()
+}
+function closeKeyDialog(accept: boolean) {
+  const slot = keyDialogSlot.value
+  if (accept && slot && keyDialogValue.value !== '') {
+    pendingKeys.value = {
+      ...pendingKeys.value,
+      [slot.secret]: keyDialogValue.value,
+    }
+    keyError.value = ''
+  }
+  keyDialogValue.value = ''
+  keyDialog.value?.close()
+}
+function discardKey(slot: KeySlot) {
+  const { [slot.secret]: _discarded, ...rest } = pendingKeys.value
+  pendingKeys.value = rest
+}
+const dirtyFieldCount = computed(
+  () => fieldChanges.value.length + keyChanges.value.length,
+)
 const conflictCount = computed(() => live.conflicts.value.length)
 const cleanDirtyCount = computed(() =>
   Math.max(0, dirtyFieldCount.value - conflictCount.value),
@@ -116,7 +169,7 @@ const dirtySummaryEntries = computed(() =>
   }),
 )
 const saveButtonLabel = computed(() =>
-  saving.value
+  saving.value || keysSaving.value
     ? 'Saving…'
     : live.needsRead.value
       ? 'Refresh before saving'
@@ -187,7 +240,27 @@ async function refreshFromServer() {
   }
 }
 async function saveConfig() {
-  await live.save(changeReason.value)
+  keyError.value = ''
+  if (fieldChanges.value.length > 0) {
+    if (!(await live.save(changeReason.value))) return
+  } else {
+    // Only keys this time: a refusal of an earlier menu save is not news any
+    // more, and beside this save's own answer it would read as one.
+    loadError.value = ''
+  }
+  keysSaving.value = true
+  try {
+    for (const slot of keyChanges.value) {
+      await mergePatch(SECRETS, slot.secret, {
+        stringData: { apiKey: pendingKeys.value[slot.secret] },
+      })
+      discardKey(slot)
+    }
+  } catch (e) {
+    keyError.value = e instanceof Error ? e.message : 'Could not set the key.'
+  } finally {
+    keysSaving.value = false
+  }
 }
 watch(
   () => serverConfig.value?.metadata?.resourceVersion,
@@ -452,9 +525,6 @@ onBeforeUnmount(clearAllFlashes)
       title="You may not edit this menu"
       highlight="coffeeconfigs"
     />
-
-    <!-- Only for the one person /room gave the menu's keys to. -->
-    <CoffeeKeys :authz="authz" />
 
     <section
       v-if="
@@ -1350,6 +1420,56 @@ onBeforeUnmount(clearAllFlashes)
               />
             </label>
           </div>
+          <div v-if="keySlots.length > 0" class="row-actions">
+            <button
+              v-for="slot in keySlots"
+              :key="slot.secret"
+              class="button button--secondary"
+              @click="openKeyDialog(slot)"
+            >
+              {{ slot.button }}
+            </button>
+          </div>
+          <dialog
+            ref="keyDialog"
+            class="key-dialog panel"
+            aria-labelledby="key-dialog-title"
+            @cancel="keyDialogValue = ''"
+          >
+            <form method="dialog" @submit.prevent="closeKeyDialog(true)">
+              <h3 id="key-dialog-title">{{ keyDialogSlot?.button }}</h3>
+              <p class="metadata-copy">
+                It waits with your other changes until you save, and is never
+                shown again, not even to you. Saving writes
+                <code class="inline-code">{{ keyDialogSlot?.secret }}</code
+                >, which is committed encrypted.
+              </p>
+              <label class="field">
+                <span>{{ keyDialogSlot?.label }}</span>
+                <input
+                  v-model="keyDialogValue"
+                  type="password"
+                  autocomplete="off"
+                />
+              </label>
+              <div class="row-actions">
+                <button
+                  class="button"
+                  type="submit"
+                  :disabled="keyDialogValue === ''"
+                >
+                  OK
+                </button>
+                <button
+                  class="button button--ghost"
+                  type="button"
+                  @click="closeKeyDialog(false)"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </dialog>
         </article>
 
         <div class="admin-sidebar admin-sidebar-stack">
@@ -1383,10 +1503,7 @@ onBeforeUnmount(clearAllFlashes)
                 </div>
               </div>
 
-              <ul
-                v-if="dirtySummaryEntries.length > 0"
-                class="save-summary__list"
-              >
+              <ul v-if="dirtyFieldCount > 0" class="save-summary__list">
                 <li
                   v-for="entry in dirtySummaryEntries"
                   :key="entry.path"
@@ -1451,6 +1568,29 @@ onBeforeUnmount(clearAllFlashes)
                     Keep Mine
                   </button>
                 </li>
+                <li
+                  v-for="slot in keyChanges"
+                  :key="slot.secret"
+                  class="save-summary__item save-summary__item--dirty"
+                >
+                  <div class="save-summary__item-copy">
+                    <div class="save-summary__item-row">
+                      <strong>{{ slot.label }}</strong>
+                      <span class="pill pill--warning">New key</span>
+                    </div>
+                    <p class="metadata-copy">
+                      A new value for
+                      <code class="inline-code">{{ slot.secret }}</code
+                      >, not shown.
+                    </p>
+                  </div>
+                  <button
+                    class="button button--ghost"
+                    @click="discardKey(slot)"
+                  >
+                    Revert
+                  </button>
+                </li>
               </ul>
 
               <div class="save-summary__meta metadata-copy">
@@ -1492,6 +1632,10 @@ onBeforeUnmount(clearAllFlashes)
                   <strong>Admin request failed</strong>
                   <p>{{ loadError }}</p>
                 </div>
+                <div v-if="keyError" class="error-copy" role="alert">
+                  <strong>Admin request failed</strong>
+                  <p>{{ keyError }}</p>
+                </div>
               </div>
 
               <div class="save-summary__footer">
@@ -1499,6 +1643,7 @@ onBeforeUnmount(clearAllFlashes)
                   class="button save-summary__button"
                   :disabled="
                     !canSave ||
+                    keysSaving ||
                     dirtyFieldCount === 0 ||
                     notWholeNumbers.length > 0 ||
                     noProducts

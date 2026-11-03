@@ -511,6 +511,28 @@ p {
   border-radius: 24px;
 }
 
+/* The menu editor's "New API key" (AdminScreen.vue): a native <dialog>, so
+   focus, Escape and the backdrop are the browser's. */
+.key-dialog {
+  /* .panel's margin-top would undo the browser's centring. */
+  margin: auto;
+  width: min(28rem, calc(100vw - 2rem));
+  color: rgb(var(--ink));
+}
+
+.key-dialog form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.key-dialog h3 {
+  margin: 0;
+}
+
+.key-dialog::backdrop {
+  background: rgb(var(--ink) / 0.45);
+}
+
 .panel--danger {
   border-color: rgb(var(--danger) / 0.35);
   background: rgb(var(--surface-danger) / 0.98);

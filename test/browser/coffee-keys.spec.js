@@ -128,8 +128,9 @@ test('a key reference names its own Secret, and only those two Secrets are publi
 });
 
 // Demo beat 2 from the room's side: the operator hands the keys to one person
-// on /room, that person sets a key on the menu page, and the operator takes
-// the grant back. Nobody reloads anything: both pages follow the bindings.
+// on /room, that person sets a new key from the menu editor, as a change saved
+// with the rest, and the operator takes the grant back. Nobody reloads
+// anything: both pages follow the bindings.
 test('the operator gives one person the keys from /room, and takes them back', async ({ browser }) => {
   const displayName = `keys-holder-${Date.now()}`;
   const contexts = [];
@@ -180,26 +181,63 @@ test('the operator gives one person the keys from /room, and takes them back', a
     kube('create', '-f', '-', { input: JSON.stringify(binding) });
     await expect(panel.getByTestId('picked-name')).toHaveText(displayName);
 
-    // The holder's menu page grows a "Set a new key" panel.
+    // The holder's menu page grows a "New mail API key" button. A key typed
+    // there is a pending change like any other: discarded with Revert, and
+    // only written by Save.
     await holder.goto(`${APP}/admin`);
-    const keys = holder.getByTestId('coffee-keys');
-    await expect(keys).toBeVisible();
-    await keys.getByLabel('Mail key').fill('taart');
-    await keys.getByRole('button', { name: 'Save mail key' }).click();
-    await expect(keys.getByRole('status')).toContainText('Mail key set.');
-    await expect(keys.getByLabel('Mail key')).toHaveValue('');
-    expect(JSON.parse(kube('get', 'secret', 'coffee-mail', '-o', 'json')).data).toEqual({ apiKey: b64('taart') });
+    const newMailKey = holder.getByRole('button', { name: 'New mail API key' });
+    const dialog = holder.getByRole('dialog');
+    const summary = holder.locator('.save-summary');
+    const enterKey = async (value, button) => {
+      await newMailKey.click();
+      await dialog.getByLabel('Mail API key').fill(value);
+      await dialog.getByRole('button', { name: button }).click();
+      await expect(dialog).toBeHidden();
+    };
+    await expect(holder.getByRole('button', { name: 'New payments API key' })).toBeVisible();
 
-    // The same value again is admission's refusal, in its own words.
-    await keys.getByLabel('Mail key').fill('taart');
-    await keys.getByRole('button', { name: 'Save mail key' }).click();
-    await expect(keys.getByRole('alert')).toContainText('That is the mail key already set: saving it has to change it.');
+    await enterKey('nope', 'Cancel');
+    await expect(summary).toContainText('No pending changes');
 
-    // Taken back on /room: the binding goes, and the panel with it.
+    await enterKey('taart', 'OK');
+    await expect(summary).toContainText('1 change(s) ready to save');
+    await expect(summary).toContainText('Mail API key');
+    await expect(summary).not.toContainText('taart');
+    await summary.getByRole('button', { name: 'Revert' }).click();
+    await expect(summary).toContainText('No pending changes');
+    expect(JSON.parse(kube('get', 'secret', 'coffee-mail', '-o', 'json')).data).toEqual({ apiKey: '' });
+
+    // Saved with a menu edit, the menu goes first: this holder may not edit
+    // the menu, so RBAC refuses it, and the key is not written either.
+    const banner = holder.getByLabel('Banner text');
+    const bannerBefore = await banner.inputValue();
+    await banner.fill(`${bannerBefore} (refused)`);
+    await enterKey('taart', 'OK');
+    await summary.getByRole('button', { name: 'Save 2 Changes' }).click();
+    await expect(summary.getByRole('alert')).toContainText('cannot patch resource "coffeeconfigs"');
+    await expect(summary).toContainText('2 change(s) ready to save');
+    expect(JSON.parse(kube('get', 'secret', 'coffee-mail', '-o', 'json')).data).toEqual({ apiKey: '' });
+    await summary.locator('li', { hasText: 'bannerText' }).getByRole('button', { name: 'Revert' }).click();
+    await expect(summary).toContainText('1 change(s) ready to save');
+    await expect(banner).toHaveValue(bannerBefore);
+
+    // The key on its own is saved.
+    await summary.getByRole('button', { name: 'Save 1 Change' }).click();
+    await expect.poll(() => JSON.parse(kube('get', 'secret', 'coffee-mail', '-o', 'json')).data).toEqual({ apiKey: b64('taart') });
+    await expect(summary).toContainText('No pending changes');
+
+    // The same value again is admission's refusal, in its own words, and the
+    // key stays pending.
+    await enterKey('taart', 'OK');
+    await summary.getByRole('button', { name: 'Save 1 Change' }).click();
+    await expect(summary.getByRole('alert')).toContainText('That is the mail key already set: saving it has to change it.');
+    await expect(summary).toContainText('1 change(s) ready to save');
+
+    // Taken back on /room: the binding goes, and the buttons with it.
     await panel.getByRole('button', { name: 'Take it back' }).click();
     await expect.poll(() => kube('get', 'rolebinding', 'voter-audience-coffee-keys-person', '--ignore-not-found', '-o', 'name').trim()).toBe('');
     await expect(panel.getByTestId('picked-name')).toHaveCount(0);
-    await expect(keys).toHaveCount(0);
+    await expect(newMailKey).toHaveCount(0);
   } finally {
     for (const c of contexts) await c.close();
     kube('delete', 'rolebinding', 'voter-audience-coffee-keys-person', '--ignore-not-found');

@@ -339,7 +339,7 @@ Voter gains `AUDIENCE_COFFEE_KEYS_ROLE` (default `voter-audience-coffee-keys`),
 published in `/config.json` the way `AUDIENCE_COFFEE_ADMIN_ROLE` is. The Secret
 names are not settings: the CRD pins them anyway. Nothing changes on a screen
 until someone holds the grant: the `/room` control hides itself from whoever
-may not list bindings, and "Set a new key" shows only to whoever may patch the
+may not list bindings, and the "New API key" buttons show only to whoever may patch the
 Secrets. The first plan had a setting per key, off by default, so a release
 could ship before the cluster had the Role; P2 shipped first instead.
 
@@ -350,13 +350,18 @@ could ship before the cluster had the Role; P2 shipped first instead.
   someone" binds the Role to one participant at random in
   `voter-audience-coffee-keys-person`, "Pick someone else" moves it, "Take it
   back" deletes it. It shows who holds it.
-- **"Set a new key"** (built, `CoffeeKeys.vue`): a panel at the top of the menu
-  page, shown only to the person whose permissions include `patch` on these
-  Secrets (the watchable-permissions machinery already answers that, so it
-  appears and disappears as `/room` gives and takes). One password input **per
-  key**, with no length limit, each with its own Save, and no echo of the value
-  afterwards. Each Save is one patch of one Secret, so a refusal names the key
-  it was about.
+- **"New mail API key" / "New payments API key"** (built, in the menu editor,
+  `AdminScreen.vue`): buttons under the mail and payments fields, shown only to
+  the person whose permissions include `patch` on that Secret (the
+  watchable-permissions machinery already answers that, so they appear and
+  disappear as `/room` gives and takes). Each opens a dialog with a password
+  field, OK and Cancel. OK does not write anything: the key becomes a pending
+  change in "Review and save", beside the menu's own, never shown, and Revert
+  discards it. Save writes the menu first and then each key, one patch of one
+  Secret each, so a refused menu leaves the key unwritten and still pending.
+  Both writes fall in the same 5 s window, so coffee-settings gets one commit,
+  and that commit is where the key is encrypted. Nothing leaves the browser
+  before Save.
 - **Menu editor, mail and payments sections** (not built): each reference
   shown, not edited: "Mail key: `coffee-mail`", "Payments key:
   `coffee-payments`", filled in when its provider is set. Until then the
@@ -415,7 +420,7 @@ it to do.
 | --- | --- | --- |
 | **P1** CRD + policy (**built**) | voter: `coffeeconfigs.yaml` (the enums, `required` and the CEL rule), [coffee-keys-policy.yaml](../voter/config/admission/coffee-keys-policy.yaml) (both policies), the Role and the two Secrets in `test/e2e/voter.yaml`, [coffee-keys.spec.js](../test/browser/coffee-keys.spec.js) | a ref to `k8s-trail-git`, a mail ref naming `coffee-payments`, and a provider without a ref are refused by the schema; a second key, a no-op patch, a dry run and a metadata change by the policy; the label on another Secret by the second one. Passing on the fixture, with the other 27 browser tests, on 2026-11-03. Ratcheting checked by hand on k3d 1.37 |
 | **P2** cluster | external/k8s: the two Secrets, the Role, the copied CRD and policies. The live `demo-coffee` already meets the new CRD: its free-text references (`Tes`/`Ter` with no provider, `Haa`/`Ns`) were set to `sendgrid` + `coffee-mail` and `stripe` + `coffee-payments` on 2026-11-03. The coffee-settings sink it writes into is live (Ready, committing since 2026-11-03) | a hand-run `kubectl patch` of each, as a test user, lands as `coffee/resources/secrets/voter/<name>.sops.yaml`, authored by them, and opens with `sops decrypt` |
-| **P3** Voter UI (**built**, except the fixed references in the editor) | voter: the `/room` control and "Set a new key"; `coffee-keys.spec.js` drives both on the fixture | the rehearsal: one phone sets both keys, a new digest, the third app rolls; then a digest pin brings the previous one back |
+| **P3** Voter UI (**built**, except the fixed references in the editor) | voter: the `/room` control and the editor's "New API key" buttons; `coffee-keys.spec.js` drives both on the fixture | the rehearsal: one phone sets both keys, a new digest, the third app rolls; then a digest pin brings the previous one back |
 | **P4** (optional) key status | voter backend: `get` on the two names; returns `{name, set, updated}` only, never any part of the key | the editor shows "mail set 2 min ago; payments not set" |
 
 ## To verify
