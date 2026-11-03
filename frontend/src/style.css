@@ -867,6 +867,44 @@ p {
   margin-top: 0.8rem;
 }
 
+/* Several fields refused at once arrive as one line each. A participant's
+   username is one long word, and unbroken it pushes Save out of the sidebar. */
+.save-refusal p {
+  margin: 0.25rem 0 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.save-refusal pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Part of the refusal, not a link away from it. */
+.save-refusal .raw-answer summary {
+  color: inherit;
+}
+
+.saved-toast {
+  position: fixed;
+  bottom: 1.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  width: max-content;
+  max-width: calc(100vw - 2rem);
+  pointer-events: none;
+}
+
+.saved-toast p {
+  margin: 0;
+  padding: 0.55rem 1rem;
+  border-radius: 10px;
+  background: rgb(var(--ink));
+  color: rgb(var(--bg));
+  font-size: 0.9rem;
+}
+
 .field {
   display: grid;
   gap: 0.35rem;

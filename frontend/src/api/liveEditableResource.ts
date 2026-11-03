@@ -18,6 +18,7 @@ import {
   type SaveRequest,
 } from '@configbutler/krm-stream'
 import type { ApiError } from './coffee'
+import { kubernetesAnswer } from './http'
 import type { CommitReceipt } from './kube'
 import type { LiveScope } from './liveResources'
 
@@ -119,6 +120,10 @@ export function useLiveEditableResource<T>(
     retries: 0,
   })
   const error = ref('')
+  /** Set while `error` is the answer to a press of Save, which is what makes it
+   *  true only until this person changes something. A lost stream's error is
+   *  not that: it stays until the stream is back. */
+  const saveFailure = shallowRef<{ answer?: string } | null>(null)
   const notice = ref('')
   const commitNotice = ref('')
   /** The CommitRequest a save just created, for whoever wants to follow it. */
@@ -245,7 +250,7 @@ export function useLiveEditableResource<T>(
   async function save(reason: string): Promise<boolean> {
     if (!canSave.value || !available()) return false
     saving.value = true
-    error.value = ''
+    clearError()
     clearTimeout(recoveryTimer)
     try {
       if (needsRead.value) {
@@ -280,15 +285,14 @@ export function useLiveEditableResource<T>(
           commitRequest.value = receipt.commitRequested
             ? (receipt.commitRequest ?? '')
             : ''
-          notice.value =
-            'Saved to Kubernetes. Waiting for live synchronization; later edits remain unsaved.'
+          // The screen says "saved" itself, once it knows everything it wrote.
+          notice.value = ''
           // One guarded read recovers a missing echo without adopting a save object.
           recoveryTimer = setTimeout(() => {
             void refreshFromServer()
               .then((accepted) => {
-                if (accepted)
-                  notice.value =
-                    'Saved to Kubernetes. Live view synchronized; any remaining changes are unsaved.'
+                // Not news: this read was the page's idea, not the person's.
+                if (accepted) notice.value = ''
               })
               .catch((cause: unknown) => {
                 error.value = (cause as Error).message
@@ -306,6 +310,7 @@ export function useLiveEditableResource<T>(
           if (!reconciled || conflicts.value.length > 0) return false
           if (attempt === saveAttempts) {
             error.value = copy.lostTheRace
+            saveFailure.value = {}
             return false
           }
         }
@@ -313,21 +318,35 @@ export function useLiveEditableResource<T>(
     } catch (cause) {
       if (disposed) return false
       error.value = (cause as Error).message
+      saveFailure.value = { answer: kubernetesAnswer(cause) }
       return false
     } finally {
       saving.value = false
     }
   }
+  function clearError() {
+    error.value = ''
+    saveFailure.value = null
+  }
+  // Every edit by this person passes through here, and somebody else's change
+  // does not: that arrives over the stream, and leaves their save just as refused.
+  function edited() {
+    if (saveFailure.value) clearError()
+  }
   function setValue(path: Path, value: unknown) {
+    edited()
     if (available()) store.setValue(uid.value!, path, value)
   }
   function removeKey(path: Path) {
+    edited()
     if (available()) store.removeKey(uid.value!, path)
   }
   function takeTheirs(path: Path) {
+    edited()
     if (available()) store.takeTheirs(uid.value!, path)
   }
   function keepMine(path: Path) {
+    edited()
     if (!available()) return
     const chosen = get(store.draft(uid.value!), path)
     store.takeTheirs(uid.value!, path)
@@ -352,6 +371,8 @@ export function useLiveEditableResource<T>(
     state,
     synced,
     error,
+    saveFailure,
+    clearError,
     notice,
     commitNotice,
     commitRequest,

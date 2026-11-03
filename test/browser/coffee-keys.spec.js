@@ -189,13 +189,14 @@ test('the operator gives one person the keys from /room, and takes them back', a
     const newMailKey = holder.getByRole('button', { name: 'New mail API key' });
     const dialog = holder.getByRole('dialog');
     const summary = holder.locator('.save-summary');
-    const enterKey = async (value, button) => {
-      await newMailKey.click();
-      await dialog.getByLabel('Mail API key').fill(value);
+    const newPaymentsKey = holder.getByRole('button', { name: 'New payments API key' });
+    const enterKey = async (value, button, open = newMailKey, label = 'Mail API key') => {
+      await open.click();
+      await dialog.getByLabel(label).fill(value);
       await dialog.getByRole('button', { name: button }).click();
       await expect(dialog).toBeHidden();
     };
-    await expect(holder.getByRole('button', { name: 'New payments API key' })).toBeVisible();
+    await expect(newPaymentsKey).toBeVisible();
 
     await enterKey('nope', 'Cancel');
     await expect(summary).toContainText('No pending changes');
@@ -222,17 +223,30 @@ test('the operator gives one person the keys from /room, and takes them back', a
     await expect(summary).toContainText('1 change(s) ready to save');
     await expect(banner).toHaveValue(bannerBefore);
 
-    // The key on its own is saved.
+    // The key on its own is saved, and the other Secret is not written at all:
+    // its resourceVersion would move even for the same value.
+    const paymentsSecret = () => JSON.parse(kube('get', 'secret', 'coffee-payments', '-o', 'json'));
+    const paymentsVersion = paymentsSecret().metadata.resourceVersion;
     await summary.getByRole('button', { name: 'Save 1 Change' }).click();
     await expect.poll(() => JSON.parse(kube('get', 'secret', 'coffee-mail', '-o', 'json')).data).toEqual({ apiKey: b64('taart') });
     await expect(summary).toContainText('No pending changes');
+    await expect(holder.getByRole('status').filter({ hasText: 'Saved to Kubernetes' })).toBeVisible();
+    expect(paymentsSecret().metadata.resourceVersion).toBe(paymentsVersion);
 
-    // The same value again is admission's refusal, in its own words, and the
-    // key stays pending.
+    // The same value again is admission's refusal, in its own words, on that
+    // key's row, and the key stays pending. The payments key saved with it is
+    // written all the same: each key is refused on its own.
     await enterKey('taart', 'OK');
-    await summary.getByRole('button', { name: 'Save 1 Change' }).click();
-    await expect(summary.getByRole('alert')).toContainText('That is the mail key already set: saving it has to change it.');
+    await enterKey('bon1', 'OK', newPaymentsKey, 'Payments API key');
+    await summary.getByRole('button', { name: 'Save 2 Changes' }).click();
+    await expect.poll(() => paymentsSecret().data).toEqual({ apiKey: b64('bon1') });
+    await expect(summary.locator('li', { hasText: 'Mail API key' }).getByRole('alert')).toContainText('That is the mail key already set: saving it has to change it.');
     await expect(summary).toContainText('1 change(s) ready to save');
+    await expect(holder.getByRole('status').filter({ hasText: 'Saved, except what is marked below' })).toBeVisible();
+
+    // A new value answers the refusal, so the refusal goes.
+    await enterKey('koekje', 'OK');
+    await expect(summary.getByRole('alert')).toHaveCount(0);
 
     // Taken back on /room: the binding goes, and the buttons grey out.
     await summary.getByRole('button', { name: 'Revert' }).click();
@@ -248,6 +262,15 @@ test('the operator gives one person the keys from /room, and takes them back', a
     await summary.getByRole('button', { name: 'Save 1 Change' }).click();
     await expect(summary.getByRole('alert')).toContainText('cannot patch resource "secrets"');
     expect(JSON.parse(kube('get', 'secret', 'coffee-mail', '-o', 'json')).data).toEqual({ apiKey: b64('taart') });
+
+    // That refusal names this participant's username, one very long word. Wide or
+    // narrow, with the whole answer open, it wraps and Save stays on screen.
+    await summary.getByText('More...').click();
+    for (const width of [390, 1280]) {
+      await holder.setViewportSize({ width, height: 800 });
+      expect(await holder.locator('.admin-sidebar').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+      expect(await holder.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    }
   } finally {
     for (const c of contexts) await c.close();
     kube('delete', 'rolebinding', 'voter-audience-coffee-keys-person', '--ignore-not-found');

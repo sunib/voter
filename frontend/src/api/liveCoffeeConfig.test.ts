@@ -234,7 +234,7 @@ describe('CoffeeConfig library integration', () => {
     await live.save('')
     expect(live.conflicts.value).toEqual([])
     expect(live.error.value).toBe('')
-    expect(live.notice.value).toContain('Saved to Kubernetes')
+    expect(live.saveFailure.value).toBeNull()
     expect(live.draft.value?.spec.shopName).toBe('Mine')
     // The CommitRequest goes first, and ONCE: it waits for whichever attempt
     // lands. A second one would be refused SaveInProgress while it waits.
@@ -254,6 +254,33 @@ describe('CoffeeConfig library integration', () => {
 
   // The other half of the same rule, and the one that keeps the demo's beat: two
   // people editing the SAME field still stops and still shows its markers.
+  // The refusal is about what this person tried to save. Somebody else's change
+  // leaves that as refused as it was; their own edit means the form on screen is
+  // no longer what was refused.
+  it('keeps a refused save until this person changes something', async () => {
+    const { live, event, host } = await fixture()
+    live.setValue(['spec', 'shopName'], 'Mine')
+    const message =
+      "x is forbidden: ValidatingAdmissionPolicy 'p' with binding 'p' denied request: No."
+    host.mockResolvedValueOnce(
+      json({ kind: 'Status', code: 422, reason: 'Invalid', message }, 422),
+    )
+    await live.save('')
+    expect(live.error.value).toBe('No.')
+    expect(live.saveFailure.value?.answer).toContain(
+      "ValidatingAdmissionPolicy 'p'",
+    )
+
+    const moved = object('2')
+    moved.spec.bannerText = 'Somebody else'
+    await event({ type: 'modified', object: moved, redacted: [] })
+    expect(live.error.value).toBe('No.')
+
+    live.setValue(['spec', 'shopName'], 'Mine, again')
+    expect(live.error.value).toBe('')
+    expect(live.saveFailure.value).toBeNull()
+  })
+
   it('stops at a real conflict rather than retrying over somebody else', async () => {
     const { live, host, requests } = await fixture()
     live.setValue(['spec', 'shopName'], 'Mine')

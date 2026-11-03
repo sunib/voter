@@ -13,6 +13,8 @@ import { isPrefix, type Path } from '@configbutler/krm-stream'
 import AppShell from '../components/layout/AppShell.vue'
 import DatabaseFields from '../components/databases/DatabaseFields.vue'
 import PermissionRequirements from '../components/PermissionRequirements.vue'
+import SaveRefusal from '../components/SaveRefusal.vue'
+import SavedToast from '../components/SavedToast.vue'
 import { DATABASE_REQUIREMENTS } from '../api/authz'
 import { useAuthorization } from '../api/useAuthorization'
 import { fieldLabel } from '../api/databaseForm'
@@ -36,6 +38,7 @@ const {
   server,
   saving,
   error: loadError,
+  saveFailure,
   commitNotice,
   commitRequest,
   notice,
@@ -169,8 +172,10 @@ function keepMine(path: string) {
   live.keepMine(toPath(path))
 }
 
+const savedToast = ref<InstanceType<typeof SavedToast> | null>(null)
 async function save() {
-  await live.save(changeReason.value)
+  if (await live.save(changeReason.value))
+    savedToast.value?.show('Saved to Kubernetes')
 }
 
 async function refreshFromServer() {
@@ -209,6 +214,7 @@ onBeforeUnmount(() => {
 
 <template>
   <AppShell title="Database request" width="wide">
+    <SavedToast ref="savedToast" />
     <section class="hero-card hero-card--compact">
       <p class="eyebrow">Platform</p>
       <h1>{{ name }}</h1>
@@ -398,14 +404,16 @@ onBeforeUnmount(() => {
                 </label>
                 <!-- Next to the button that caused it: a refused save shown at
                      the top of the page went unseen below a long form. -->
-                <div
+                <SaveRefusal
                   v-if="loadError && state.status === 'live'"
-                  class="error-copy"
-                  role="alert"
-                >
-                  <strong>Save failed</strong>
-                  <p>{{ loadError }}</p>
-                </div>
+                  :headline="
+                    saveFailure
+                      ? 'Not saved. Your changes are still here.'
+                      : 'Request failed'
+                  "
+                  :message="loadError"
+                  :answer="saveFailure?.answer"
+                />
               </div>
 
               <div class="save-summary__footer">

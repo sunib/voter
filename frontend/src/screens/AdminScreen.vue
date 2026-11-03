@@ -12,12 +12,15 @@ import { appConfig } from '../api/appConfig'
 import { loginURL } from '../api/session'
 import { commitURL, shortSha, useCommitStatus } from '../api/commitStatus'
 import { ADMIN_REQUIREMENTS, allowsNamed } from '../api/authz'
+import { kubernetesAnswer } from '../api/http'
 import { SECRETS, mergePatch } from '../api/kube'
 import { useAuthorization } from '../api/useAuthorization'
 import AdminNav from '../components/admin/AdminNav.vue'
 import AppShell from '../components/layout/AppShell.vue'
 import PermissionRequirements from '../components/PermissionRequirements.vue'
 import FieldStateMarker from '../components/admin/FieldStateMarker.vue'
+import SaveRefusal from '../components/SaveRefusal.vue'
+import SavedToast from '../components/SavedToast.vue'
 
 type FieldState = 'clean' | 'dirty' | 'conflict'
 type FieldConflict = { previousServer?: unknown; incomingServer: unknown }
@@ -38,6 +41,7 @@ const {
   server: serverConfig,
   saving,
   error: loadError,
+  saveFailure,
   commitNotice,
   commitRequest,
   notice,
@@ -105,8 +109,10 @@ const fieldChanges = computed(() =>
 // lifts this page's own check and nothing else: Save then gets the API
 // server's real refusal, which is the point of the demo. A new key waits here,
 // in this page, as a change like any other, until Save writes it: after the
-// menu, so a refused menu takes the key down with it. Both writes land in the
-// same coffee-settings commit, and that commit is where the key is encrypted.
+// menu, so a refused menu takes the key down with it. Each key is then written
+// and refused on its own, with its refusal on its own row: a refused mail key
+// does not hold back the payments key. Both writes land in the same
+// coffee-settings commit, and that commit is where the key is encrypted.
 const KEY_SLOTS = [
   { secret: 'coffee-mail', label: 'Mail API key', button: 'New mail API key' },
   {
@@ -125,7 +131,14 @@ const keyChanges = computed(() =>
   KEY_SLOTS.filter((slot) => pendingKeys.value[slot.secret] !== undefined),
 )
 const keysSaving = ref(false)
-const keyError = ref('')
+const keyErrors = ref<
+  Partial<Record<KeySlot['secret'], { message: string; answer?: string }>>
+>({})
+const savedToast = ref<InstanceType<typeof SavedToast> | null>(null)
+function clearKeyError(slot: KeySlot) {
+  const { [slot.secret]: _cleared, ...rest } = keyErrors.value
+  keyErrors.value = rest
+}
 const keyDialog = ref<HTMLDialogElement | null>(null)
 const keyDialogSlot = ref<KeySlot | null>(null)
 const keyDialogValue = ref('')
@@ -141,7 +154,7 @@ function closeKeyDialog(accept: boolean) {
       ...pendingKeys.value,
       [slot.secret]: keyDialogValue.value,
     }
-    keyError.value = ''
+    clearKeyError(slot)
   }
   keyDialogValue.value = ''
   keyDialog.value?.close()
@@ -149,6 +162,7 @@ function closeKeyDialog(accept: boolean) {
 function discardKey(slot: KeySlot) {
   const { [slot.secret]: _discarded, ...rest } = pendingKeys.value
   pendingKeys.value = rest
+  clearKeyError(slot)
 }
 const dirtyFieldCount = computed(
   () => fieldChanges.value.length + keyChanges.value.length,
@@ -234,27 +248,38 @@ async function refreshVoucherUsage() {
   }
 }
 async function saveConfig() {
-  keyError.value = ''
-  if (fieldChanges.value.length > 0) {
+  keyErrors.value = {}
+  const menuChanged = fieldChanges.value.length > 0
+  if (menuChanged) {
     if (!(await live.save(changeReason.value))) return
   } else {
     // Only keys this time: a refusal of an earlier menu save is not news any
     // more, and beside this save's own answer it would read as one.
-    loadError.value = ''
+    live.clearError()
   }
+  const keys = keyChanges.value
   keysSaving.value = true
-  try {
-    for (const slot of keyChanges.value) {
+  for (const slot of keys) {
+    try {
       await mergePatch(SECRETS, slot.secret, {
         stringData: { apiKey: pendingKeys.value[slot.secret] },
       })
       discardKey(slot)
+    } catch (e) {
+      keyErrors.value = {
+        ...keyErrors.value,
+        [slot.secret]: {
+          message: e instanceof Error ? e.message : 'Could not set the key.',
+          answer: kubernetesAnswer(e),
+        },
+      }
     }
-  } catch (e) {
-    keyError.value = e instanceof Error ? e.message : 'Could not set the key.'
-  } finally {
-    keysSaving.value = false
   }
+  keysSaving.value = false
+  const refused = Object.keys(keyErrors.value).length
+  if (refused === 0) savedToast.value?.show('Saved to Kubernetes')
+  else if (menuChanged || refused < keys.length)
+    savedToast.value?.show('Saved, except what is marked below')
 }
 watch(
   () => serverConfig.value?.metadata?.resourceVersion,
@@ -490,6 +515,7 @@ onBeforeUnmount(clearAllFlashes)
 
 <template>
   <AppShell title="Menu editor" width="wide">
+    <SavedToast ref="savedToast" />
     <section class="hero-card hero-card--compact">
       <p class="eyebrow">Admin</p>
       <h1>Live coffee config</h1>
@@ -1594,6 +1620,12 @@ onBeforeUnmount(clearAllFlashes)
                       <code class="inline-code">{{ slot.secret }}</code
                       >, not shown.
                     </p>
+                    <SaveRefusal
+                      v-if="keyErrors[slot.secret]"
+                      headline="Not saved. Your new key is still here."
+                      :message="keyErrors[slot.secret]!.message"
+                      :answer="keyErrors[slot.secret]!.answer"
+                    />
                   </div>
                   <button
                     class="button button--ghost"
@@ -1635,18 +1667,16 @@ onBeforeUnmount(clearAllFlashes)
                 </p>
                 <!-- Next to the button that caused it: a refused save shown at
                      the top of the page went unseen below a long menu. -->
-                <div
+                <SaveRefusal
                   v-if="loadError && state.status === 'live'"
-                  class="error-copy"
-                  role="alert"
-                >
-                  <strong>Admin request failed</strong>
-                  <p>{{ loadError }}</p>
-                </div>
-                <div v-if="keyError" class="error-copy" role="alert">
-                  <strong>Admin request failed</strong>
-                  <p>{{ keyError }}</p>
-                </div>
+                  :headline="
+                    saveFailure
+                      ? 'Not saved. Your changes are still here.'
+                      : 'Request failed'
+                  "
+                  :message="loadError"
+                  :answer="saveFailure?.answer"
+                />
               </div>
 
               <div class="save-summary__footer">

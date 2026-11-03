@@ -71,8 +71,8 @@ menu edit into a key read. This is the confused-deputy problem. Notice also that
   person writes a new mail key, a new payments key,     PATCH secret coffee-mail / coffee-payments,
   or both                                               own token, via /k8s
     admission: one entry, value actually changes, no dry run, no metadata
-    gitops-reverser -> coffee-settings: coffee/resources/secrets/voter/coffee-mail.sops.yaml
-                                        coffee/resources/secrets/voter/coffee-payments.sops.yaml
+    gitops-reverser -> coffee-settings: coffee/resources/coffee-mail.sops.yaml
+                                        coffee/resources/coffee-payments.sops.yaml
                                         (ciphertext, authored by them)              <- demo beat 2
   coffee-settings CI -> a new settings image, a new digest
   Flux -> the third coffee app rolls onto it            the previous digest stays in zot, unchanged
@@ -252,8 +252,7 @@ The same rule goes on `payments`, with its own message. This is the rule behind
 do): the editor makes it easy, and the schema makes it true for `kubectl` and
 Flux too. Until P3 the editor still has free-text fields for both. A save sends
 every changed field in one patch, so filling in a provider and its reference
-together works; filling in one of them gets this message in the "Admin request
-failed" panel.
+together works; filling in one of them gets this message above the Save button.
 
 Why the enum stays rather than becoming CEL as well (`self.name ==
 'coffee-mail'`): an enum is part of the OpenAPI document, so `kubectl explain`,
@@ -361,7 +360,9 @@ could ship before the cluster had the Role; P2 shipped first instead.
   field, OK and Cancel. OK does not write anything: the key becomes a pending
   change in "Review and save", beside the menu's own, never shown, and Revert
   discards it. Save writes the menu first and then each key, one patch of one
-  Secret each, so a refused menu leaves the key unwritten and still pending.
+  Secret each, so a refused menu leaves the key unwritten and still pending. The
+  keys do not depend on each other: a refused one stays pending with its refusal
+  on its own row, and the other is still written.
   Both writes fall in the same 5 s window, so coffee-settings gets one commit,
   and that commit is where the key is encrypted. Nothing leaves the browser
   before Save.
@@ -372,8 +373,10 @@ could ship before the cluster had the Role; P2 shipped first instead.
 - **The reveal** is a stage beat, not a screen: the key-holder has kept the key
   to themselves, and Simon opens the commit's `.sops.yaml` with `sops decrypt`
   and reads it out. The room sees that only someone with the age key could.
-- A refusal comes back as the policy's own message in the existing "Admin
-  request failed" panel, as the price policy's does now.
+- A refusal of a key comes back as the policy's own message on that key's row in
+  "Review and save"; a refusal of the menu above the Save button, as the price
+  policy's does now. Either way "More..." opens the whole answer, and
+  the refusal stays until the person changes what was refused or saves again.
 
 Showing whether a key is set, and since when, needs something that can read the
 Secret. That is optional, in phase 4. Until then the proof is the commit in

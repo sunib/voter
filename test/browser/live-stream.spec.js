@@ -292,7 +292,7 @@ test("a save that keeps losing says so and keeps unsaved input visible", async (
     // permission, so it is on screen throughout. Neither is a real ambiguity --
     // both are strict-mode violations over an element that was there all along.
     // The heading belongs to the save-failure panel and to nothing else.
-    const refusal = editor.page.getByRole("alert").filter({ hasText: "Admin request failed" });
+    const refusal = editor.page.getByRole("alert").filter({ hasText: "Not saved" });
     await expect(refusal).toContainText(/their save landed first each time/);
     // Bounded: one press of Save is three attempts, and then it stops trying.
     expect(patches).toBe(3);
@@ -323,15 +323,31 @@ test("a price over €10 is refused by admission, in the policy's words", async 
   try {
     await price.fill("1250");
     await editor.page.getByRole("button", { name: /^Save \d+ Change/ }).click();
-    const refusal = editor.page.getByRole("alert").filter({ hasText: "Admin request failed" });
-    await expect(refusal).toContainText(
+    const refusal = editor.page.getByRole("alert").filter({ hasText: "Not saved" });
+    await expect(refusal.locator("p")).toHaveText(
       `Nobody pays more than €10 for a coffee: ${coffeeConfig().spec.products[0].name}.`,
     );
-    await expect(refusal).not.toContainText("ValidatingAdmissionPolicy");
     expect(patches).toBe(1);
     // Nothing was stored, and the person's typing is still there to correct.
     expect(coffeeConfig().spec.products[0].priceCents).toBe(before);
     await expect(price).toHaveValue("1250");
+
+    // Kubernetes' whole answer, word for word, is one click away.
+    const answer = refusal.locator("pre");
+    await expect(answer).toBeHidden();
+    await refusal.getByText("More...").click();
+    await expect(answer).toContainText("ValidatingAdmissionPolicy 'voter-coffee-price'");
+    await expect(answer).toContainText('"kind": "Status"');
+
+    // It stays while somebody else changes the menu: this save is still refused.
+    const changed = `While refused ${Date.now()}`;
+    kube("-n", "voter", "patch", "coffeeconfig", "demo-coffee", "--type=merge", "-p", JSON.stringify({ spec: { shopName: changed } }));
+    await expect(shopName(editor.page)).toHaveValue(changed);
+    await expect(refusal).toBeVisible();
+
+    // And it goes as soon as this person changes what was refused.
+    await price.fill("950");
+    await expect(refusal).toHaveCount(0);
   } finally {
     await editor.context.close();
   }

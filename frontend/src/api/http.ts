@@ -37,12 +37,38 @@ export function createApiError(status: number, body: unknown): ApiError {
         : typeof details?.error === 'string'
           ? details.error
           : `Request failed (${status})`
-  const err = new Error(admissionReason(message)) as ApiError
+  const err = new Error(
+    fieldReasons(body) ?? admissionReason(message),
+  ) as ApiError
   err.status = status
   if (typeof details?.code === 'string') err.code = details.code
   else if (typeof details?.reason === 'string') err.code = details.reason
   err.body = body
   return err
+}
+
+/** Kubernetes' whole answer to a refused request, word for word, for whoever
+ *  wants more than the sentence on the screen. Undefined when something else
+ *  answered, because then there is no such thing to show. */
+export function kubernetesAnswer(cause: unknown): string | undefined {
+  const body = (cause as ApiError).body as { kind?: unknown } | undefined
+  return body?.kind === 'Status' ? JSON.stringify(body, null, 2) : undefined
+}
+
+/** A refusal by a CRD's schema, as the person should read it: each field and what
+ *  Kubernetes said about it, without 'CoffeeConfig... "demo" is invalid:' around
+ *  them. The field `<nil>` is the API server's note that it stopped checking.
+ *  An admission policy names no field, so it has no causes to use here. */
+function fieldReasons(body: unknown): string | undefined {
+  const causes = (
+    body as {
+      details?: { causes?: { field?: string; message?: string }[] }
+    } | null
+  )?.details?.causes
+  const lines = (causes ?? [])
+    .filter((cause) => cause.field && cause.field !== '<nil>')
+    .map((cause) => `${cause.field}: ${cause.message}`)
+  return lines.length > 0 ? lines.join('\n') : undefined
 }
 
 /** A refusal by one of Voter's admission policies, as the person should read
