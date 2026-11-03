@@ -1,0 +1,118 @@
+# The two Secrets the menu's key references name, coffee-mail and
+# coffee-payments, and what a person may do to them
+# (docs/coffee-api-keys-design.md, decision 5).
+#
+# The grant is `patch` on those two names and nothing else
+# (voter-audience-coffee-keys), so this policy is about the patch itself. Every
+# write passes through the API server with the person's own token, gets audited
+# under their name, and is mirrored, encrypted, into the public coffee-settings
+# repository. What stops a write here stops it everywhere.
+#
+# The value itself is not checked: any length will do. A policy could not read
+# it anyway, because CEL sees a Secret's data as base64 text and cannot decode
+# it (docs/kube-api-limitations.md). Old and new can still be compared as text.
+#
+# People only, as voter-editable-spec: Flux seeds these Secrets from Git with an
+# empty value, and no controller writes them.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: voter-coffee-keys
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ['']
+        apiVersions: ['*']
+        resources: [secrets]
+        operations: [UPDATE]
+        resourceNames: [coffee-mail, coffee-payments]
+  matchConditions:
+    - name: a-person
+      expression: >-
+        !request.userInfo.username.startsWith('system:')
+  variables:
+    - name: which
+      expression: >-
+        {'coffee-mail': 'mail key', 'coffee-payments': 'payments key'}[object.metadata.name]
+    - name: data
+      expression: "object.?data.orValue({})"
+  validations:
+    # A patch is answered with the whole stored object. With one entry, that is
+    # only ever what this person just sent.
+    - expression: "variables.data.size() == 1 && 'apiKey' in variables.data"
+      messageExpression: >-
+        'The ' + variables.which + ' holds one entry, apiKey, and nothing else.'
+      reason: Invalid
+    # Otherwise `patch` works as `get`: sending nothing new, or the value
+    # already stored, is answered with the previous person's key. A dry run
+    # would let anyone test a guess against it without changing anything.
+    - expression: "!request.dryRun"
+      messageExpression: >-
+        'A new ' + variables.which + ' is set for real, not as a dry run.'
+      reason: Forbidden
+    - expression: >-
+        variables.data.?apiKey.orValue('') != oldObject.?data.apiKey.orValue('')
+      messageExpression: >-
+        'That is the ' + variables.which + ' already set: saving it has to change it.'
+      reason: Invalid
+    # Only the value. gitops-reverser encrypts data and stringData and nothing
+    # else, so an annotation holding the value (kubectl apply's
+    # last-applied-configuration does) would reach a public repository in plain
+    # text. And `immutable: true` would freeze the key for everyone, Flux too.
+    - expression: >-
+        object.metadata.?labels.orValue({}) == oldObject.metadata.?labels.orValue({})
+          && object.metadata.?annotations.orValue({}) == oldObject.metadata.?annotations.orValue({})
+          && object.metadata.?finalizers.orValue([]) == oldObject.metadata.?finalizers.orValue([])
+          && object.metadata.?ownerReferences.orValue([]) == oldObject.metadata.?ownerReferences.orValue([])
+          && object.?type.orValue('') == oldObject.?type.orValue('')
+          && object.?immutable.orValue(false) == oldObject.?immutable.orValue(false)
+      messageExpression: >-
+        'Only the value of the ' + variables.which + ' can be changed here: the rest is managed by GitOps.'
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: voter-coffee-keys
+spec:
+  policyName: voter-coffee-keys
+  validationActions: [Deny]
+---
+# The converse, for everyone: the label that publishes a Secret to
+# coffee-settings belongs on those two Secrets only. People cannot label Secrets
+# at all; this is for the operator's own mistakes. Label coffee-settings-age by
+# accident and the coffee-settings WatchRule would publish the key that decrypts
+# that repository, encrypted to itself, next to the menu.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: voter-coffee-settings-label
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ['']
+        apiVersions: ['*']
+        resources: [secrets]
+        operations: [CREATE, UPDATE]
+  # Every Secret in the cluster passes through here, so the condition keeps a
+  # mistake in this policy away from all the ones without the label.
+  matchConditions:
+    - name: labelled
+      expression: >-
+        'voter.configbutler.ai/coffee-settings' in object.metadata.?labels.orValue({})
+  validations:
+    - expression: "object.metadata.name in ['coffee-mail', 'coffee-payments']"
+      messageExpression: >-
+        'Only coffee-mail and coffee-payments are published with the menu; ' +
+        object.metadata.name + ' cannot carry voter.configbutler.ai/coffee-settings.'
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: voter-coffee-settings-label
+spec:
+  policyName: voter-coffee-settings-label
+  validationActions: [Deny]

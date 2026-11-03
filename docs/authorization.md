@@ -145,7 +145,7 @@ but cannot list them.
 ### Admission: the rules RBAC cannot say
 
 RBAC decides verbs on resources; it cannot say "only your own ballot" or "only
-the spec". Two ValidatingAdmissionPolicies in `voter/config/admission/` (copied to
+the spec". ValidatingAdmissionPolicies in `voter/config/admission/` (copied to
 `2-gitops/voter-demo/admission/`) say it, for people only — `system:` users and
 service accounts (Flux, gitops-reverser, Voter's reconciler) are not matched:
 
@@ -164,12 +164,20 @@ service accounts (Flux, gitops-reverser, Voter's reconciler) are not matched:
   `platform.configbutler.ai/intent` annotation and `kubectl apply`'s
   last-applied annotation. A person's `kubectl apply` of a CoffeeConfig is
   therefore refused.
+- **`voter-coffee-keys`**, on updates of the Secrets `coffee-mail` and
+  `coffee-payments`, which `voter-audience-coffee-keys` lets one person `patch`:
+  one entry, `apiKey`, set to something new, not as a dry run, and nothing else
+  about the Secret changed. The value itself is not checked
+  ([coffee-api-keys-design.md](coffee-api-keys-design.md), decision 5). Defined
+  in Voter's fixture; not on the cluster yet.
 
-A third policy is not about who: **`voter-coffee-price`** refuses any
+Another policy is not about who: **`voter-coffee-price`** refuses any
 CoffeeConfig create or update that sets a product over €10 (`priceCents` above
 1000; a price already stored stays until changed), from anyone, Flux included, as a 422 with "Nobody pays more than €10 for
 a coffee: <product>." Whether a person may change the menu is RBAC's question;
-whether the change makes sense is this one's.
+whether the change makes sense is this one's. **`voter-coffee-settings-label`**
+is the same kind: from anyone, only `coffee-mail` and `coffee-payments` may carry
+the label that publishes a Secret to coffee-settings.
 
 **There is still no bound on how much an audience token may write.** The `voter`
 namespace has no ResourceQuota and no LimitRange. One ballot per person per round

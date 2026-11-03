@@ -1,6 +1,9 @@
 # Mail and payments keys the room can set
 
-_2026-11-03. Design, not built. Answers the open question in
+_2026-11-03. P1 is built (the CRD, the policies, the fixture and
+`test/browser/coffee-keys.spec.js`); P2 to P4 are design. There is no rule on the
+key's value: admission cannot read it (decision 5), and any length is fine.
+Answers the open question in
 `external/k8s/k8s.koudijs.dev/docs/settings-image-publishing-plan.md` §2 ("Which
 Secret goes with the menu, who writes it, and who reads it?") for demo beat 2.
 Items marked **to verify** are believed true from docs or source but have not
@@ -67,7 +70,7 @@ menu edit into a key read. This is the confused-deputy problem. Notice also that
 /room: operator gives "Keys" to one person              (RoleBinding, like the menu's -person grant)
   person writes a new mail key, a new payments key,     PATCH secret coffee-mail / coffee-payments,
   or both                                               own token, via /k8s
-    admission: a word of 1-5 letters or digits, value actually changes, no metadata
+    admission: one entry, value actually changes, no dry run, no metadata
     gitops-reverser -> coffee-settings: coffee/resources/secrets/voter/coffee-mail.sops.yaml
                                         coffee/resources/secrets/voter/coffee-payments.sops.yaml
                                         (ciphertext, authored by them)              <- demo beat 2
@@ -91,25 +94,20 @@ the loop this repository already has (decision 3).
 | `spec.mail.apiKeySecretRef` | `coffee-mail` | `apiKey` |
 | `spec.payments.apiKeySecretRef` | `coffee-payments` | `apiKey` |
 
-**The value is a word: 1 to 5 letters or digits** (`^[A-Za-z0-9]{1,5}$`), the
-same rule for both. The person picks one, and it stays secret. Nobody will
-mistake `taart` for a real API key, so it is plain to everyone that this is a
-demo. It is also the simplest rule that still refuses a real key pasted by
-mistake: every real provider key is far longer than five characters. A SendGrid
-key is 69, a Stripe secret key over 100.
+**The value is whatever the person types**, of any length: a word like `taart`,
+one character, or something the size of a real key. It stays secret. Nothing
+checks it (decision 5), so the demo relies on people typing a made-up word,
+not on a rule.
 
 Both are **pre-created by Flux** from `external/k8s` (SOPS, like every Secret
 there), with:
 
-- an **empty** value, which consumers read as "not configured". The empty
-  value is outside the rule, so it is the one value only Flux can write;
+- an **empty** value, which consumers read as "not configured". A person can
+  empty a key again too;
 - the label `voter.configbutler.ai/coffee-settings: "true"`, so the existing
   coffee-settings WatchRule picks them up (git-sink-coffee-settings.yaml);
 - `kustomize.toolkit.fluxcd.io/ssa: IfNotPresent`, so the room's writes are not
   reverted. This is the same choice as the seeded CoffeeConfig in `app.yaml`.
-
-Nothing here depends on which providers mail and payments use: the word rule
-is the same whatever `provider` says.
 
 One Secret per reference, not one Secret with two keys: each key is written,
 committed and refused on its own. And the rule in decision 5 that a patch
@@ -228,9 +226,9 @@ payments:
 - **"The change, not the menu" comes free.** CRD validation ratcheting (GA since
   Kubernetes 1.33; the nodes run 1.37) lets an object whose stored reference
   already breaks the enum be updated, as long as that field is left alone. This
-  is what the price policy does by hand. `required` might not ratchet the same
-  way (**to verify**), so the change ships only after checking that no live
-  CoffeeConfig holds a half-filled ref (P1).
+  is what the price policy does by hand. Verified on k3d 1.37 for the enum,
+  `required` and the CEL rule below. The CEL rule differs in one way: it lets
+  the edit through **with a warning**, on every write, until the menu is fixed.
 
 **A CEL rule for what the enum cannot say.** An enum judges one field on its
 own. Whether a reference belongs there at all depends on its neighbour,
@@ -252,7 +250,10 @@ mail:
 The same rule goes on `payments`, with its own message. This is the rule behind
 "the editor fills a reference in when its provider is set" (What the screens
 do): the editor makes it easy, and the schema makes it true for `kubectl` and
-Flux too.
+Flux too. Until P3 the editor still has free-text fields for both. A save sends
+every changed field in one patch, so filling in a provider and its reference
+together works; filling in one of them gets this message in the "Admin request
+failed" panel.
 
 Why the enum stays rather than becoming CEL as well (`self.name ==
 'coffee-mail'`): an enum is part of the OpenAPI document, so `kubectl explain`,
@@ -263,9 +264,9 @@ replace the enum with CEL; do not keep both, or one mistake comes back as two
 errors.
 
 **What CEL cannot do here** is look at the Secret a reference names: whether it
-exists, or holds a valid word. A rule in the API server sees only the object
-being written, never another one. That is why the word rule sits on the Secret
-itself (decision 5), and why the Secrets are pre-created (decision 1).
+exists, or what it holds. A rule in the API server sees only the object
+being written, never another one. That is why the checks on a key sit on the
+Secret itself (decision 5), and why the Secrets are pre-created (decision 1).
 
 Pinning a value in the schema mixes a deployment choice into the API: another
 name means a CRD change, not a policy edit. Here that costs nothing. The CRD is
@@ -277,41 +278,46 @@ to: both Secrets always exist (decision 1), and an unset one reads as unset
 (decision 6). The checks on the Secrets themselves (decision 5) stay a policy,
 because a Secret is a built-in type and has no schema of ours to put them in.
 
-### 5. Admission on the Secrets: a word, and nothing else
+### 5. Admission on the Secrets: the value changes, and nothing else does
 
-New policy `voter-coffee-keys`, matched with
-`matchConstraints.resourceRules[].resourceNames: [coffee-mail,
-coffee-payments]`. A ValidatingAdmissionPolicy, not a webhook: every rule is a
-line of CEL in the API server, so there is no server to run. The word rule is:
+**The value itself is not checked.** Any length is fine. The first plan was a
+rule of 1 to 5 letters or digits, as CEL:
+`string(object.data.apiKey).matches('^[A-Za-z0-9]{1,5}$')`. On k3d it never
+matches: in admission a Secret's value is its base64 text, and CEL cannot decode
+it ([kube-api-limitations.md](kube-api-limitations.md#a-secrets-data-is-base64-text-in-cel-and-cel-cannot-decode-it)).
+A regex on the base64 shape could still pin the length, but a short word is a
+habit for the demo, not something to enforce. Whoever pastes a real key is
+allowed to: it lands in the audit log and, encrypted, in coffee-settings, and
+that is on them.
 
-```yaml
-- expression: "string(object.data.apiKey).matches('^[A-Za-z0-9]{1,5}$')"
-  message: "A key here is a word of 1 to 5 letters or digits: this is a demo, and a real key does not belong in it."
-```
+Policy `voter-coffee-keys`
+([coffee-keys-policy.yaml](../voter/config/admission/coffee-keys-policy.yaml)),
+matched on updates with `matchConstraints.resourceRules[].resourceNames:
+[coffee-mail, coffee-payments]`. A ValidatingAdmissionPolicy, not a webhook:
+every rule is a line of CEL in the API server, so there is no server to run.
 
 For people (not `system:`), it requires:
 
 | Rule | Why |
 | --- | --- |
 | `data` has exactly one key, `apiKey` | the response to a patch carries the whole object; one key means it carries only what this person wrote |
-| `apiKey` is a word of 1 to 5 letters or digits | a real key pasted by mistake is refused before it is stored, audited or committed, and nobody can take what is stored for a real key |
-| `apiKey` differs from the stored value | a no-op patch would return the previous person's key, so `patch` would work as `get`; refusing the no-op closes that |
-| labels, annotations, finalizers, owner references, `type` unchanged | the reverser encrypts only `data`/`stringData` (`encrypted_regex`). An annotation such as `kubectl apply`'s `last-applied-configuration` contains the value **in plain text**, and coffee-settings is public |
+| not a dry run | a dry run would let anyone test a guess against the stored key without changing it: refused means the guess was right |
+| `apiKey` differs from the stored value (comparing the base64 text) | a no-op patch would return the previous person's key, so `patch` would work as `get`; refusing the no-op closes that. Verified: a no-op patch still goes through admission |
+| labels, annotations, finalizers, owner references, `type`, `immutable` unchanged | the reverser encrypts only `data`/`stringData` (`encrypted_regex`). An annotation such as `kubectl apply`'s `last-applied-configuration` contains the value **in plain text**, and coffee-settings is public. `immutable: true` would freeze the key for everyone, Flux included |
 
-And a second validation, for **everyone**, on every Secret in `voter`: the
-label `voter.configbutler.ai/coffee-settings` is allowed only on `coffee-mail`
-and `coffee-payments`. People cannot label Secrets anyway, so this protects
-against the operator's own mistakes: label `coffee-settings-age` by accident
-and it would be published, encrypted to itself, next to the menu.
+And a second policy, `voter-coffee-settings-label`, for **everyone**, on every
+Secret in the cluster that carries the label `voter.configbutler.ai/coffee-settings`:
+only `coffee-mail` and `coffee-payments` may. People cannot label Secrets anyway,
+so this protects against the operator's own mistakes: label `coffee-settings-age`
+by accident and it would be published, encrypted to itself, next to the menu. A
+match condition on the label keeps every other Secret write away from it.
 
-**A short word changes what may be shown about it.** There are fewer than a
-billion words of up to five letters and digits (62⁵ ≈ 9 × 10⁸), so a computer
-tries them all in seconds. Anything derived from the word therefore gives the
-word away: its hash, its last four characters, a fingerprint. Nothing in this
-design shows any of them (decision 6, P4, and the signing side note). Encryption
-is unaffected: SOPS encrypts with a random key, not one derived from the word.
-The ciphertext's length does give away the word's length, 1 to 5, and that is
-accepted.
+**Nothing derived from a key is shown.** People will mostly type short words,
+and a short word is found from its hash, its last four characters or a
+fingerprint in seconds. Nothing in this design shows any of them (decision 6, P4,
+and the signing side note). Encryption is unaffected: SOPS encrypts with a random
+key, not one derived from the value. The ciphertext's length gives away the
+value's length, and that is accepted.
 
 ### 6. The consumer resolves each reference inside the bundle
 
@@ -347,11 +353,10 @@ demo-production until `app.yaml` sets them.
   provider is set, so a menu edit cannot leave it half done.
 - **"Set a new key"**, shown only to the person whose permissions include
   `patch` on these Secrets (the watchable-permissions machinery already answers
-  that): one password input **per key**, five characters long at most, each with
-  its own Save, and no echo of the value afterwards. Each Save is one patch of
-  one Secret, so a refusal names the key it was about. The input's own limit is
-  a convenience; the policy is the rule, and a terminal hits the same one.
-- **The reveal** is a stage beat, not a screen: the key-holder has kept the word
+  that): one password input **per key**, with no length limit, each with its
+  own Save, and no echo of the value afterwards. Each Save is one patch of one
+  Secret, so a refusal names the key it was about.
+- **The reveal** is a stage beat, not a screen: the key-holder has kept the key
   to themselves, and Simon opens the commit's `.sops.yaml` with `sops decrypt`
   and reads it out. The room sees that only someone with the age key could.
 - A refusal comes back as the policy's own message in the existing "Admin
@@ -366,7 +371,7 @@ coffee-settings, and that commit is beat 2 anyway.
 | What limits it | How hard |
 | --- | --- |
 | One named person holds the grant, given and taken back from `/room` | hard: RBAC |
-| A patch must change the value and be a word of 1 to 5 letters or digits | hard: admission |
+| A patch must change the value, and not be a dry run | hard: admission |
 | Commits are batched (5 s idle, 1 min max window), and a settings image is built per commit | soft: churn is cheap but visible |
 | The UI disables a Save for a few seconds after a write | cosmetic only |
 
@@ -379,8 +384,9 @@ it to do.
 ## Costs we accept
 
 - **The audit log carries the values.** `1-talos/files/audit-policy.yaml` logs
-  Secrets at `RequestResponse` on purpose, for authorship. Accepted, because
-  decision 5 makes sure each value is a short demo word, never a real key.
+  Secrets at `RequestResponse` on purpose, for authorship. Accepted: the keys
+  are made-up words for a demo, and someone who pastes a real key puts it there
+  themselves (decision 5).
 - **The writer sees their own key in the patch response.** Write-only does not
   exist in Kubernetes RBAC. With one key per Secret and no-op patches refused,
   they only ever see the value they just sent.
@@ -395,32 +401,41 @@ it to do.
   its own, delivered by Git.
 - **A namespace rebuild resets both keys** to empty (IfNotPresent seeding), the
   same as the menu.
-- **The ciphertext gives away the word's length**, 1 to 5. Nothing else about
-  it (decision 5).
+- **The ciphertext gives away the key's length.** Nothing else about it
+  (decision 5).
+- **The live menu warns until it is fixed.** `voter/demo-coffee` holds
+  `mail.apiKeySecretRef: {name: Tes, key: Ter}` with no provider and
+  `payments.apiKeySecretRef: {name: Haa, key: Ns}` (read 2026-11-03), typed into
+  the old free-text fields. It stays editable, but every write prints the CEL
+  rule's warning. Part of P2: set both references right, or remove them.
 
 ## Phases
 
 | Phase | Where | Ends when |
 | --- | --- | --- |
-| **P1** CRD + policy | voter: `coffeeconfigs.yaml` (the enums and `required`), `voter/config/admission/` (the Secrets' policy), fixture tests on k3d. Before it ships, read the refs on every live CoffeeConfig (`kubectl get coffeeconfigs -A -o yaml`) | a ref to `k8s-trail-git`, a mail ref naming `coffee-payments`, and a provider without a ref are refused by the schema, a pasted real key, an empty value and a no-op patch by the policy, all on k3d; an object with an old wrong ref can still have its prices changed |
-| **P2** cluster | external/k8s: the two Secrets, the Role, the copied policies. **Needs** the coffee-settings sink switched on (it is committed but commented out in `kustomization.yaml`) | a hand-run `kubectl patch` of each, as a test user, lands as `coffee/resources/secrets/voter/<name>.sops.yaml`, authored by them, and opens with `sops decrypt` |
+| **P1** CRD + policy (**built**) | voter: `coffeeconfigs.yaml` (the enums, `required` and the CEL rule), [coffee-keys-policy.yaml](../voter/config/admission/coffee-keys-policy.yaml) (both policies), the Role and the two Secrets in `test/e2e/voter.yaml`, [coffee-keys.spec.js](../test/browser/coffee-keys.spec.js) | a ref to `k8s-trail-git`, a mail ref naming `coffee-payments`, and a provider without a ref are refused by the schema; a second key, a no-op patch, a dry run and a metadata change by the policy; the label on another Secret by the second one. Passing on the fixture, with the other 27 browser tests, on 2026-11-03. Ratcheting checked by hand on k3d 1.37 |
+| **P2** cluster | external/k8s: the two Secrets, the Role, the copied CRD and policies, and the live `demo-coffee`'s references fixed (Costs). **Needs** the coffee-settings sink switched on (it is committed but commented out in `kustomization.yaml`) | a hand-run `kubectl patch` of each, as a test user, lands as `coffee/resources/secrets/voter/<name>.sops.yaml`, authored by them, and opens with `sops decrypt` |
 | **P3** Voter UI | voter: `/room` grant, the fixed references in the editor, "Set a new key" for each, behind the two settings | the rehearsal: one phone sets both keys, a new digest, the third app rolls; then a digest pin brings the previous one back |
-| **P4** (optional) key status | voter backend: `get` on the two names; returns `{name, set, updated}` only, never any part of the word | the editor shows "mail set 2 min ago; payments not set" |
+| **P4** (optional) key status | voter backend: `get` on the two names; returns `{name, set, updated}` only, never any part of the key | the editor shows "mail set 2 min ago; payments not set" |
 
-## To verify (before P1 lands)
+## To verify
 
-- Ratcheting on the enums: a CoffeeConfig whose stored ref breaks them can still
-  be patched elsewhere. And whether `required: [name, key]` ratchets too, or a
-  half-filled stored ref blocks every edit until it is fixed. The same for the
-  provider/reference CEL rule: a live menu with a provider and no reference must
-  still be editable elsewhere (CEL rules without `oldSelf` are meant to ratchet).
+Checked on k3d 1.37.1 on 2026-11-03, before P1:
 
-- Validating admission sees `stringData` already merged into `data` for a
-  Secret, so a `stringData` patch cannot get past the format rule.
-- A no-op patch, and a `dryRun=All` patch, both still go through validating
-  admission. If a no-op skips it, the "must change" rule needs another way in.
-- `string(object.data.apiKey)` works on Secret bytes in CEL, and a map literal
-  indexed by `object.metadata.name` is accepted in a policy variable.
+- **Holds.** Ratcheting: a CoffeeConfig with a wrong ref, a half-filled ref, a
+  mail ref naming `coffee-payments`, or a provider without a ref can still have
+  a price changed. The enum and `required` ratchet silently; the CEL rule lets
+  the edit through with a warning on every write.
+- **Holds.** Validating admission sees `stringData` already merged into `data`.
+- **Holds.** A no-op patch and a `dryRun=All` patch both go through validating
+  admission.
+- **Holds.** A map literal indexed by `object.metadata.name` type-checks in a
+  policy variable.
+- **Fails.** `string(object.data.apiKey)` gives the base64 text, not the word,
+  and CEL has no `base64.decode`. The value is not checked at all (decision 5).
+
+Still open:
+
 - Whether gitops-reverser strips `last-applied-configuration` from a mirrored
   Secret. Decision 5 forbids it either way. If it does not strip it, Simon's own
   `kubectl apply` of a Secret is a plain-text leak in **every** sink, not only
@@ -487,8 +502,8 @@ Compared with a plain Secret:
   can never be named, because it is not a `SendGridKey`.
 - **The format belongs to the kind.** The key's real pattern (`SG.<22>.<43>`,
   `sk_live_…`) is validated in the same place as the rest of the schema, and
-  each kind refuses the other's keys. A demo keeps decision 5's five-letter
-  word, where telling keys apart is not the point.
+  each kind refuses the other's keys. A demo keeps decision 5's unchecked
+  value, where telling keys apart is not the point.
 - **The metadata is safe to show and to commit.** Expiry, key name, scopes and,
   for payments, live or test mode are not secret. They can go into Git in plain
   text and appear on a page, which answers phase 4's "is the key set, and which
@@ -533,7 +548,7 @@ The reviewer cannot read the key and does not need to. What they approve is
 everything around it: who pushed it, when, its name and scopes and expiry (in
 plain text, if it is a typed key), its fingerprint, and the result of a check
 that ran somewhere trusted. A plain SHA-256 is a safe fingerprint for a real,
-long random key, but not for a five-letter demo word, which a computer finds
+long random key, but not for a short demo word, which a computer finds
 from its hash in seconds (decision 5). For the word, the fingerprint has to be
 keyed (an HMAC with a key the cluster holds), or left out.
 Merging is then a signature over that set, and it could be a real one: an
@@ -567,5 +582,5 @@ Questions to take further:
 | Question | Default if unanswered |
 | --- | --- |
 | The Secrets' names | `coffee-mail`, `coffee-payments` |
-| The value's rule | a word of 1 to 5 letters or digits, the same for both keys |
+| The value's rule | none, any length (decided 2026-11-03: admission cannot read it, and the demo does not need one) |
 | One grant for both keys, or one per key (two people)? | one grant, one person: that is the rate limit, and `/room` gets one row |

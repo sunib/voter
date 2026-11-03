@@ -118,8 +118,22 @@ spec:
                           type: string
                       displayMessage:
                         type: string
+                # Each key reference names exactly one Secret, or is absent:
+                # whatever resolves it reads with its own rights, so a free name
+                # would let a menu edit point it at the deploy or age keys in
+                # the same namespace (docs/coffee-api-keys-design.md, decision 4).
+                # An enum rather than CEL, so kubectl explain and the editor can
+                # read the one allowed value. Menus stored before these rules
+                # stay editable: validation ratchets on fields left alone.
                 mail:
                   type: object
+                  x-kubernetes-validations:
+                    - rule: >-
+                        (has(self.provider) && self.provider != '') == has(self.apiKeySecretRef)
+                      message: >-
+                        Mail needs a provider and its key reference together, or
+                        neither: a provider without a key cannot send, and a key
+                        without a provider is never used.
                   properties:
                     provider:
                       type: string
@@ -129,13 +143,27 @@ spec:
                       type: string
                     apiKeySecretRef:
                       type: object
+                      required:
+                        - name
+                        - key
                       properties:
                         name:
                           type: string
+                          enum:
+                            - coffee-mail
                         key:
                           type: string
+                          enum:
+                            - apiKey
                 payments:
                   type: object
+                  x-kubernetes-validations:
+                    - rule: >-
+                        (has(self.provider) && self.provider != '') == has(self.apiKeySecretRef)
+                      message: >-
+                        Payments need a provider and its key reference together,
+                        or neither: a provider without a key cannot take a
+                        payment, and a key without a provider is never used.
                   properties:
                     provider:
                       type: string
@@ -145,8 +173,15 @@ spec:
                       type: boolean
                     apiKeySecretRef:
                       type: object
+                      required:
+                        - name
+                        - key
                       properties:
                         name:
                           type: string
+                          enum:
+                            - coffee-payments
                         key:
                           type: string
+                          enum:
+                            - apiKey
