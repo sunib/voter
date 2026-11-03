@@ -403,18 +403,13 @@ it to do.
   same as the menu.
 - **The ciphertext gives away the key's length.** Nothing else about it
   (decision 5).
-- **The live menu warns until it is fixed.** `voter/demo-coffee` holds
-  `mail.apiKeySecretRef: {name: Tes, key: Ter}` with no provider and
-  `payments.apiKeySecretRef: {name: Haa, key: Ns}` (read 2026-11-03), typed into
-  the old free-text fields. It stays editable, but every write prints the CEL
-  rule's warning. Part of P2: set both references right, or remove them.
 
 ## Phases
 
 | Phase | Where | Ends when |
 | --- | --- | --- |
 | **P1** CRD + policy (**built**) | voter: `coffeeconfigs.yaml` (the enums, `required` and the CEL rule), [coffee-keys-policy.yaml](../voter/config/admission/coffee-keys-policy.yaml) (both policies), the Role and the two Secrets in `test/e2e/voter.yaml`, [coffee-keys.spec.js](../test/browser/coffee-keys.spec.js) | a ref to `k8s-trail-git`, a mail ref naming `coffee-payments`, and a provider without a ref are refused by the schema; a second key, a no-op patch, a dry run and a metadata change by the policy; the label on another Secret by the second one. Passing on the fixture, with the other 27 browser tests, on 2026-11-03. Ratcheting checked by hand on k3d 1.37 |
-| **P2** cluster | external/k8s: the two Secrets, the Role, the copied CRD and policies, and the live `demo-coffee`'s references fixed (Costs). **Needs** the coffee-settings sink switched on (it is committed but commented out in `kustomization.yaml`) | a hand-run `kubectl patch` of each, as a test user, lands as `coffee/resources/secrets/voter/<name>.sops.yaml`, authored by them, and opens with `sops decrypt` |
+| **P2** cluster | external/k8s: the two Secrets, the Role, the copied CRD and policies. The live `demo-coffee` already meets the new CRD: its free-text references (`Tes`/`Ter` with no provider, `Haa`/`Ns`) were set to `sendgrid` + `coffee-mail` and `stripe` + `coffee-payments` on 2026-11-03. **Needs** the coffee-settings sink switched on (it is committed but commented out in `kustomization.yaml`) | a hand-run `kubectl patch` of each, as a test user, lands as `coffee/resources/secrets/voter/<name>.sops.yaml`, authored by them, and opens with `sops decrypt` |
 | **P3** Voter UI | voter: `/room` grant, the fixed references in the editor, "Set a new key" for each, behind the two settings | the rehearsal: one phone sets both keys, a new digest, the third app rolls; then a digest pin brings the previous one back |
 | **P4** (optional) key status | voter backend: `get` on the two names; returns `{name, set, updated}` only, never any part of the key | the editor shows "mail set 2 min ago; payments not set" |
 
