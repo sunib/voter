@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   allows,
+  allowsNamed,
   extraVerbs,
   flattenResourceRules,
   missingPermissions,
@@ -80,6 +81,40 @@ describe('allows', () => {
       { apiGroup: COFFEE, resource: 'quizsubmissions', verbs: ['create'] },
     ])
     expect(allows(authz, COFFEE, 'coffeeconfigs', 'create')).toBe(false)
+  })
+})
+
+describe('allowsNamed', () => {
+  // The menu's keys: patch on two Secrets by name, and nothing else.
+  const keys = authorization([
+    {
+      apiGroup: '',
+      resource: 'secrets',
+      verbs: ['patch'],
+      names: ['coffee-mail', 'coffee-payments'],
+    },
+  ])
+
+  it('counts a grant for that name', () => {
+    expect(allowsNamed(keys, '', 'secrets', 'patch', 'coffee-mail')).toBe(true)
+  })
+
+  it('does not count it for another name, or another verb', () => {
+    expect(
+      allowsNamed(keys, '', 'secrets', 'patch', 'coffee-settings-age'),
+    ).toBe(false)
+    expect(allowsNamed(keys, '', 'secrets', 'get', 'coffee-mail')).toBe(false)
+  })
+
+  it('counts an unrestricted grant for any name', () => {
+    const admin = authorization([
+      { apiGroup: '*', resource: '*', verbs: ['*'] },
+    ])
+    expect(allowsNamed(admin, '', 'secrets', 'patch', 'coffee-mail')).toBe(true)
+  })
+
+  it('is false before the API server has answered', () => {
+    expect(allowsNamed(null, '', 'secrets', 'patch', 'coffee-mail')).toBe(false)
   })
 })
 
@@ -188,7 +223,11 @@ describe('flattenResourceRules', () => {
     expect(
       flattenResourceRules([
         { apiGroups: [COFFEE], resources: ['coffeeconfigs'], verbs: ['get'] },
-        { apiGroups: [COFFEE], resources: ['coffeeconfigs'], verbs: ['patch', 'get'] },
+        {
+          apiGroups: [COFFEE],
+          resources: ['coffeeconfigs'],
+          verbs: ['patch', 'get'],
+        },
       ]),
     ).toEqual([
       { apiGroup: COFFEE, resource: 'coffeeconfigs', verbs: ['get', 'patch'] },
@@ -230,7 +269,9 @@ describe('flattenResourceRules', () => {
 
   it('passes a wildcard through rather than inventing resources', () => {
     expect(
-      flattenResourceRules([{ apiGroups: ['*'], resources: ['*'], verbs: ['*'] }]),
+      flattenResourceRules([
+        { apiGroups: ['*'], resources: ['*'], verbs: ['*'] },
+      ]),
     ).toEqual([{ apiGroup: '*', resource: '*', verbs: ['*'] }])
   })
 })

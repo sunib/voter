@@ -17,6 +17,7 @@ import AdminNav from '../components/admin/AdminNav.vue'
 import AppShell from '../components/layout/AppShell.vue'
 import PermissionRequirements from '../components/PermissionRequirements.vue'
 import FieldStateMarker from '../components/admin/FieldStateMarker.vue'
+import CoffeeKeys from '../components/admin/CoffeeKeys.vue'
 
 type FieldState = 'clean' | 'dirty' | 'conflict'
 type FieldConflict = { previousServer?: unknown; incomingServer: unknown }
@@ -451,6 +452,9 @@ onBeforeUnmount(clearAllFlashes)
       title="You may not edit this menu"
       highlight="coffeeconfigs"
     />
+
+    <!-- Only for the one person /room gave the menu's keys to. -->
+    <CoffeeKeys :authz="authz" />
 
     <section
       v-if="

@@ -126,3 +126,85 @@ test('a key reference names its own Secret, and only those two Secrets are publi
   expect(() => dryRun({ apiVersion: 'v1', kind: 'Secret', metadata: { name: 'coffee-settings-age', namespace: 'voter', labels: { 'voter.configbutler.ai/coffee-settings': 'true' } }, data: {} }))
     .toThrow(/coffee-settings-age cannot carry voter\.configbutler\.ai\/coffee-settings/);
 });
+
+// Demo beat 2 from the room's side: the operator hands the keys to one person
+// on /room, that person sets a key on the menu page, and the operator takes
+// the grant back. Nobody reloads anything: both pages follow the bindings.
+test('the operator gives one person the keys from /room, and takes them back', async ({ browser }) => {
+  const displayName = `keys-holder-${Date.now()}`;
+  const contexts = [];
+  const open = async () => {
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    contexts.push(context);
+    const page = await context.newPage();
+    page.on('pageerror', error => { throw error; });
+    return page;
+  };
+  try {
+    const holder = await open();
+    await holder.goto(`${APP}/`);
+    await holder.getByLabel('Room code').fill(JSON.parse(kube('get', 'room', 'demo', '-o', 'json')).status.joinCode.code);
+    await holder.getByLabel('Display name').fill(displayName);
+    await holder.getByRole('radio', { name: 'Vue' }).check();
+    await holder.getByRole('button', { name: 'Continue', exact: true }).click();
+    await holder.waitForURL(`${APP}/`);
+    const participant = JSON.parse(kube('get', 'participants', '-o', 'json')).items.find(p => p.spec.displayName === displayName);
+
+    const room = await open();
+    await room.goto(`${APP}/login?next=%2Froom&connector=github`);
+    await room.waitForURL(`${APP}/room`);
+    const panel = room.getByTestId('pick-keys');
+    await expect(panel).toContainText('Hand one participant');
+
+    // A pick: a binding to the keys Role naming one User, and the menu's own
+    // one-person grant left alone. Picked at random, and the fixture's room
+    // may hold other people, so who it lands on is not this test's to choose.
+    await panel.getByRole('button', { name: 'Pick someone', exact: true }).click();
+    const picked = () => JSON.parse(kube('get', 'rolebinding', 'voter-audience-coffee-keys-person', '-o', 'json'));
+    await expect.poll(() => kube('get', 'rolebinding', 'voter-audience-coffee-keys-person', '--ignore-not-found', '-o', 'name').trim()).not.toBe('');
+    expect(picked().roleRef.name).toBe('voter-audience-coffee-keys');
+    expect(picked().subjects).toHaveLength(1);
+    expect(picked().subjects[0].kind).toBe('User');
+    await expect(panel.getByTestId('picked-name')).toHaveText(picked().metadata.annotations['voter.configbutler.ai/display-name']);
+    expect(kube('get', 'rolebinding', 'voter-audience-coffee-admin-person', '--ignore-not-found', '-o', 'name').trim()).toBe('');
+
+    // So the test stands in for the operator's luck: the same binding, naming
+    // this test's participant (their username is what the session reports).
+    const { subject } = await holder.evaluate(async () => (await fetch('/auth/session')).json());
+    const binding = picked();
+    binding.subjects[0].name = `demo:${subject}`;
+    binding.metadata.annotations['voter.configbutler.ai/display-name'] = displayName;
+    binding.metadata.annotations['voter.configbutler.ai/participant'] = participant.metadata.name;
+    delete binding.metadata.resourceVersion;
+    kube('delete', 'rolebinding', 'voter-audience-coffee-keys-person');
+    kube('create', '-f', '-', { input: JSON.stringify(binding) });
+    await expect(panel.getByTestId('picked-name')).toHaveText(displayName);
+
+    // The holder's menu page grows a "Set a new key" panel.
+    await holder.goto(`${APP}/admin`);
+    const keys = holder.getByTestId('coffee-keys');
+    await expect(keys).toBeVisible();
+    await keys.getByLabel('Mail key').fill('taart');
+    await keys.getByRole('button', { name: 'Save mail key' }).click();
+    await expect(keys.getByRole('status')).toContainText('Mail key set.');
+    await expect(keys.getByLabel('Mail key')).toHaveValue('');
+    expect(JSON.parse(kube('get', 'secret', 'coffee-mail', '-o', 'json')).data).toEqual({ apiKey: b64('taart') });
+
+    // The same value again is admission's refusal, in its own words.
+    await keys.getByLabel('Mail key').fill('taart');
+    await keys.getByRole('button', { name: 'Save mail key' }).click();
+    await expect(keys.getByRole('alert')).toContainText('That is the mail key already set: saving it has to change it.');
+
+    // Taken back on /room: the binding goes, and the panel with it.
+    await panel.getByRole('button', { name: 'Take it back' }).click();
+    await expect.poll(() => kube('get', 'rolebinding', 'voter-audience-coffee-keys-person', '--ignore-not-found', '-o', 'name').trim()).toBe('');
+    await expect(panel.getByTestId('picked-name')).toHaveCount(0);
+    await expect(keys).toHaveCount(0);
+  } finally {
+    for (const c of contexts) await c.close();
+    kube('delete', 'rolebinding', 'voter-audience-coffee-keys-person', '--ignore-not-found');
+    for (const name of ['coffee-mail', 'coffee-payments']) kube('patch', 'secret', name, '--type=merge', '-p', '{"data":{"apiKey":""}}');
+    const participants = JSON.parse(kube('get', 'participants', '-o', 'json')).items;
+    for (const p of participants) if (p.spec.displayName === displayName) kube('delete', 'participant', p.metadata.name);
+  }
+});

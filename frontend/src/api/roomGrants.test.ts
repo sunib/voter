@@ -5,6 +5,7 @@ import {
   ballotBindingName,
   ballotGroups,
   ballotGroupsMarker,
+  coffeeKeysPerson,
   participantUsername,
   personGrant,
   pickParticipant,
@@ -118,6 +119,29 @@ describe('personGrant', () => {
     })
   })
 
+  it('finds the keys holder only when asked for the keys', () => {
+    const bindings = [
+      binding(
+        'voter-audience-coffee-admin-person',
+        'voter-audience-coffee-admin',
+        [{ kind: 'User', name: 'demo:abc' }],
+        { 'voter.configbutler.ai/display-name': 'Ada' },
+      ),
+      binding(
+        'voter-audience-coffee-keys-person',
+        'voter-audience-coffee-keys',
+        [{ kind: 'User', name: 'demo:def' }],
+        { 'voter.configbutler.ai/display-name': 'Grace' },
+      ),
+    ]
+    expect(personGrant(bindings)?.displayName).toBe('Ada')
+    expect(personGrant(bindings, coffeeKeysPerson())).toEqual({
+      binding: 'voter-audience-coffee-keys-person',
+      username: 'demo:def',
+      displayName: 'Grace',
+    })
+  })
+
   it('is null when only the room-wide switch is on', () => {
     expect(
       personGrant([
@@ -177,7 +201,9 @@ describe('pickParticipant', () => {
 describe('ballotGroupsMarker', () => {
   it('reads the same for the same set, whatever the order', () => {
     expect(
-      ballotGroupsMarker(new Set(['demo:frontend-vue', 'demo:frontend-svelte'])),
+      ballotGroupsMarker(
+        new Set(['demo:frontend-vue', 'demo:frontend-svelte']),
+      ),
     ).toBe('demo:frontend-svelte,demo:frontend-vue')
   })
 

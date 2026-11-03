@@ -89,6 +89,8 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			"commitLeadMillis":       deps.cfg.ConfigButlerCommitLeadMillis,
 			// The Role the operator binds the audience to, and the binding's name.
 			"audienceCoffeeAdminRole": deps.cfg.AudienceCoffeeAdminRole,
+			// The Role the operator gives one person to set the menu's keys.
+			"audienceCoffeeKeysRole": deps.cfg.AudienceCoffeeKeysRole,
 			// The Role the operator binds a group to, so it may vote.
 			"audienceBallotRole": deps.cfg.AudienceBallotRole,
 			// The Roles the operator binds the audience to, so it may take a

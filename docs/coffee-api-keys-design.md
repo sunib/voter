@@ -333,29 +333,34 @@ If something ever resolves a reference live in the cluster instead, it gets
 It reports an empty value as "not configured", and never echoes a value, not
 even part of one (decision 5).
 
-### 7. Off by default, per key
+### 7. One setting, on by default
 
-Voter gains `COFFEE_MAIL_KEY_SECRET` and `COFFEE_PAYMENTS_KEY_SECRET` (both
-empty by default) and `AUDIENCE_COFFEE_KEYS_ROLE`, published in `/config.json`
-the way `AUDIENCE_COFFEE_ADMIN_ROLE` is. Each setting turns on its own half: with
-only the mail one set, payments keeps its free-text fields. With both empty, no
-screen changes. A `feat:` release of this changes nothing in demo or
-demo-production until `app.yaml` sets them.
+Voter gains `AUDIENCE_COFFEE_KEYS_ROLE` (default `voter-audience-coffee-keys`),
+published in `/config.json` the way `AUDIENCE_COFFEE_ADMIN_ROLE` is. The Secret
+names are not settings: the CRD pins them anyway. Nothing changes on a screen
+until someone holds the grant: the `/room` control hides itself from whoever
+may not list bindings, and "Set a new key" shows only to whoever may patch the
+Secrets. The first plan had a setting per key, off by default, so a release
+could ship before the cluster had the Role; P2 shipped first instead.
 
 ## What the screens do
 
-- **`/room`**: a "Keys" row beside the menu grant, with the same "pick someone"
-  control. It shows who holds it.
-- **Menu editor, mail and payments sections** (when configured): each reference
-  is shown, not edited: "Mail key: `coffee-mail`", "Payments key:
-  `coffee-payments`". A text field for a value that has one allowed answer is
-  how wrong references get typed. The editor fills a reference in when its
-  provider is set, so a menu edit cannot leave it half done.
-- **"Set a new key"**, shown only to the person whose permissions include
-  `patch` on these Secrets (the watchable-permissions machinery already answers
-  that): one password input **per key**, with no length limit, each with its
-  own Save, and no echo of the value afterwards. Each Save is one patch of one
-  Secret, so a refusal names the key it was about.
+- **`/room`** (built): "The menu's keys", under the menu's own "One person
+  first", with the same control (`PickSomeone.vue`, given the keys Role). "Pick
+  someone" binds the Role to one participant at random in
+  `voter-audience-coffee-keys-person`, "Pick someone else" moves it, "Take it
+  back" deletes it. It shows who holds it.
+- **"Set a new key"** (built, `CoffeeKeys.vue`): a panel at the top of the menu
+  page, shown only to the person whose permissions include `patch` on these
+  Secrets (the watchable-permissions machinery already answers that, so it
+  appears and disappears as `/room` gives and takes). One password input **per
+  key**, with no length limit, each with its own Save, and no echo of the value
+  afterwards. Each Save is one patch of one Secret, so a refusal names the key
+  it was about.
+- **Menu editor, mail and payments sections** (not built): each reference
+  shown, not edited: "Mail key: `coffee-mail`", "Payments key:
+  `coffee-payments`", filled in when its provider is set. Until then the
+  free-text fields stay, and the CRD refuses anything but the one right value.
 - **The reveal** is a stage beat, not a screen: the key-holder has kept the key
   to themselves, and Simon opens the commit's `.sops.yaml` with `sops decrypt`
   and reads it out. The room sees that only someone with the age key could.
@@ -410,7 +415,7 @@ it to do.
 | --- | --- | --- |
 | **P1** CRD + policy (**built**) | voter: `coffeeconfigs.yaml` (the enums, `required` and the CEL rule), [coffee-keys-policy.yaml](../voter/config/admission/coffee-keys-policy.yaml) (both policies), the Role and the two Secrets in `test/e2e/voter.yaml`, [coffee-keys.spec.js](../test/browser/coffee-keys.spec.js) | a ref to `k8s-trail-git`, a mail ref naming `coffee-payments`, and a provider without a ref are refused by the schema; a second key, a no-op patch, a dry run and a metadata change by the policy; the label on another Secret by the second one. Passing on the fixture, with the other 27 browser tests, on 2026-11-03. Ratcheting checked by hand on k3d 1.37 |
 | **P2** cluster | external/k8s: the two Secrets, the Role, the copied CRD and policies. The live `demo-coffee` already meets the new CRD: its free-text references (`Tes`/`Ter` with no provider, `Haa`/`Ns`) were set to `sendgrid` + `coffee-mail` and `stripe` + `coffee-payments` on 2026-11-03. The coffee-settings sink it writes into is live (Ready, committing since 2026-11-03) | a hand-run `kubectl patch` of each, as a test user, lands as `coffee/resources/secrets/voter/<name>.sops.yaml`, authored by them, and opens with `sops decrypt` |
-| **P3** Voter UI | voter: `/room` grant, the fixed references in the editor, "Set a new key" for each, behind the two settings | the rehearsal: one phone sets both keys, a new digest, the third app rolls; then a digest pin brings the previous one back |
+| **P3** Voter UI (**built**, except the fixed references in the editor) | voter: the `/room` control and "Set a new key"; `coffee-keys.spec.js` drives both on the fixture | the rehearsal: one phone sets both keys, a new digest, the third app rolls; then a digest pin brings the previous one back |
 | **P4** (optional) key status | voter backend: `get` on the two names; returns `{name, set, updated}` only, never any part of the key | the editor shows "mail set 2 min ago; payments not set" |
 
 ## To verify

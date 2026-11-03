@@ -164,6 +164,26 @@ export function allows(
   )
 }
 
+/** True when the identity holds `verb` on the one object `name`: through a rule
+ *  for that name, or through an unrestricted one. For grants that are only
+ *  ever names, such as the menu's keys. */
+export function allowsNamed(
+  authz: Authorization | null,
+  apiGroup: string,
+  resource: string,
+  verb: string,
+  name: string,
+): boolean {
+  if (authz === null) return false
+  return authz.rules.some(
+    (rule) =>
+      ((rule.names ?? []).length === 0 || rule.names!.includes(name)) &&
+      (rule.apiGroup === apiGroup || rule.apiGroup === '*') &&
+      (rule.resource === resource || rule.resource === '*') &&
+      (rule.verbs.includes(verb) || rule.verbs.includes('*')),
+  )
+}
+
 /** Verbs held on a resource that are outside DISPLAY_VERBS, so the table can
  *  show them rather than pretend the grant is smaller than it is. */
 export function extraVerbs(rule: AuthzRule): string[] {
