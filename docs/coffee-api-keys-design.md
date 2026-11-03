@@ -339,8 +339,8 @@ Voter gains `AUDIENCE_COFFEE_KEYS_ROLE` (default `voter-audience-coffee-keys`),
 published in `/config.json` the way `AUDIENCE_COFFEE_ADMIN_ROLE` is. The Secret
 names are not settings: the CRD pins them anyway. Nothing changes on a screen
 until someone holds the grant: the `/room` control hides itself from whoever
-may not list bindings, and the "New API key" buttons show only to whoever may patch the
-Secrets. The first plan had a setting per key, off by default, so a release
+may not list bindings, and the "New API key" buttons are greyed out for
+whoever may not patch the Secrets. The first plan had a setting per key, off by default, so a release
 could ship before the cluster had the Role; P2 shipped first instead.
 
 ## What the screens do
@@ -351,10 +351,13 @@ could ship before the cluster had the Role; P2 shipped first instead.
   `voter-audience-coffee-keys-person`, "Pick someone else" moves it, "Take it
   back" deletes it. It shows who holds it.
 - **"New mail API key" / "New payments API key"** (built, in the menu editor,
-  `AdminScreen.vue`): buttons under the mail and payments fields, shown only to
-  the person whose permissions include `patch` on that Secret (the
-  watchable-permissions machinery already answers that, so they appear and
-  disappear as `/room` gives and takes). Each opens a dialog with a password
+  `AdminScreen.vue`): buttons under the mail and payments fields, shown to
+  everyone and greyed out unless this person's permissions include `patch` on
+  that Secret. The watchable-permissions machinery already answers that, so they
+  light up the moment `/room` picks someone, which is how that person finds out,
+  and grey out again when it takes the grant back. "Try anyway" lifts the page's
+  own check and nothing else: Save then gets the API server's real refusal. Each
+  opens a dialog with a password
   field, OK and Cancel. OK does not write anything: the key becomes a pending
   change in "Review and save", beside the menu's own, never shown, and Revert
   discards it. Save writes the menu first and then each key, one patch of one

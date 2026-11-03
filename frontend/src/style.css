@@ -1346,6 +1346,14 @@ p {
   text-underline-offset: 3px;
 }
 
+/* The same look on a button, for an action that is a footnote. */
+button.text-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
 .panel > .empty-state {
   margin-top: 1rem;
 }

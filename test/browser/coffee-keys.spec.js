@@ -130,7 +130,8 @@ test('a key reference names its own Secret, and only those two Secrets are publi
 // Demo beat 2 from the room's side: the operator hands the keys to one person
 // on /room, that person sets a new key from the menu editor, as a change saved
 // with the rest, and the operator takes the grant back. Nobody reloads
-// anything: both pages follow the bindings.
+// anything: both pages follow the bindings. Without the grant the buttons are
+// there but greyed out, and "Try anyway" gets Kubernetes' own refusal.
 test('the operator gives one person the keys from /room, and takes them back', async ({ browser }) => {
   const displayName = `keys-holder-${Date.now()}`;
   const contexts = [];
@@ -233,11 +234,20 @@ test('the operator gives one person the keys from /room, and takes them back', a
     await expect(summary.getByRole('alert')).toContainText('That is the mail key already set: saving it has to change it.');
     await expect(summary).toContainText('1 change(s) ready to save');
 
-    // Taken back on /room: the binding goes, and the buttons with it.
+    // Taken back on /room: the binding goes, and the buttons grey out.
+    await summary.getByRole('button', { name: 'Revert' }).click();
     await panel.getByRole('button', { name: 'Take it back' }).click();
     await expect.poll(() => kube('get', 'rolebinding', 'voter-audience-coffee-keys-person', '--ignore-not-found', '-o', 'name').trim()).toBe('');
     await expect(panel.getByTestId('picked-name')).toHaveCount(0);
-    await expect(newMailKey).toHaveCount(0);
+    await expect(newMailKey).toBeDisabled();
+
+    // "Try anyway" lifts the page's check, not Kubernetes': the key is refused
+    // on Save, by RBAC, and nothing is written.
+    await holder.getByRole('button', { name: 'Try anyway' }).click();
+    await enterKey('koek', 'OK');
+    await summary.getByRole('button', { name: 'Save 1 Change' }).click();
+    await expect(summary.getByRole('alert')).toContainText('cannot patch resource "secrets"');
+    expect(JSON.parse(kube('get', 'secret', 'coffee-mail', '-o', 'json')).data).toEqual({ apiKey: b64('taart') });
   } finally {
     for (const c of contexts) await c.close();
     kube('delete', 'rolebinding', 'voter-audience-coffee-keys-person', '--ignore-not-found');

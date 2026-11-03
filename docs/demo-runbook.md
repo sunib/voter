@@ -508,8 +508,8 @@ The order feed needs no reset. Restarting the pod empties it.
 | Voucher still depleted after raising the limit | Reorder. The limit is read fresh every order |
 | A voucher vanished after a terminal patch | A merge patch replaced the list. Use `--type=json` with an index. Reseed the CoffeeConfig |
 | Save greyed out in the editor | An unresolved conflict, by design. Resolve every red field |
-| No conflict appears in demo 2 step 4 | The second editor changed a different field, which is not a conflict and is the point of beat 2. If the banner says reconnecting, press Refresh from cluster and redo it |
-| "Live updates overtook the read" | Press Refresh from cluster again. Your draft is kept |
+| No conflict appears in demo 2 step 4 | The second editor changed a different field, which is not a conflict and is the point of beat 2. If the banner says reconnecting, wait for it, then redo it; when the editor needs a fresh read its Save button says Refresh before saving |
+| "Live updates overtook the read" | Press the Save button, which then reads Refresh before saving, again. Your draft is kept |
 
 If anything looks odd with authentication: nothing may reach Dex's `room-pass`
 connector callback except Room Pass. Do not port forward to Dex on a conference

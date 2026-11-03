@@ -100,7 +100,10 @@ const fieldChanges = computed(() =>
 // The menu's mail and payments keys (docs/coffee-api-keys-design.md). Not
 // part of the CoffeeConfig: each is a Secret of its own that the menu names.
 // Only the one person /room gave the keys to may replace them (patch on those
-// two Secrets, never get), so only they see the button. A new key waits here,
+// two Secrets, never get). Everybody sees the buttons; they light up for that
+// person the moment /room picks them, which is how they find out. "Try anyway"
+// lifts this page's own check and nothing else: Save then gets the API
+// server's real refusal, which is the point of the demo. A new key waits here,
 // in this page, as a change like any other, until Save writes it: after the
 // menu, so a refused menu takes the key down with it. Both writes land in the
 // same coffee-settings commit, and that commit is where the key is encrypted.
@@ -114,11 +117,10 @@ const KEY_SLOTS = [
 ] as const
 type KeySlot = (typeof KEY_SLOTS)[number]
 const pendingKeys = ref<Partial<Record<KeySlot['secret'], string>>>({})
-const keySlots = computed(() =>
-  KEY_SLOTS.filter((slot) =>
-    allowsNamed(authz.value, '', SECRETS.resource, 'patch', slot.secret),
-  ),
-)
+const mayReplaceKey = (slot: KeySlot) =>
+  allowsNamed(authz.value, '', SECRETS.resource, 'patch', slot.secret)
+const mayReplaceAnyKey = computed(() => KEY_SLOTS.some(mayReplaceKey))
+const tryKeysAnyway = ref(false)
 const keyChanges = computed(() =>
   KEY_SLOTS.filter((slot) => pendingKeys.value[slot.secret] !== undefined),
 )
@@ -229,14 +231,6 @@ async function refreshVoucherUsage() {
   } catch {
     voucherUsageError.value =
       'Voucher usage could not be refreshed. Counts may be out of date.'
-  }
-}
-async function refreshFromServer() {
-  try {
-    await live.refreshFromServer()
-    await refreshVoucherUsage()
-  } catch (cause) {
-    loadError.value = (cause as Error).message
   }
 }
 async function saveConfig() {
@@ -1420,16 +1414,33 @@ onBeforeUnmount(clearAllFlashes)
               />
             </label>
           </div>
-          <div v-if="keySlots.length > 0" class="row-actions">
+          <div class="row-actions">
             <button
-              v-for="slot in keySlots"
+              v-for="slot in KEY_SLOTS"
               :key="slot.secret"
               class="button button--secondary"
+              :disabled="!mayReplaceKey(slot) && !tryKeysAnyway"
               @click="openKeyDialog(slot)"
             >
               {{ slot.button }}
             </button>
           </div>
+          <p v-if="!mayReplaceAnyKey" class="metadata-copy">
+            <template v-if="tryKeysAnyway">
+              Go ahead: Kubernetes, not this page, will refuse the key when you
+              save.
+            </template>
+            <template v-else>
+              Only the person picked on the room page may set new keys.
+              <button
+                class="text-link"
+                type="button"
+                @click="tryKeysAnyway = true"
+              >
+                Try anyway
+              </button>
+            </template>
+          </p>
           <dialog
             ref="keyDialog"
             class="key-dialog panel"
@@ -1651,13 +1662,6 @@ onBeforeUnmount(clearAllFlashes)
                   @click="saveConfig"
                 >
                   {{ saveButtonLabel }}
-                </button>
-                <button
-                  class="button button--ghost"
-                  :disabled="saving"
-                  @click="refreshFromServer"
-                >
-                  Refresh from cluster
                 </button>
               </div>
               <!-- A commit that did NOT happen is news and keeps the panel. A commit
