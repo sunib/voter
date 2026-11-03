@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.10.1](https://github.com/sunib/voter/compare/v2.10.0...v2.10.1) (2026-11-03)
+
+
+### Bug Fixes
+
+* a refused save says so until you change what was refused, and each key stands alone ([737c0a6](https://github.com/sunib/voter/commit/737c0a6890bf32658e40216b7a895a7e948f53e1))
+
 ## [2.10.0](https://github.com/sunib/voter/compare/v2.9.0...v2.10.0) (2026-11-03)
 
 
