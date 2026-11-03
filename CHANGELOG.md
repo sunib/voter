@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.10.0](https://github.com/sunib/voter/compare/v2.9.0...v2.10.0) (2026-11-03)
+
+
+### Features
+
+* one person, picked on /room, can add new API keys in the menu editor ([#57](https://github.com/sunib/voter/issues/57)) ([a3103f1](https://github.com/sunib/voter/commit/a3103f151263a6463e383d3ad34976a4a5503fdb))
+* the menu's key references name their own Secret, and a person may only change its value ([#56](https://github.com/sunib/voter/issues/56)) ([cbdcb8d](https://github.com/sunib/voter/commit/cbdcb8d4e72d7a3bcb40455acff9056ddd08d1b5))
+
 ## [2.9.0](https://github.com/sunib/voter/compare/v2.8.1...v2.9.0) (2026-10-30)
 
 
