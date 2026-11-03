@@ -153,6 +153,47 @@ rules:
     resources: [coffeeconfigs]
     verbs: [patch, update]
 ---
+# Setting the menu's mail and payments keys, a live grant like the one above
+# (docs/coffee-api-keys-design.md, decision 2). `patch` on two names only: no
+# `get`, so the person never reads a key, and no `create`, which RBAC cannot
+# limit by name; the Secrets below exist beforehand. voter-coffee-keys holds
+# what the patch may change.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: voter-audience-coffee-keys
+  namespace: voter
+rules:
+  - apiGroups: ['']
+    resources: [secrets]
+    resourceNames: [coffee-mail, coffee-payments]
+    verbs: [patch]
+---
+# The two Secrets the menu's key references name, empty ("not configured")
+# until someone with the grant above sets one. The cluster seeds them from Git
+# with ssa: IfNotPresent; here every e2e-up resets them.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: coffee-mail
+  namespace: voter
+  labels:
+    voter.configbutler.ai/coffee-settings: "true"
+type: Opaque
+data:
+  apiKey: ""
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: coffee-payments
+  namespace: voter
+  labels:
+    voter.configbutler.ai/coffee-settings: "true"
+type: Opaque
+data:
+  apiKey: ""
+---
 # Who may vote, as in the cluster's participant-rbac.yaml: the Role is here and
 # the operator page binds it to a group. Unlike the cluster, the fixture starts
 # with the whole room bound, which is what every spec but the one about the
