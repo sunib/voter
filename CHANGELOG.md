@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.11.0](https://github.com/sunib/voter/compare/v2.10.1...v2.11.0) (2026-11-04)
+
+
+### Features
+
+* mail and payment panes, a key shows whether it is set, and a save links both commits ([8e29465](https://github.com/sunib/voter/commit/8e294654f34ae60d90fe83cf2318d6ae36418b1b))
+
 ## [2.10.1](https://github.com/sunib/voter/compare/v2.10.0...v2.10.1) (2026-11-03)
 
 
