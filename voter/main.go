@@ -20,12 +20,20 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
+
+	"k8s.io/client-go/dynamic"
 )
+
+const shutdownTimeout = 20 * time.Second
 
 // Build information, set via ldflags at build time
 var (
@@ -55,14 +63,35 @@ func main() {
 		log.Printf("static: serving the frontend from %s", cfg.StaticDir)
 	}
 
-	serviceAccount, err := newServiceAccountClient(&cfg)
-	if err != nil {
-		log.Fatalf("kubernetes: %v", err)
+	// One or the other. The reconcilers below need the client, and they sit behind
+	// !ShopOnly, which SETTINGS_DIR requires.
+	var serviceAccount dynamic.Interface
+	var loaded *settings
+	if cfg.SettingsDir != "" {
+		loaded, err = loadSettings(cfg)
+		if err != nil {
+			log.Fatalf("settings: %v", err)
+		}
+		log.Printf("settings: serving menu %s, revision %s, from %s", cfg.CoffeeConfigName, loaded.revision, cfg.SettingsDir)
+	} else {
+		serviceAccount, err = newServiceAccountClient(&cfg)
+		if err != nil {
+			log.Fatalf("kubernetes: %v", err)
+		}
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer stop()
+
+	// Beside serving and never before it: keys must not hold up readiness.
+	if loaded != nil && loaded.keys != nil {
+		go loaded.keys.run(ctx)
 	}
 
 	deps := handlerDeps{
 		cfg:            cfg,
 		serviceAccount: serviceAccount,
+		settings:       loaded,
 		defaultNS:      applicationNamespace(cfg),
 		vouchers:       newVoucherLedger(),
 		orders:         newOrderLog(),
@@ -82,8 +111,8 @@ func main() {
 	//
 	// Started before serving: the results screen has no other source, so the
 	// tally must be running before the first phone connects. It runs for the
-	// life of the process: this binary has no graceful shutdown to hang a cancel
-	// off, and a half-stopped tally would be worse than a stopped one.
+	// life of the process rather than on ctx: a half-stopped tally would be worse
+	// than a stopped one, and only requests are worth finishing on the way out.
 	//
 	// Not in a shop-only deployment: it has no rounds, and its ServiceAccount
 	// may not read them.
@@ -115,6 +144,39 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		log.Fatalf("listen: %v", err)
+	}
 	log.Printf("listening on %s", addr)
-	log.Fatal(srv.ListenAndServe())
+	if err := serve(ctx, srv, listener); err != nil {
+		log.Fatalf("serve: %v", err)
+	}
+	log.Print("stopped")
+}
+
+// serve runs srv until ctx ends, then lets the requests in flight finish.
+//
+// The wait for the edge to stop sending new ones is not here: it is a preStop
+// sleep in a Deployment that does rolling updates, so one that does not (demo)
+// just stops. shutdownTimeout has to fit in the grace period after that sleep.
+func serve(ctx context.Context, srv *http.Server, listener net.Listener) error {
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(listener) }()
+
+	select {
+	case err := <-served:
+		return err
+	case <-ctx.Done():
+	}
+	log.Print("stopping: finishing the requests in flight")
+	shutdown, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(shutdown); err != nil {
+		return err
+	}
+	if err := <-served; !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
 }

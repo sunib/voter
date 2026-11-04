@@ -20,6 +20,8 @@ See [the migration plan](../docs/krm-foyer-migration.md),
 | --- | --- |
 | `GET /healthz` | Process health |
 | `GET /config.json` | The deployment's settings, without a session: namespace, object names, commit link template, participant connector, the GitTargets and CommitRequest namespace a save asks to commit to, and the audience grant's Role |
+| `GET /revision.json` | Which menu this pod loaded, for a browser to notice a new one. `no-store`, not under `/public/` because every visible order screen polls it every second, and empty when the menu is from Kubernetes |
+| `GET /dont-do-this` | The opened keys, to anyone. 404 unless `DONT_DO_THIS` is on |
 | `GET /join-room?code=` | The QR code's target: Room Pass's join cookie, then a redirect to krm-foyer's login through Room Pass |
 | `GET /public/storefront`, `POST /public/orders` | Coffee menu and order decisions |
 | `GET /public/orders`, `GET /public/orders/stream` | The room's order feed, as JSON and as SSE |
@@ -53,6 +55,12 @@ there is no issuer, client, cookie key or origin to configure.
 | `KUBERNETES_API_SERVER` | The in-cluster server, or the explicit kubeconfig's; an override must match the kubeconfig |
 | `KUBERNETES_NAMESPACE` | Pod's mounted namespace, otherwise `voter`; explicit value overrides both |
 | `COFFEE_CONFIG_NAME` | `testnet-coffee` |
+| `SHOP_ONLY` | Off; on is read-only, the coffee bar and nothing else |
+| `SETTINGS_DIR` | Empty reads the menu from Kubernetes; a folder reads it from there at startup and builds no Kubernetes client. Requires `SHOP_ONLY`. [The plan](../docs/voter-settings-mode-plan.md) |
+| `SETTINGS_REFERENCE` | Where that folder came from, for people to read |
+| `SETTINGS_KEYS` | Empty opens nothing; `openbao-age` fetches the age key from OpenBao to open the folder's encrypted Secrets with `sops`. A key is never read from Voter's own environment |
+| `OPENBAO_ADDR`, `OPENBAO_ROLE`, `OPENBAO_AGE_SECRET_PATH`, `OPENBAO_TOKEN_FILE` | All required by `openbao-age` |
+| `DONT_DO_THIS` | Off; on registers `/dont-do-this`. Only for made-up values |
 | `ROOM_NAME` | `demo`; the Room whose join code the operator page shows |
 | `PARTICIPANT_CONNECTOR_ID` | `room-pass`; the logins that may vote, published in `/config.json` |
 | `AUDIENCE_COFFEE_ADMIN_ROLE` | `voter-audience-coffee-admin`; the Role, and RoleBinding, of the operator's audience grant |

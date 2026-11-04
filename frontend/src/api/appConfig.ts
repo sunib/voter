@@ -51,6 +51,9 @@ export interface AppConfig {
   audienceSeatEditRole: string
   /** The coffee bar alone: no editor, rounds or operator pages (shopOnly.ts). */
   shopOnly: boolean
+  /** Where the menu comes from. From a folder there is no stream to follow it, and
+   *  a new menu is a new pod (menuRevision.ts). Absent on a pod older than this. */
+  menuSource?: 'kubernetes' | 'folder'
 }
 
 let loaded: AppConfig | null = null

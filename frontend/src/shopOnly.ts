@@ -13,6 +13,12 @@ export function shopOnly(): boolean {
   return appConfig().shopOnly === true
 }
 
+/** The menu comes from a folder in the pod (SETTINGS_DIR, /config.json
+ *  `menuSource`), so this host has no /k8s or /stream to read it through. */
+export function menuFromFolder(): boolean {
+  return appConfig().menuSource === 'folder'
+}
+
 /** Where a shop-only deployment sends a route it does not serve, or null to
  *  let the navigation through. */
 export function shopOnlyRedirect(

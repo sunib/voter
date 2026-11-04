@@ -31,6 +31,10 @@ type handlerDeps struct {
 	// orders is the in-memory feed of what the room actually ordered. Not a
 	// custom resource, and deliberately so -- coffee_orders.go says why.
 	orders *orderLog
+
+	// settings is the menu and keys from SETTINGS_DIR, and nil when the menu is
+	// read from Kubernetes (settings.go).
+	settings *settings
 }
 
 func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
@@ -101,8 +105,27 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			"audienceSeatEditRole":  deps.cfg.AudienceSeatEditRole,
 			// The coffee bar alone, with no editor, rounds or operator pages.
 			"shopOnly": deps.cfg.ShopOnly,
+			// Where the menu comes from, so the page knows whether a stream
+			// exists to follow it.
+			"menuSource": deps.settings.menuSource(),
 		})
 	})
+
+	// GET /revision.json -- which menu this pod loaded, for a browser to notice a
+	// new one (docs/voter-settings-mode-plan.md). Polled by every visible order
+	// screen every second, so it is not under /public/: each request there goes
+	// through krm-foyer's check. Registered in every mode, so a tab left open
+	// across a change of mode gets an answer rather than the SPA's HTML.
+	mux.HandleFunc("/revision.json", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		noStore(w)
+		writeJSON(w, http.StatusOK, map[string]string{"revision": deps.settings.menuRevision()})
+	})
+
+	registerDontDoThis(mux, deps)
 
 	// Registered last and matching everything left over: the built frontend,
 	// with an SPA fallback. See static.go.

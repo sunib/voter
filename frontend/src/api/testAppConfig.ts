@@ -23,6 +23,7 @@ export const TEST_CONFIG: AppConfig = {
   audienceSeatClaimRole: 'voter-audience-seat-claim',
   audienceSeatEditRole: 'voter-audience-seat-edit',
   shopOnly: false,
+  menuSource: 'kubernetes',
 }
 
 export async function useTestAppConfig(

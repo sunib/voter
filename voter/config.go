@@ -1,6 +1,9 @@
 package main
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/kelseyhightower/envconfig"
 )
 
@@ -69,8 +72,9 @@ type config struct {
 	// ShopOnly turns this deployment into the coffee bar and nothing else: the
 	// production side of the demo, which Flux fills from Git and nobody edits.
 	// The page offers only the order screen, and there are no rounds to tally.
-	// What makes it read-only is RBAC in its namespace; this only stops the
-	// page offering what Kubernetes would refuse.
+	// What makes it read-only is RBAC in its namespace, or having no client at
+	// all with SETTINGS_DIR; this only stops the page offering what would be
+	// refused.
 	ShopOnly bool `envconfig:"SHOP_ONLY"`
 
 	// ConfigButlerGitTargetName names the ConfigButler GitTarget whose open
@@ -150,6 +154,26 @@ type config struct {
 	// container image sets it to /srv/www; leaving it empty (the local Vite
 	// setup) serves a plain-text API description at / instead.
 	StaticDir string `envconfig:"STATIC_DIR"`
+
+	// SettingsDir reads the menu from this folder at startup instead of from
+	// Kubernetes, and no Kubernetes client is built (settings.go). The folder
+	// holds the files directly: /settings/resources for the settings image.
+	SettingsDir string `envconfig:"SETTINGS_DIR"`
+	// SettingsReference says where that folder came from, for people to read.
+	SettingsReference string `envconfig:"SETTINGS_REFERENCE"`
+	// SettingsKeys is how sops gets its key to open the folder's encrypted
+	// Secrets (settings_keys.go). Empty opens nothing.
+	SettingsKeys string `envconfig:"SETTINGS_KEYS"`
+	// OpenBao is where SETTINGS_KEYS=openbao-age gets the age key: log in with
+	// the projected token in the file, then read the path, in the form the API
+	// uses (secret/data/...).
+	OpenBaoAddr          string `envconfig:"OPENBAO_ADDR"`
+	OpenBaoRole          string `envconfig:"OPENBAO_ROLE"`
+	OpenBaoAgeSecretPath string `envconfig:"OPENBAO_AGE_SECRET_PATH"`
+	OpenBaoTokenFile     string `envconfig:"OPENBAO_TOKEN_FILE"`
+	// DontDoThis registers /dont-do-this, which shows the opened keys to anyone.
+	// Only for made-up values: it comes out before a real key goes in.
+	DontDoThis bool `envconfig:"DONT_DO_THIS"`
 }
 
 func loadConfig() (config, error) {
@@ -157,5 +181,34 @@ func loadConfig() (config, error) {
 	if err := envconfig.Process("", &cfg); err != nil {
 		return cfg, err
 	}
+	if err := cfg.validate(); err != nil {
+		return cfg, err
+	}
 	return cfg, nil
+}
+
+// validate refuses the combinations that cannot work, so they fail at startup
+// with a reason rather than later without one.
+func (c config) validate() error {
+	if c.SettingsDir != "" && !c.ShopOnly {
+		// The editor writes a CoffeeConfig through /k8s while orders would read
+		// the folder, so the screen and the till would disagree.
+		return errors.New("SETTINGS_DIR requires SHOP_ONLY")
+	}
+	if c.SettingsKeys != "" && c.SettingsDir == "" {
+		return errors.New("SETTINGS_KEYS requires SETTINGS_DIR")
+	}
+	if c.DontDoThis && c.SettingsKeys == "" {
+		return errors.New("DONT_DO_THIS requires SETTINGS_KEYS")
+	}
+	switch c.SettingsKeys {
+	case "":
+	case settingsKeysOpenBaoAge:
+		if c.OpenBaoAddr == "" || c.OpenBaoRole == "" || c.OpenBaoAgeSecretPath == "" || c.OpenBaoTokenFile == "" {
+			return errors.New("SETTINGS_KEYS=openbao-age requires OPENBAO_ADDR, OPENBAO_ROLE, OPENBAO_AGE_SECRET_PATH and OPENBAO_TOKEN_FILE")
+		}
+	default:
+		return fmt.Errorf("unknown SETTINGS_KEYS %q", c.SettingsKeys)
+	}
+	return nil
 }
