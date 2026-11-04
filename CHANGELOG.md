@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.11.1](https://github.com/sunib/voter/compare/v2.11.0...v2.11.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* a key already set when Voter starts is shown as set ([22b5a08](https://github.com/sunib/voter/commit/22b5a08cc3714e6011b744ab9a433a27dd256d4b))
+
 ## [2.11.0](https://github.com/sunib/voter/compare/v2.10.1...v2.11.0) (2026-11-04)
 
 
