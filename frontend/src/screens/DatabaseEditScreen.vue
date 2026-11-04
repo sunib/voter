@@ -406,11 +406,7 @@ onBeforeUnmount(() => {
                      the top of the page went unseen below a long form. -->
                 <SaveRefusal
                   v-if="loadError && state.status === 'live'"
-                  :headline="
-                    saveFailure
-                      ? 'Not saved. Your changes are still here.'
-                      : 'Request failed'
-                  "
+                  :headline="saveFailure ? 'Not saved' : 'Request failed'"
                   :message="loadError"
                   :answer="saveFailure?.answer"
                 />

@@ -389,7 +389,10 @@ gitops-reverser mirrors the namespace through four GitTargets into the private
 with the human as Author and the bot as Committer. The editor follows its
 CommitRequest's status to the commit it became
 ([frontend/src/api/commitStatus.ts](frontend/src/api/commitStatus.ts)), linked through
-`commitURLTemplate`.
+`commitURLTemplate`. The menu editor asks twice, because a save reaches two
+repositories: its `coffee` target in k8s-trail, and `coffee-settings`, which holds the
+menu and its keys. A CommitRequest names one GitTarget, so each gets its own, and the
+page links both commits by their repository's name.
 
 ## Voting rounds
 

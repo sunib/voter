@@ -505,32 +505,11 @@ p {
   font-size: 0.85rem;
 }
 
+
 .panel {
   margin-top: 1rem;
   padding: 1.2rem;
   border-radius: 24px;
-}
-
-/* The menu editor's "New API key" (AdminScreen.vue): a native <dialog>, so
-   focus, Escape and the backdrop are the browser's. */
-.key-dialog {
-  /* .panel's margin-top would undo the browser's centring. */
-  margin: auto;
-  width: min(28rem, calc(100vw - 2rem));
-  color: rgb(var(--ink));
-}
-
-.key-dialog form {
-  display: grid;
-  gap: 0.75rem;
-}
-
-.key-dialog h3 {
-  margin: 0;
-}
-
-.key-dialog::backdrop {
-  background: rgb(var(--ink) / 0.45);
 }
 
 .panel--danger {
@@ -867,22 +846,154 @@ p {
   margin-top: 0.8rem;
 }
 
-/* Several fields refused at once arrive as one line each. A participant's
-   username is one long word, and unbroken it pushes Save out of the sidebar. */
+/* A soft callout rather than a block of red: only the title carries the colour.
+   Two lines of sentence at most, and the JSON below holds the rest. A
+   participant's username is one long word, and unbroken it pushes Save out of the
+   sidebar, so the answer wraps instead of scrolling. */
+.save-refusal {
+  margin-top: 0.8rem;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid rgb(var(--danger) / 0.25);
+  border-radius: 10px;
+  background: rgb(var(--surface-danger));
+  color: rgb(var(--ink));
+  font-size: 0.9rem;
+}
+
+.save-refusal__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.save-refusal__head strong {
+  color: rgb(var(--danger));
+}
+
 .save-refusal p {
-  margin: 0.25rem 0 0;
+  margin: 0.15rem 0 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
   white-space: pre-line;
   overflow-wrap: anywhere;
 }
 
-.save-refusal pre {
+.save-refusal__toggle {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: rgb(var(--muted));
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  text-decoration-color: rgb(var(--muted) / 0.4);
+}
+
+.save-refusal__toggle:hover {
+  color: rgb(var(--ink));
+}
+
+.save-refusal__answer {
+  position: relative;
+  margin-top: 0.5rem;
+}
+
+.save-refusal__answer .save-refusal__toggle {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.6rem;
+}
+
+.save-refusal__answer pre {
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  max-height: 16rem;
+  overflow: auto;
+  border-radius: 8px;
+  background: rgb(var(--line) / 0.06);
+  font-size: 0.75rem;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-/* Part of the refusal, not a link away from it. */
-.save-refusal .raw-answer summary {
-  color: inherit;
+.integrations {
+  margin-top: 1.5rem;
+}
+
+.integration__title {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.key-field__state {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+}
+
+/* No taller than its neighbours' labels, so the inputs in a row stay level. */
+.key-field__state .pill {
+  padding-block: 0;
+  font-size: 0.7rem;
+  line-height: 1.3;
+}
+
+.key-field__control {
+  position: relative;
+}
+
+.field .key-field__control input {
+  padding-right: 3rem;
+}
+
+/* The dots say a value is there, so they read as a value and not as a hint. */
+.key-field__input--set::placeholder {
+  color: rgb(var(--ink));
+  opacity: 0.75;
+}
+
+.key-field__eye {
+  position: absolute;
+  top: 50%;
+  right: 0.5rem;
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: rgb(var(--ink));
+  cursor: pointer;
+}
+
+.key-field__eye:disabled {
+  color: rgb(var(--muted));
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.key-field__eye svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.key-field__hint {
+  margin: 0;
+  font-size: 0.85rem;
 }
 
 .saved-toast {

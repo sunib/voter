@@ -94,6 +94,14 @@ type config struct {
 	// under its default message. The seat-why admission policy names the same
 	// target (config/admission/seat-why-policy.yaml).
 	ConfigButlerSeatGitTargetName string `envconfig:"CONFIGBUTLER_SEAT_GIT_TARGET_NAME"`
+	// ConfigButlerSettingsGitTargetName is the second target of a save on the
+	// menu editor: the settings repository, which holds the menu and its two
+	// keys. Empty means no CommitRequest, and the write still reaches that
+	// repository on the target's own window, under its default message.
+	ConfigButlerSettingsGitTargetName string `envconfig:"CONFIGBUTLER_SETTINGS_GIT_TARGET_NAME"`
+	// SettingsCommitURLTemplate is AuditTrailCommitURLTemplate for that target's
+	// repository.
+	SettingsCommitURLTemplate string `envconfig:"SETTINGS_COMMIT_URL_TEMPLATE"`
 	// AuditTrailCommitURLTemplate turns a commit sha into a link a participant
 	// can open. "{sha}" is substituted; anything else is passed through.
 	//

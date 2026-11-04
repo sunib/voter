@@ -44,19 +44,21 @@ func TestBuildInfoEndpoint(t *testing.T) {
 func TestConfigEndpoint(t *testing.T) {
 	mux := http.NewServeMux()
 	registerHandlers(mux, handlerDeps{defaultNS: "voter", cfg: config{
-		CoffeeConfigName:              "demo-coffee",
-		RoomName:                      "demo",
-		SeatingPlanName:               "mission2",
-		AuditTrailCommitURLTemplate:   "https://example.test/commit/{sha}",
-		ParticipantConnectorID:        "room-pass",
-		ConfigButlerGitTargetName:     " voter-demo ",
-		ConfigButlerSeatGitTargetName: "seats",
-		ConfigButlerCommitLeadMillis:  500,
-		AudienceCoffeeAdminRole:       "voter-audience-coffee-admin",
-		AudienceCoffeeKeysRole:        "voter-audience-coffee-keys",
-		AudienceBallotRole:            "voter-audience-ballot",
-		AudienceSeatClaimRole:         "voter-audience-seat-claim",
-		AudienceSeatEditRole:          "voter-audience-seat-edit",
+		CoffeeConfigName:                  "demo-coffee",
+		RoomName:                          "demo",
+		SeatingPlanName:                   "mission2",
+		AuditTrailCommitURLTemplate:       "https://example.test/commit/{sha}",
+		ParticipantConnectorID:            "room-pass",
+		ConfigButlerGitTargetName:         " voter-demo ",
+		ConfigButlerSeatGitTargetName:     "seats",
+		ConfigButlerSettingsGitTargetName: "coffee-settings",
+		SettingsCommitURLTemplate:         "https://example.test/settings/{sha}",
+		ConfigButlerCommitLeadMillis:      500,
+		AudienceCoffeeAdminRole:           "voter-audience-coffee-admin",
+		AudienceCoffeeKeysRole:            "voter-audience-coffee-keys",
+		AudienceBallotRole:                "voter-audience-ballot",
+		AudienceSeatClaimRole:             "voter-audience-seat-claim",
+		AudienceSeatEditRole:              "voter-audience-seat-edit",
 	}})
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/config.json", nil))
@@ -68,17 +70,19 @@ func TestConfigEndpoint(t *testing.T) {
 		t.Fatalf("not JSON: %v", err)
 	}
 	want := map[string]any{
-		"namespace":            "voter",
-		"coffeeConfigName":     "demo-coffee",
-		"roomName":             "demo",
-		"seatingPlanName":      "mission2",
-		"commitURLTemplate":    "https://example.test/commit/{sha}",
-		"participantConnector": "room-pass",
+		"namespace":                 "voter",
+		"coffeeConfigName":          "demo-coffee",
+		"roomName":                  "demo",
+		"seatingPlanName":           "mission2",
+		"commitURLTemplate":         "https://example.test/commit/{sha}",
+		"settingsCommitURLTemplate": "https://example.test/settings/{sha}",
+		"participantConnector":      "room-pass",
 		// Trimmed: an env value with stray spaces must not name a GitTarget
 		// that does not exist.
 		"gitTargetName":           "voter-demo",
 		"databaseGitTargetName":   "",
 		"seatGitTargetName":       "seats",
+		"settingsGitTargetName":   "coffee-settings",
 		"commitRequestNamespace":  "",
 		"commitLeadMillis":        float64(500),
 		"audienceCoffeeAdminRole": "voter-audience-coffee-admin",

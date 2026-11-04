@@ -27,6 +27,10 @@ spec:
         - name: Created
           type: date
           jsonPath: .metadata.creationTimestamp
+      # Voter writes status.keys; with the subresource, nobody writing the menu
+      # itself can, and a status write moves no generation.
+      subresources:
+        status: {}
       schema:
         openAPIV3Schema:
           type: object
@@ -185,3 +189,21 @@ spec:
                           type: string
                           enum:
                             - apiKey
+            status:
+              type: object
+              properties:
+                # Whether each key's Secret holds a value, and nothing else about
+                # it (coffee_keys_reconciler.go in sunib/voter).
+                keys:
+                  type: object
+                  properties:
+                    mail:
+                      type: object
+                      properties:
+                        set:
+                          type: boolean
+                    payments:
+                      type: object
+                      properties:
+                        set:
+                          type: boolean

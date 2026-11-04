@@ -156,8 +156,8 @@ rules:
 Blue/green is already in the system, for the whole settings bundle rather than
 for one Secret:
 
-- each write is a commit in coffee-settings, authored by whoever made it. Two
-  key writes within the 5 s window land in one commit;
+- each save is a commit in coffee-settings, authored by whoever made it, with
+  the reason they gave as its message: the writes of one press land in one commit;
 - each commit becomes a settings image with its own **immutable digest**, tagged
   `main-<commit time>-<sha7>`; settings-image never deletes, so every earlier
   digest stays pullable;
@@ -250,9 +250,9 @@ mail:
 The same rule goes on `payments`, with its own message. This is the rule behind
 "the editor fills a reference in when its provider is set" (What the screens
 do): the editor makes it easy, and the schema makes it true for `kubectl` and
-Flux too. Until P3 the editor still has free-text fields for both. A save sends
-every changed field in one patch, so filling in a provider and its reference
-together works; filling in one of them gets this message above the Save button.
+Flux too. The editor has no fields for the reference: it sends it with the
+provider and removes it with the provider, in one patch. Anyone else who fills in
+one of them gets this message.
 
 Why the enum stays rather than becoming CEL as well (`self.name ==
 'coffee-mail'`): an enum is part of the OpenAPI document, so `kubectl explain`,
@@ -338,7 +338,7 @@ Voter gains `AUDIENCE_COFFEE_KEYS_ROLE` (default `voter-audience-coffee-keys`),
 published in `/config.json` the way `AUDIENCE_COFFEE_ADMIN_ROLE` is. The Secret
 names are not settings: the CRD pins them anyway. Nothing changes on a screen
 until someone holds the grant: the `/room` control hides itself from whoever
-may not list bindings, and the "New API key" buttons are greyed out for
+may not list bindings, and the API key fields are greyed out for
 whoever may not patch the Secrets. The first plan had a setting per key, off by default, so a release
 could ship before the cluster had the Role; P2 shipped first instead.
 
@@ -349,38 +349,46 @@ could ship before the cluster had the Role; P2 shipped first instead.
   someone" binds the Role to one participant at random in
   `voter-audience-coffee-keys-person`, "Pick someone else" moves it, "Take it
   back" deletes it. It shows who holds it.
-- **"New mail API key" / "New payments API key"** (built, in the menu editor,
-  `AdminScreen.vue`): buttons under the mail and payments fields, shown to
-  everyone and greyed out unless this person's permissions include `patch` on
+- **API key** (built, in the menu editor, `AdminScreen.vue`, `ApiKeyField.vue`):
+  one field in the "Mail integration" pane and one in "Payment integration", shown
+  to everyone and greyed out unless this person's permissions include `patch` on
   that Secret. The watchable-permissions machinery already answers that, so they
-  light up the moment `/room` picks someone, which is how that person finds out,
-  and grey out again when it takes the grant back. "Try anyway" lifts the page's
-  own check and nothing else: Save then gets the API server's real refusal. Each
-  opens a dialog with a password
-  field, OK and Cancel. OK does not write anything: the key becomes a pending
-  change in "Review and save", beside the menu's own, never shown, and Revert
-  discards it. Save writes the menu first and then each key, one patch of one
+  open the moment `/room` picks someone, which is how that person finds out, and
+  grey out again when it takes the grant back. "Try anyway" lifts the page's
+  own check and nothing else: Save then gets the API server's real refusal. Typing
+  writes nothing: the key becomes a pending change in "Review and save", beside
+  the menu's own, and the field's Revert, or the one in the summary, discards it.
+  The eye shows what is being typed and nothing else. Save writes the menu first and then each key, one patch of one
   Secret each, so a refused menu leaves the key unwritten and still pending. The
   keys do not depend on each other: a refused one stays pending with its refusal
   on its own row, and the other is still written.
-  Both writes fall in the same 5 s window, so coffee-settings gets one commit,
-  and that commit is where the key is encrypted. Nothing leaves the browser
-  before Save.
-- **Menu editor, mail and payments sections** (not built): each reference
-  shown, not edited: "Mail key: `coffee-mail`", "Payments key:
-  `coffee-payments`", filled in when its provider is set. Until then the
-  free-text fields stay, and the CRD refuses anything but the one right value.
+  Save asks coffee-settings for its commit first, as it asks the coffee target
+  for the menu's: a CommitRequest names one GitTarget, so a save with a menu change
+  makes two, with the same message, and a save of only keys makes the one. The
+  writes fall in one window, so coffee-settings gets one commit, and that commit
+  is where the key is encrypted. The page says "Committed to coffee-settings and
+  k8s-trail" under Save, each name a link to its commit, and only what this press
+  wrote: a key refused on its own has no commit to show. Nothing leaves the
+  browser before Save.
+- **Menu editor, mail and payments** (built): two panes, each with its settings
+  and its API key. No reference is shown or chosen. It follows the provider, and
+  the CRD refuses anything but the one right value.
 - **The reveal** is a stage beat, not a screen: the key-holder has kept the key
   to themselves, and Simon opens the commit's `.sops.yaml` with `sops decrypt`
   and reads it out. The room sees that only someone with the age key could.
 - A refusal of a key comes back as the policy's own message on that key's row in
   "Review and save"; a refusal of the menu above the Save button, as the price
-  policy's does now. Either way "More..." opens the whole answer, and
+  policy's does now. Either way "Show JSON" opens the whole answer, and
   the refusal stays until the person changes what was refused or saves again.
 
-Showing whether a key is set, and since when, needs something that can read the
-Secret. That is optional, in phase 4. Until then the proof is the commit in
-coffee-settings, and that commit is beat 2 anyway.
+Showing whether a key is set needs something that can read the Secret, so Voter
+does it (`voter/coffee_keys_reconciler.go`): its ServiceAccount may list and watch
+the two Secrets by name, keeps one bit of each, and writes it to the menu's
+`status.keys.{mail,payments}.set`, which every reader of the menu streams. The
+field shows dots with a "Set" pill or is empty with "Not set", and the dots are a
+placeholder: no value reaches the browser. The eye shows only what the person is
+typing, and the field's Revert drops that. Nothing tells whether a key changed,
+only whether one is there: the bit is the most this design shows of a key.
 
 ## Not every two seconds
 
@@ -410,7 +418,8 @@ it to do.
   back is a digest pin and a new key (decision 3), not a switch back, and the pin
   takes the other key back with it.
 - **coffee-settings is public.** The Secrets' names, their labels and the
-  ciphertext are visible; the keys are not.
+  ciphertext are visible; the keys are not. So is whatever a person types under
+  "Why are you making this change?", which is that commit's message.
 - **demo-production gets the references but no Secrets.** k8s-trail's
   `configs/coffee/` carries the CoffeeConfig only, so in `demo-production` both
   references resolve to nothing. That is correct until production has Secrets of
@@ -426,8 +435,8 @@ it to do.
 | --- | --- | --- |
 | **P1** CRD + policy (**built**) | voter: `coffeeconfigs.yaml` (the enums, `required` and the CEL rule), [coffee-keys-policy.yaml](../voter/config/admission/coffee-keys-policy.yaml) (both policies), the Role and the two Secrets in `test/e2e/voter.yaml`, [coffee-keys.spec.js](../test/browser/coffee-keys.spec.js) | a ref to `k8s-trail-git`, a mail ref naming `coffee-payments`, and a provider without a ref are refused by the schema; a second key, a no-op patch, a dry run and a metadata change by the policy; the label on another Secret by the second one. Passing on the fixture, with the other 27 browser tests, on 2026-11-03. Ratcheting checked by hand on k3d 1.37 |
 | **P2** cluster | external/k8s: the two Secrets, the Role, the copied CRD and policies. The live `demo-coffee` already meets the new CRD: its free-text references (`Tes`/`Ter` with no provider, `Haa`/`Ns`) were set to `sendgrid` + `coffee-mail` and `stripe` + `coffee-payments` on 2026-11-03. The coffee-settings sink it writes into is live (Ready, committing since 2026-11-03) | a hand-run `kubectl patch` of each, as a test user, lands as `coffee/resources/secrets/voter/<name>.sops.yaml`, authored by them, and opens with `sops decrypt` |
-| **P3** Voter UI (**built**, except the fixed references in the editor) | voter: the `/room` control and the editor's "New API key" buttons; `coffee-keys.spec.js` drives both on the fixture | the rehearsal: one phone sets both keys, a new digest, the third app rolls; then a digest pin brings the previous one back |
-| **P4** (optional) key status | voter backend: `get` on the two names; returns `{name, set, updated}` only, never any part of the key | the editor shows "mail set 2 min ago; payments not set" |
+| **P3** Voter UI (**built**) | voter: the `/room` control and the editor's API key fields; `coffee-keys.spec.js` drives both on the fixture | the rehearsal: one phone sets both keys, a new digest, the third app rolls; then a digest pin brings the previous one back |
+| **P4** key status (built) | voter backend: list and watch on the two names; writes `status.keys.<section>.set` on the menu, never any part of the key | the editor shows "Set" or "Not set" on each key, live, to everyone |
 
 ## To verify
 

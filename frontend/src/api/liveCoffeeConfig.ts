@@ -1,6 +1,7 @@
 import type {
   KRMObject,
   KubernetesStructuralSchema,
+  SaveRequest,
 } from '@configbutler/krm-stream'
 import {
   getAdminCoffeeConfig,
@@ -45,6 +46,23 @@ export const coffeeConfigKeyedLists: KubernetesStructuralSchema = {
   },
 }
 
+/** krm-stream 0.10.0 reports a removed object as each of its fields removed, and
+ *  a merge patch of those leaves `apiKeySecretRef: {}` behind, which the CRD
+ *  refuses: name and key are required. So a reference goes as one removal
+ *  (docs/krm-stream-feedback.md, entry 4). Drop this once the library does it. */
+function removeReferencesWhole(intent: SaveRequest): SaveRequest {
+  const patch = structuredClone(intent.patch) as {
+    spec?: Record<string, { apiKeySecretRef?: unknown } | undefined>
+  }
+  for (const section of [patch.spec?.mail, patch.spec?.payments]) {
+    const reference = section?.apiKeySecretRef as
+      { name?: unknown; key?: unknown } | null | undefined
+    if (section && reference?.name === null && reference.key === null)
+      section.apiKeySecretRef = null
+  }
+  return { ...intent, patch }
+}
+
 /** The coffee menu, live and editable. All of the draft, conflict, save and
  *  recovery mechanics are in liveEditableResource.ts, which the Database editor
  *  uses too -- this file is the things that are specific to a
@@ -65,7 +83,7 @@ export function useLiveCoffeeConfig(
     },
     editable,
     read: getAdminCoffeeConfig,
-    write: (intent) => writeAdminCoffeeConfig(intent),
+    write: (intent) => writeAdminCoffeeConfig(removeReferencesWhole(intent)),
     requestCommit: requestCoffeeCommit,
     keyedLists: coffeeConfigKeyedLists,
     isExpectedKind: coffeeResource,

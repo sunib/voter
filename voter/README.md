@@ -58,9 +58,11 @@ there is no issuer, client, cookie key or origin to configure.
 | `AUDIENCE_COFFEE_ADMIN_ROLE` | `voter-audience-coffee-admin`; the Role, and RoleBinding, of the operator's audience grant |
 | `CONFIGBUTLER_GIT_TARGET_NAME` | `voter-demo`; empty asks no commit after a menu save |
 | `CONFIGBUTLER_DATABASE_GIT_TARGET_NAME` | Empty; the same for a Database save |
+| `CONFIGBUTLER_SETTINGS_GIT_TARGET_NAME` | Empty; the second target of a menu editor save, the settings repository that holds the menu and its keys |
 | `CONFIGBUTLER_COMMITREQUEST_NAMESPACE` | Application namespace unless overridden |
 | `CONFIGBUTLER_COMMIT_LEAD_MS` | `500`; how long a save waits between its CommitRequest and its write, so the request is waiting for the window the write opens |
 | `AUDIT_TRAIL_COMMIT_URL_TEMPLATE` | Empty; turns a commit sha into a link, with `{sha}` substituted |
+| `SETTINGS_COMMIT_URL_TEMPLATE` | Empty; the same link for the settings repository |
 | `STATIC_DIR` | Empty locally; image sets `/srv/www` |
 
 Voter acts in Kubernetes only as itself (`service_account.go`), for two things: the

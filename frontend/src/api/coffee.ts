@@ -15,6 +15,7 @@ import {
   conditionalPatch,
   getObject,
   mergePatch,
+  requestCommit,
   requestCommitAhead,
   type CommitReceipt,
 } from './kube'
@@ -105,6 +106,18 @@ export async function patchAdminCoffeeConfig(
  *  liveEditableResource.ts). */
 export async function requestCoffeeCommit(reason?: string): Promise<CommitReceipt> {
   return await requestCommitAhead(appConfig().gitTargetName, 'coffee-save-', changeReason(reason))
+}
+
+/** The same request for the settings repository's target, without the lead: the
+ *  screen sends it first, and whatever it writes next waits the lead itself. It
+ *  is the screen's because it follows from everything one press writes, the
+ *  menu and the keys, and only the screen knows all of that. */
+export async function requestSettingsCommit(reason?: string): Promise<CommitReceipt> {
+  return await requestCommit(
+    appConfig().settingsGitTargetName,
+    'coffee-settings-save-',
+    changeReason(reason),
+  )
 }
 
 export async function writeAdminCoffeeConfig(intent: SaveRequest): Promise<void> {

@@ -9,8 +9,8 @@ kind: Role
 metadata:
   name: voter
   namespace: voter
-# Must mirror the platform repo's voter Role. Voter acts as itself for three
-# things only: the storefront reads the one CoffeeConfig, the tally reconciler
+# Must mirror the platform repo's voter Role. Voter acts as itself for four
+# things only: whether the menu's keys are set, on the menu's status; the storefront reads the one CoffeeConfig, the tally reconciler
 # reads rounds and ballots and writes a round's status, and the seat reconciler
 # reads seats and their CommitRequests and writes a seat's status (idle here:
 # the fixture sets no seat GitTarget). Everything a
@@ -45,6 +45,18 @@ rules:
     verbs: [list, watch]
   - apiGroups: [examples.configbutler.ai]
     resources: [seats/status]
+    verbs: [patch]
+  # Whether the menu's keys are set (coffee_keys_reconciler.go): watch the two
+  # Secrets by name, and write the answer to the menu's STATUS only. The grant
+  # reads their values; the reconciler keeps one bit of each and drops the rest
+  # before it is cached.
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [coffee-mail, coffee-payments]
+    verbs: [list, watch]
+  - apiGroups: [examples.configbutler.ai]
+    resources: [coffeeconfigs/status]
+    resourceNames: [demo-coffee]
     verbs: [patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

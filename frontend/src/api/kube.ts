@@ -277,11 +277,17 @@ export async function requestCommitAhead(
   labels?: Record<string, string>,
 ): Promise<CommitReceipt> {
   const receipt = await requestCommit(target, generateName, reason, labels)
+  await waitCommitLead(receipt)
+  return receipt
+}
+
+/** The second half of requestCommitAhead: nothing to wait for unless a request
+ *  was accepted. */
+export async function waitCommitLead(receipt: CommitReceipt): Promise<void> {
   const lead = appConfig().commitLeadMillis
   if (receipt.commitRequested && lead > 0) {
     await new Promise((resolve) => setTimeout(resolve, lead))
   }
-  return receipt
 }
 
 /** Asks ConfigButler to commit this person's next write: a CommitRequest

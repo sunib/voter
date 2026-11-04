@@ -55,6 +55,17 @@ export function kubernetesAnswer(cause: unknown): string | undefined {
   return body?.kind === 'Status' ? JSON.stringify(body, null, 2) : undefined
 }
 
+/** The short form of a refusal for a small space. RBAC's sentence spends most of
+ *  its length on the person's own username, the API group and the namespace, so
+ *  it keeps the part that says what was refused. Anything else is short already,
+ *  and the whole of it is in kubernetesAnswer either way. */
+export function briefRefusal(message: string): string {
+  const rbac = /is forbidden: User ".*?" (cannot \S+ resource "[^"]*")/.exec(
+    message,
+  )
+  return rbac ? `You ${rbac[1]}` : message
+}
+
 /** A refusal by a CRD's schema, as the person should read it: each field and what
  *  Kubernetes said about it, without 'CoffeeConfig... "demo" is invalid:' around
  *  them. The field `<nil>` is the API server's note that it stopped checking.

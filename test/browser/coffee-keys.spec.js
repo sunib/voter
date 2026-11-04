@@ -182,26 +182,34 @@ test('the operator gives one person the keys from /room, and takes them back', a
     kube('create', '-f', '-', { input: JSON.stringify(binding) });
     await expect(panel.getByTestId('picked-name')).toHaveText(displayName);
 
-    // The holder's menu page grows a "New mail API key" button. A key typed
+    // Both integrations on the holder's menu page have an API key field. A key typed
     // there is a pending change like any other: discarded with Revert, and
     // only written by Save.
     await holder.goto(`${APP}/admin`);
-    const newMailKey = holder.getByRole('button', { name: 'New mail API key' });
-    const dialog = holder.getByRole('dialog');
+    const pane = (name) => holder.getByRole('region', { name });
+    const mailPane = pane('Mail integration');
+    const mailKey = mailPane.getByLabel('API key');
+    const paymentsKey = pane('Payment integration').getByLabel('API key');
     const summary = holder.locator('.save-summary');
-    const newPaymentsKey = holder.getByRole('button', { name: 'New payments API key' });
-    const enterKey = async (value, button, open = newMailKey, label = 'Mail API key') => {
-      await open.click();
-      await dialog.getByLabel(label).fill(value);
-      await dialog.getByRole('button', { name: button }).click();
-      await expect(dialog).toBeHidden();
-    };
-    await expect(newPaymentsKey).toBeVisible();
+    await expect(paymentsKey).toBeEditable();
+    await expect(mailPane.getByText('Not set', { exact: true })).toBeVisible();
 
-    await enterKey('nope', 'Cancel');
+    // The eye shows only what is being typed: nothing to show until then.
+    const eye = mailPane.getByRole('button', { name: 'Show what you typed' });
+    await expect(eye).toBeDisabled();
+    await expect(mailKey).toHaveAttribute('type', 'password');
+    await mailKey.fill('nope');
+    await expect(summary).toContainText('1 change(s) ready to save');
+    await eye.click();
+    await expect(mailKey).toHaveAttribute('type', 'text');
+    await expect(mailKey).toHaveValue('nope');
+    // Reverted in the field itself, and the eye closes with it.
+    await mailPane.getByRole('button', { name: 'Revert' }).click();
     await expect(summary).toContainText('No pending changes');
+    await expect(mailKey).toHaveValue('');
+    await expect(mailKey).toHaveAttribute('type', 'password');
 
-    await enterKey('taart', 'OK');
+    await mailKey.fill('taart');
     await expect(summary).toContainText('1 change(s) ready to save');
     await expect(summary).toContainText('Mail API key');
     await expect(summary).not.toContainText('taart');
@@ -214,7 +222,7 @@ test('the operator gives one person the keys from /room, and takes them back', a
     const banner = holder.getByLabel('Banner text');
     const bannerBefore = await banner.inputValue();
     await banner.fill(`${bannerBefore} (refused)`);
-    await enterKey('taart', 'OK');
+    await mailKey.fill('taart');
     await summary.getByRole('button', { name: 'Save 2 Changes' }).click();
     await expect(summary.getByRole('alert')).toContainText('cannot patch resource "coffeeconfigs"');
     await expect(summary).toContainText('2 change(s) ready to save');
@@ -233,11 +241,20 @@ test('the operator gives one person the keys from /room, and takes them back', a
     await expect(holder.getByRole('status').filter({ hasText: 'Saved to Kubernetes' })).toBeVisible();
     expect(paymentsSecret().metadata.resourceVersion).toBe(paymentsVersion);
 
+    // Set, for the page and for whoever reads the menu: one bit, and the dots are
+    // a placeholder over an empty input, so the value is nowhere in the page.
+    await expect(mailPane.getByText('Set', { exact: true })).toBeVisible();
+    await expect(mailKey).toHaveValue('');
+    await expect(mailKey).toHaveAttribute('placeholder', /^•+$/);
+    await expect(mailPane.getByRole('button', { name: 'Show what you typed' })).toBeDisabled();
+    expect(await holder.content()).not.toContain('taart');
+    expect(JSON.parse(kube('get', 'coffeeconfig', 'demo-coffee', '-o', 'json')).status.keys).toEqual({ mail: { set: true }, payments: { set: false } });
+
     // The same value again is admission's refusal, in its own words, on that
     // key's row, and the key stays pending. The payments key saved with it is
     // written all the same: each key is refused on its own.
-    await enterKey('taart', 'OK');
-    await enterKey('bon1', 'OK', newPaymentsKey, 'Payments API key');
+    await mailKey.fill('taart');
+    await paymentsKey.fill('bon1');
     await summary.getByRole('button', { name: 'Save 2 Changes' }).click();
     await expect.poll(() => paymentsSecret().data).toEqual({ apiKey: b64('bon1') });
     await expect(summary.locator('li', { hasText: 'Mail API key' }).getByRole('alert')).toContainText('That is the mail key already set: saving it has to change it.');
@@ -245,7 +262,7 @@ test('the operator gives one person the keys from /room, and takes them back', a
     await expect(holder.getByRole('status').filter({ hasText: 'Saved, except what is marked below' })).toBeVisible();
 
     // A new value answers the refusal, so the refusal goes.
-    await enterKey('koekje', 'OK');
+    await mailKey.fill('koekje');
     await expect(summary.getByRole('alert')).toHaveCount(0);
 
     // Taken back on /room: the binding goes, and the buttons grey out.
@@ -253,19 +270,19 @@ test('the operator gives one person the keys from /room, and takes them back', a
     await panel.getByRole('button', { name: 'Take it back' }).click();
     await expect.poll(() => kube('get', 'rolebinding', 'voter-audience-coffee-keys-person', '--ignore-not-found', '-o', 'name').trim()).toBe('');
     await expect(panel.getByTestId('picked-name')).toHaveCount(0);
-    await expect(newMailKey).toBeDisabled();
+    await expect(mailKey).toBeDisabled();
 
     // "Try anyway" lifts the page's check, not Kubernetes': the key is refused
     // on Save, by RBAC, and nothing is written.
     await holder.getByRole('button', { name: 'Try anyway' }).click();
-    await enterKey('koek', 'OK');
+    await mailKey.fill('koek');
     await summary.getByRole('button', { name: 'Save 1 Change' }).click();
     await expect(summary.getByRole('alert')).toContainText('cannot patch resource "secrets"');
     expect(JSON.parse(kube('get', 'secret', 'coffee-mail', '-o', 'json')).data).toEqual({ apiKey: b64('taart') });
 
     // That refusal names this participant's username, one very long word. Wide or
     // narrow, with the whole answer open, it wraps and Save stays on screen.
-    await summary.getByText('More...').click();
+    await summary.getByRole('button', { name: 'Show JSON' }).click();
     for (const width of [390, 1280]) {
       await holder.setViewportSize({ width, height: 800 });
       expect(await holder.locator('.admin-sidebar').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
@@ -275,6 +292,55 @@ test('the operator gives one person the keys from /room, and takes them back', a
     for (const c of contexts) await c.close();
     kube('delete', 'rolebinding', 'voter-audience-coffee-keys-person', '--ignore-not-found');
     for (const name of ['coffee-mail', 'coffee-payments']) kube('patch', 'secret', name, '--type=merge', '-p', '{"data":{"apiKey":""}}');
+    const participants = JSON.parse(kube('get', 'participants', '-o', 'json')).items;
+    for (const p of participants) if (p.spec.displayName === displayName) kube('delete', 'participant', p.metadata.name);
+  }
+});
+
+// A key going from empty to set moves the menu's resourceVersion, through its
+// status. That is somebody else's change to the page of whoever is editing: their
+// edit stays, and their save still lands.
+test('a key being set does not disturb an edit of the menu', async ({ browser }) => {
+  const displayName = `keys-editor-${Date.now()}`;
+  const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+  page.on('pageerror', error => { throw error; });
+  const before = JSON.parse(kube('get', 'coffeeconfig', 'demo-coffee', '-o', 'json')).spec.shopName;
+  try {
+    kube('create', 'rolebinding', 'voter-audience-coffee-admin', '--role=voter-audience-coffee-admin', '--group=demo:voter-audience');
+    await page.goto(`${APP}/admin`);
+    await page.getByLabel('Room code').fill(JSON.parse(kube('get', 'room', 'demo', '-o', 'json')).status.joinCode.code);
+    await page.getByLabel('Display name').fill(displayName);
+    await page.getByRole('radio', { name: 'Vue' }).check();
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await page.waitForURL(`${APP}/admin`);
+
+    const mailPane = page.getByRole('region', { name: 'Mail integration' });
+    const shopField = page.locator('label', { hasText: 'Shop name' }).locator('input');
+    const summary = page.locator('.save-summary');
+    await expect(shopField).toBeEditable();
+    await expect(mailPane.getByText('Not set', { exact: true })).toBeVisible();
+    await shopField.fill(`${before} edited`);
+
+    kube('patch', 'secret', 'coffee-mail', '--type=merge', '-p', `{"data":{"apiKey":"${b64('koek')}"}}`);
+    await expect(mailPane.getByText('Set', { exact: true })).toBeVisible();
+    await expect(shopField).toHaveValue(`${before} edited`);
+    await expect(summary).toContainText('1 change(s) ready to save');
+
+    await summary.getByRole('button', { name: 'Save 1 Change' }).click();
+    await expect.poll(() => JSON.parse(kube('get', 'coffeeconfig', 'demo-coffee', '-o', 'json')).spec.shopName).toBe(`${before} edited`);
+    await expect(summary).toContainText('No pending changes');
+    await expect(summary.getByRole('alert')).toHaveCount(0);
+
+    // And back: empty is "Not set" again, with no dots.
+    kube('patch', 'secret', 'coffee-mail', '--type=merge', '-p', '{"data":{"apiKey":""}}');
+    await expect(mailPane.getByText('Not set', { exact: true })).toBeVisible();
+    await expect(mailPane.getByLabel('API key')).not.toHaveAttribute('placeholder', /•/);
+  } finally {
+    await context.close().catch(() => {});
+    kube('delete', 'rolebinding', 'voter-audience-coffee-admin', '--ignore-not-found');
+    kube('patch', 'coffeeconfig', 'demo-coffee', '--type=merge', '-p', JSON.stringify({ spec: { shopName: before } }));
+    kube('patch', 'secret', 'coffee-mail', '--type=merge', '-p', '{"data":{"apiKey":""}}');
     const participants = JSON.parse(kube('get', 'participants', '-o', 'json')).items;
     for (const p of participants) if (p.spec.displayName === displayName) kube('delete', 'participant', p.metadata.name);
   }

@@ -281,6 +281,30 @@ describe('CoffeeConfig library integration', () => {
     expect(live.saveFailure.value).toBeNull()
   })
 
+  it('removes a key reference whole, which is the only way the CRD allows', async () => {
+    const { live, event, host, requests } = await fixture()
+    const withMail = {
+      ...object('2'),
+      spec: {
+        ...object('2').spec,
+        mail: {
+          provider: 'sendgrid',
+          apiKeySecretRef: { name: 'coffee-mail', key: 'apiKey' },
+        },
+      },
+    }
+    await event({ type: 'modified', object: withMail, redacted: [] })
+    live.setValue(['spec', 'mail', 'provider'], '')
+    live.removeKey(['spec', 'mail', 'apiKeySecretRef'])
+    host.mockResolvedValueOnce(json(withMail))
+    await live.save('')
+    const sent = requests.find((request) => request.method === 'PATCH')!
+    expect(JSON.parse(sent.body as string).spec.mail).toEqual({
+      provider: '',
+      apiKeySecretRef: null,
+    })
+  })
+
   it('stops at a real conflict rather than retrying over somebody else', async () => {
     const { live, host, requests } = await fixture()
     live.setValue(['spec', 'shopName'], 'Mine')

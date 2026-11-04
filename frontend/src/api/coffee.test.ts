@@ -5,6 +5,7 @@ import {
   getStorefront,
   getVoucherUsage,
   patchAdminCoffeeConfig,
+  requestSettingsCommit,
   submitOrder,
 } from './coffee'
 import { getSession } from './session'
@@ -233,6 +234,34 @@ describe('CSRF proof', () => {
       commitRequested: true,
       commitRequest: 'coffee-save-x',
     })
+  })
+
+  it('asks the settings target with the same message, and no lead of its own', async () => {
+    await useTestAppConfig({ settingsGitTargetName: 'coffee-settings', commitLeadMillis: 60000 })
+    await signIn()
+    route(() => ({ body: { metadata: { name: 'coffee-settings-save-x' } } }))
+
+    const receipt = await requestSettingsCommit('  raise the limit ')
+
+    expect(bodyOf(calls[0]!)).toEqual({
+      apiVersion: 'configbutler.ai/v1alpha3',
+      kind: 'CommitRequest',
+      metadata: { generateName: 'coffee-settings-save-', namespace: 'voter' },
+      spec: {
+        gitTargetRef: { name: 'coffee-settings' },
+        message: 'raise the limit',
+        window: { attach: 'CurrentOrNext', attachTimeout: '3s', maxDuration: '1s' },
+      },
+    })
+    expect(receipt).toEqual({ commitRequested: true, commitRequest: 'coffee-settings-save-x' })
+  })
+
+  it('asks the settings target nothing when the deployment names none', async () => {
+    await signIn()
+    route(() => ({}))
+
+    expect(await requestSettingsCommit('raise the limit')).toEqual({})
+    expect(calls).toHaveLength(0)
   })
 
   it('asks for no commit when the deployment names no GitTarget', async () => {

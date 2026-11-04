@@ -3,22 +3,27 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { get, isPrefix, type Path } from '@configbutler/krm-stream'
 import { leafChanges, revertTarget, serverPathFor } from '../api/fieldChanges'
 import { formatConflictValue, humanizePath } from '../adminFormatters'
-import { formatMoney, getVoucherUsage } from '../api/coffee'
+import {
+  formatMoney,
+  getVoucherUsage,
+  requestSettingsCommit,
+} from '../api/coffee'
 import {
   coffeeConfigKeyedLists,
   useLiveCoffeeConfig,
 } from '../api/liveCoffeeConfig'
 import { appConfig } from '../api/appConfig'
 import { loginURL } from '../api/session'
-import { commitURL, shortSha, useCommitStatus } from '../api/commitStatus'
+import { commitURL, repositoryName, useCommitStatus } from '../api/commitStatus'
 import { ADMIN_REQUIREMENTS, allowsNamed } from '../api/authz'
 import { kubernetesAnswer } from '../api/http'
-import { SECRETS, mergePatch } from '../api/kube'
+import { SECRETS, mergePatch, waitCommitLead } from '../api/kube'
 import { useAuthorization } from '../api/useAuthorization'
 import AdminNav from '../components/admin/AdminNav.vue'
 import AppShell from '../components/layout/AppShell.vue'
 import PermissionRequirements from '../components/PermissionRequirements.vue'
 import FieldStateMarker from '../components/admin/FieldStateMarker.vue'
+import ApiKeyField from '../components/ApiKeyField.vue'
 import SaveRefusal from '../components/SaveRefusal.vue'
 import SavedToast from '../components/SavedToast.vue'
 
@@ -54,14 +59,44 @@ const {
 // Follows the receipt the save just handed back until ConfigButler reports the
 // commit pushed, so the line under the form is the state of Git rather than the
 // state of Git at the instant of the save.
+//
+// One save, two repositories: the coffee target in the audit trail, and the
+// settings target, which holds the menu and its keys. A CommitRequest names one
+// GitTarget, so each gets its own, and each its own line.
 const commit = useCommitStatus(config.namespace)
-const { state: commitState, sha: commitSha, detail: commitDetail } = commit
+const settingsCommit = useCommitStatus(config.namespace)
+const settingsCommitNotice = ref('')
 const failedCommitCopy =
   'Your change is saved in Kubernetes. ConfigButler stopped trying to commit it.'
 // Empty unless the deployment names where its audit trail can be read, in which
 // case the sha stays plain text rather than becoming a link to nowhere.
-const commitLink = computed(() =>
-  commitURL(config.commitURLTemplate, commitSha.value),
+const commitTrails = computed(() =>
+  [
+    {
+      target: config.settingsGitTargetName,
+      followed: settingsCommit,
+      template: config.settingsCommitURLTemplate,
+    },
+    {
+      target: config.gitTargetName,
+      followed: commit,
+      template: config.commitURLTemplate,
+    },
+  ].map(({ target, followed, template }) => ({
+    name: repositoryName(template) || target,
+    state: followed.state.value,
+    detail: followed.detail.value,
+    link: commitURL(template, followed.sha.value),
+  })),
+)
+const failedCommits = computed(() =>
+  commitTrails.value.filter((trail) => trail.state === 'failed'),
+)
+const committedTrails = computed(() =>
+  commitTrails.value.filter((trail) => trail.state === 'committed'),
+)
+const committingTrails = computed(() =>
+  commitTrails.value.filter((trail) => trail.state === 'pending'),
 )
 watch(commitRequest, (name) => {
   if (name) commit.follow(name)
@@ -104,8 +139,9 @@ const fieldChanges = computed(() =>
 // The menu's mail and payments keys (docs/coffee-api-keys-design.md). Not
 // part of the CoffeeConfig: each is a Secret of its own that the menu names.
 // Only the one person /room gave the keys to may replace them (patch on those
-// two Secrets, never get). Everybody sees the buttons; they light up for that
-// person the moment /room picks them, which is how they find out. "Try anyway"
+// two Secrets, never get). Everybody sees whether a key is set, which Voter puts
+// on the menu's status (coffee_keys_reconciler.go), and the fields; they open for
+// that person the moment /room picks them, which is how they find out. "Try anyway"
 // lifts this page's own check and nothing else: Save then gets the API
 // server's real refusal, which is the point of the demo. A new key waits here,
 // in this page, as a change like any other, until Save writes it: after the
@@ -114,15 +150,25 @@ const fieldChanges = computed(() =>
 // does not hold back the payments key. Both writes land in the same
 // coffee-settings commit, and that commit is where the key is encrypted.
 const KEY_SLOTS = [
-  { secret: 'coffee-mail', label: 'Mail API key', button: 'New mail API key' },
   {
+    section: 'mail',
+    secret: 'coffee-mail',
+    label: 'Mail API key',
+  },
+  {
+    section: 'payments',
     secret: 'coffee-payments',
     label: 'Payments API key',
-    button: 'New payments API key',
   },
 ] as const
 type KeySlot = (typeof KEY_SLOTS)[number]
+const [mailKey, paymentsKey] = KEY_SLOTS
 const pendingKeys = ref<Partial<Record<KeySlot['secret'], string>>>({})
+const storedKey = (slot: KeySlot) =>
+  (
+    serverConfig.value as
+      { status?: { keys?: Record<string, { set?: boolean }> } } | undefined
+  )?.status?.keys?.[slot.section]?.set
 const mayReplaceKey = (slot: KeySlot) =>
   allowsNamed(authz.value, '', SECRETS.resource, 'patch', slot.secret)
 const mayReplaceAnyKey = computed(() => KEY_SLOTS.some(mayReplaceKey))
@@ -130,7 +176,7 @@ const tryKeysAnyway = ref(false)
 const keyChanges = computed(() =>
   KEY_SLOTS.filter((slot) => pendingKeys.value[slot.secret] !== undefined),
 )
-const keysSaving = ref(false)
+const pressingSave = ref(false)
 const keyErrors = ref<
   Partial<Record<KeySlot['secret'], { message: string; answer?: string }>>
 >({})
@@ -139,25 +185,13 @@ function clearKeyError(slot: KeySlot) {
   const { [slot.secret]: _cleared, ...rest } = keyErrors.value
   keyErrors.value = rest
 }
-const keyDialog = ref<HTMLDialogElement | null>(null)
-const keyDialogSlot = ref<KeySlot | null>(null)
-const keyDialogValue = ref('')
-function openKeyDialog(slot: KeySlot) {
-  keyDialogSlot.value = slot
-  keyDialogValue.value = ''
-  keyDialog.value?.showModal()
-}
-function closeKeyDialog(accept: boolean) {
-  const slot = keyDialogSlot.value
-  if (accept && slot && keyDialogValue.value !== '') {
-    pendingKeys.value = {
-      ...pendingKeys.value,
-      [slot.secret]: keyDialogValue.value,
-    }
-    clearKeyError(slot)
+function setPendingKey(slot: KeySlot, value: string) {
+  if (value === '') {
+    discardKey(slot)
+    return
   }
-  keyDialogValue.value = ''
-  keyDialog.value?.close()
+  pendingKeys.value = { ...pendingKeys.value, [slot.secret]: value }
+  clearKeyError(slot)
 }
 function discardKey(slot: KeySlot) {
   const { [slot.secret]: _discarded, ...rest } = pendingKeys.value
@@ -165,27 +199,35 @@ function discardKey(slot: KeySlot) {
   clearKeyError(slot)
 }
 const dirtyFieldCount = computed(
-  () => fieldChanges.value.length + keyChanges.value.length,
+  () => dirtySummaryEntries.value.length + keyChanges.value.length,
 )
 const conflictCount = computed(() => live.conflicts.value.length)
 const cleanDirtyCount = computed(() =>
   Math.max(0, dirtyFieldCount.value - conflictCount.value),
 )
 const dirtySummaryEntries = computed(() =>
-  fieldChanges.value.map((change) => {
-    const path = change.path.join('.')
-    return {
-      path,
-      label: humanizePath(path),
-      state: fieldState(path),
-      draftValue: change.new,
-      serverValue: change.old,
-      previousServer: undefined,
-    }
-  }),
+  fieldChanges.value
+    .map((change) => {
+      const path = change.path.join('.')
+      return {
+        path,
+        label: humanizePath(path),
+        state: fieldState(path),
+        draftValue: change.new,
+        serverValue: change.old,
+        previousServer: undefined,
+      }
+    })
+    // A key reference follows its provider (setProvider) and is nobody's to
+    // review, unless somebody else's change collides with it: a conflict stops
+    // the save, so that one has to stay in reach.
+    .filter(
+      (entry) =>
+        entry.state === 'conflict' || !entry.path.includes('.apiKeySecretRef'),
+    ),
 )
 const saveButtonLabel = computed(() =>
-  saving.value || keysSaving.value
+  saving.value || pressingSave.value
     ? 'Saving…'
     : live.needsRead.value
       ? 'Refresh before saving'
@@ -249,37 +291,60 @@ async function refreshVoucherUsage() {
 }
 async function saveConfig() {
   keyErrors.value = {}
+  // What the last press committed is not what this one will: a refused save, or
+  // one of only keys, would otherwise sit above that old sha.
+  commit.clear()
+  settingsCommit.clear()
+  commitNotice.value = ''
+  settingsCommitNotice.value = ''
   const menuChanged = fieldChanges.value.length > 0
-  if (menuChanged) {
-    if (!(await live.save(changeReason.value))) return
-  } else {
-    // Only keys this time: a refusal of an earlier menu save is not news any
-    // more, and beside this save's own answer it would read as one.
-    live.clearError()
-  }
   const keys = keyChanges.value
-  keysSaving.value = true
-  for (const slot of keys) {
-    try {
-      await mergePatch(SECRETS, slot.secret, {
-        stringData: { apiKey: pendingKeys.value[slot.secret] },
-      })
-      discardKey(slot)
-    } catch (e) {
-      keyErrors.value = {
-        ...keyErrors.value,
-        [slot.secret]: {
-          message: e instanceof Error ? e.message : 'Could not set the key.',
-          answer: kubernetesAnswer(e),
-        },
+  pressingSave.value = true
+  try {
+    const settings = await requestSettingsCommit(changeReason.value)
+    if (menuChanged) {
+      if (!(await live.save(changeReason.value))) return
+    } else {
+      // Only keys this time: a refusal of an earlier menu save is not news any
+      // more, and beside this save's own answer it would read as one.
+      live.clearError()
+      await waitCommitLead(settings)
+    }
+    for (const slot of keys) {
+      try {
+        await mergePatch(SECRETS, slot.secret, {
+          stringData: { apiKey: pendingKeys.value[slot.secret] },
+        })
+        discardKey(slot)
+      } catch (e) {
+        keyErrors.value = {
+          ...keyErrors.value,
+          [slot.secret]: {
+            message: e instanceof Error ? e.message : 'Could not set the key.',
+            answer: kubernetesAnswer(e),
+          },
+        }
       }
     }
+    const refused = Object.keys(keyErrors.value).length
+    const wroteSomething = menuChanged || refused < keys.length
+    if (refused === 0) {
+      savedToast.value?.show('Saved to Kubernetes')
+      // That was this change's reason. Left here it would be the next one's too,
+      // unseen, and a commit message in a public repository. A key still refused
+      // is still this change, so its reason waits with it.
+      changeReason.value = ''
+    } else if (wroteSomething)
+      savedToast.value?.show('Saved, except what is marked below')
+    // With nothing written, the request has no window to attach to and ends on
+    // its own: not a failed commit, because there was nothing to commit.
+    if (wroteSomething) {
+      settingsCommitNotice.value = settings.commitError ?? ''
+      if (settings.commitRequest) settingsCommit.follow(settings.commitRequest)
+    }
+  } finally {
+    pressingSave.value = false
   }
-  keysSaving.value = false
-  const refused = Object.keys(keyErrors.value).length
-  if (refused === 0) savedToast.value?.show('Saved to Kubernetes')
-  else if (menuChanged || refused < keys.length)
-    savedToast.value?.show('Saved, except what is marked below')
 }
 watch(
   () => serverConfig.value?.metadata?.resourceVersion,
@@ -293,6 +358,20 @@ watch(live.flashed, (paths) => {
 onMounted(refreshVoucherUsage)
 function updateField(path: string, value: unknown) {
   live.setValue(fieldPath(path), value)
+}
+// Each integration has one key, in one fixed Secret, so nobody picks a reference
+// on this page: it comes with the provider and goes with it, in the same patch,
+// which is what the CRD asks for (docs/coffee-api-keys-design.md, decision 4).
+function setProvider(slot: KeySlot, value: string) {
+  updateField(`spec.${slot.section}.provider`, value)
+  const reference = `spec.${slot.section}.apiKeySecretRef`
+  const current = getFieldValue(reference) as
+    { name?: string; key?: string } | undefined
+  if (value === '') {
+    if (current) live.removeKey(fieldPath(reference))
+  } else if (current?.name !== slot.secret || current?.key !== 'apiKey') {
+    updateField(reference, { name: slot.secret, key: 'apiKey' })
+  }
 }
 // A conflict is the library's to resolve. A plain Revert finds the server's
 // value by key, since after a removal the same index is a different product.
@@ -310,6 +389,9 @@ function applyServerValue(path: string) {
     else live.setValue(target, value)
   }
   clearArrayInputBranch(path)
+  // Its reference came with the provider, so it goes back with it.
+  const slot = KEY_SLOTS.find((k) => path === `spec.${k.section}.provider`)
+  if (slot) applyServerValue(`spec.${slot.section}.apiKeySecretRef`)
 }
 function keepLocalValue(path: string) {
   live.keepMine(fieldPath(path))
@@ -1173,283 +1255,204 @@ onBeforeUnmount(clearAllFlashes)
             </article>
           </div>
 
-          <div class="section-heading section-heading--tight">
-            <h3>Mail and payments</h3>
-          </div>
-          <div class="form-grid">
-            <label :class="fieldClasses('spec.mail.provider')">
-              <div class="field__heading">
-                <span>Mail provider</span>
-                <FieldStateMarker
-                  :state="fieldState('spec.mail.provider')"
-                  :server-value="serverValueFor('spec.mail.provider')"
-                  :previous-server="
-                    conflictFor('spec.mail.provider')?.previousServer
-                  "
-                  @apply="applyServerValue('spec.mail.provider')"
+          <div class="stack-list integrations">
+            <section class="embedded-card" aria-labelledby="mail-integration">
+              <h4 id="mail-integration" class="integration__title">
+                Mail integration
+              </h4>
+              <div class="form-grid">
+                <label :class="fieldClasses('spec.mail.provider')">
+                  <div class="field__heading">
+                    <span>Provider</span>
+                    <FieldStateMarker
+                      :state="fieldState('spec.mail.provider')"
+                      :server-value="serverValueFor('spec.mail.provider')"
+                      :previous-server="
+                        conflictFor('spec.mail.provider')?.previousServer
+                      "
+                      @apply="applyServerValue('spec.mail.provider')"
+                    />
+                  </div>
+                  <input
+                    :value="getTextField('spec.mail.provider')"
+                    type="text"
+                    @input="
+                      setProvider(
+                        mailKey,
+                        ($event.target as HTMLInputElement).value,
+                      )
+                    "
+                  />
+                </label>
+                <label :class="fieldClasses('spec.mail.fromAddress')">
+                  <div class="field__heading">
+                    <span>From address</span>
+                    <FieldStateMarker
+                      :state="fieldState('spec.mail.fromAddress')"
+                      :server-value="serverValueFor('spec.mail.fromAddress')"
+                      :previous-server="
+                        conflictFor('spec.mail.fromAddress')?.previousServer
+                      "
+                      @apply="applyServerValue('spec.mail.fromAddress')"
+                    />
+                  </div>
+                  <input
+                    :value="getTextField('spec.mail.fromAddress')"
+                    type="text"
+                    @input="
+                      updateField(
+                        'spec.mail.fromAddress',
+                        ($event.target as HTMLInputElement).value,
+                      )
+                    "
+                  />
+                </label>
+                <label
+                  :class="fieldClasses('spec.mail.orderConfirmationTemplate')"
+                >
+                  <div class="field__heading">
+                    <span>Order confirmation template</span>
+                    <FieldStateMarker
+                      :state="fieldState('spec.mail.orderConfirmationTemplate')"
+                      :server-value="
+                        serverValueFor('spec.mail.orderConfirmationTemplate')
+                      "
+                      :previous-server="
+                        conflictFor('spec.mail.orderConfirmationTemplate')
+                          ?.previousServer
+                      "
+                      @apply="
+                        applyServerValue('spec.mail.orderConfirmationTemplate')
+                      "
+                    />
+                  </div>
+                  <input
+                    :value="getTextField('spec.mail.orderConfirmationTemplate')"
+                    type="text"
+                    @input="
+                      updateField(
+                        'spec.mail.orderConfirmationTemplate',
+                        ($event.target as HTMLInputElement).value,
+                      )
+                    "
+                  />
+                </label>
+                <ApiKeyField
+                  id="mail-api-key"
+                  :value="pendingKeys[mailKey.secret]"
+                  :stored="storedKey(mailKey)"
+                  :disabled="!mayReplaceKey(mailKey) && !tryKeysAnyway"
+                  @update="setPendingKey(mailKey, $event)"
+                  @revert="discardKey(mailKey)"
                 />
               </div>
-              <input
-                :value="getTextField('spec.mail.provider')"
-                type="text"
-                @input="
-                  updateField(
-                    'spec.mail.provider',
-                    ($event.target as HTMLInputElement).value,
-                  )
-                "
-              />
-            </label>
-            <label :class="fieldClasses('spec.mail.orderConfirmationTemplate')">
-              <div class="field__heading">
-                <span>Mail template</span>
-                <FieldStateMarker
-                  :state="fieldState('spec.mail.orderConfirmationTemplate')"
-                  :server-value="
-                    serverValueFor('spec.mail.orderConfirmationTemplate')
-                  "
-                  :previous-server="
-                    conflictFor('spec.mail.orderConfirmationTemplate')
-                      ?.previousServer
-                  "
-                  @apply="
-                    applyServerValue('spec.mail.orderConfirmationTemplate')
-                  "
-                />
-              </div>
-              <input
-                :value="getTextField('spec.mail.orderConfirmationTemplate')"
-                type="text"
-                @input="
-                  updateField(
-                    'spec.mail.orderConfirmationTemplate',
-                    ($event.target as HTMLInputElement).value,
-                  )
-                "
-              />
-            </label>
-            <label :class="fieldClasses('spec.mail.fromAddress')">
-              <div class="field__heading">
-                <span>From address</span>
-                <FieldStateMarker
-                  :state="fieldState('spec.mail.fromAddress')"
-                  :server-value="serverValueFor('spec.mail.fromAddress')"
-                  :previous-server="
-                    conflictFor('spec.mail.fromAddress')?.previousServer
-                  "
-                  @apply="applyServerValue('spec.mail.fromAddress')"
-                />
-              </div>
-              <input
-                :value="getTextField('spec.mail.fromAddress')"
-                type="text"
-                @input="
-                  updateField(
-                    'spec.mail.fromAddress',
-                    ($event.target as HTMLInputElement).value,
-                  )
-                "
-              />
-            </label>
-            <label :class="fieldClasses('spec.payments.provider')">
-              <div class="field__heading">
-                <span>Payment provider</span>
-                <FieldStateMarker
-                  :state="fieldState('spec.payments.provider')"
-                  :server-value="serverValueFor('spec.payments.provider')"
-                  :previous-server="
-                    conflictFor('spec.payments.provider')?.previousServer
-                  "
-                  @apply="applyServerValue('spec.payments.provider')"
-                />
-              </div>
-              <input
-                :value="getTextField('spec.payments.provider')"
-                type="text"
-                @input="
-                  updateField(
-                    'spec.payments.provider',
-                    ($event.target as HTMLInputElement).value,
-                  )
-                "
-              />
-            </label>
-            <label :class="fieldClasses('spec.payments.mode')">
-              <div class="field__heading">
-                <span>Payment mode</span>
-                <FieldStateMarker
-                  :state="fieldState('spec.payments.mode')"
-                  :server-value="serverValueFor('spec.payments.mode')"
-                  :previous-server="
-                    conflictFor('spec.payments.mode')?.previousServer
-                  "
-                  @apply="applyServerValue('spec.payments.mode')"
-                />
-              </div>
-              <input
-                :value="getTextField('spec.payments.mode')"
-                type="text"
-                @input="
-                  updateField(
-                    'spec.payments.mode',
-                    ($event.target as HTMLInputElement).value,
-                  )
-                "
-              />
-            </label>
-            <label
-              :class="
-                checkboxFieldClasses('spec.payments.zeroAmountCheckoutAllowed')
-              "
+            </section>
+            <section
+              class="embedded-card"
+              aria-labelledby="payment-integration"
             >
-              <input
-                :checked="
-                  getBooleanField('spec.payments.zeroAmountCheckoutAllowed')
-                "
-                type="checkbox"
-                @change="
-                  updateField(
-                    'spec.payments.zeroAmountCheckoutAllowed',
-                    ($event.target as HTMLInputElement).checked,
-                  )
-                "
-              />
-              <div class="field__checkbox-copy">
-                <span>Zero amount checkout allowed</span>
-                <FieldStateMarker
-                  :state="fieldState('spec.payments.zeroAmountCheckoutAllowed')"
-                  :server-value="
-                    serverValueFor('spec.payments.zeroAmountCheckoutAllowed')
+              <h4 id="payment-integration" class="integration__title">
+                Payment integration
+              </h4>
+              <div class="form-grid">
+                <label :class="fieldClasses('spec.payments.provider')">
+                  <div class="field__heading">
+                    <span>Provider</span>
+                    <FieldStateMarker
+                      :state="fieldState('spec.payments.provider')"
+                      :server-value="serverValueFor('spec.payments.provider')"
+                      :previous-server="
+                        conflictFor('spec.payments.provider')?.previousServer
+                      "
+                      @apply="applyServerValue('spec.payments.provider')"
+                    />
+                  </div>
+                  <input
+                    :value="getTextField('spec.payments.provider')"
+                    type="text"
+                    @input="
+                      setProvider(
+                        paymentsKey,
+                        ($event.target as HTMLInputElement).value,
+                      )
+                    "
+                  />
+                </label>
+                <label :class="fieldClasses('spec.payments.mode')">
+                  <div class="field__heading">
+                    <span>Mode</span>
+                    <FieldStateMarker
+                      :state="fieldState('spec.payments.mode')"
+                      :server-value="serverValueFor('spec.payments.mode')"
+                      :previous-server="
+                        conflictFor('spec.payments.mode')?.previousServer
+                      "
+                      @apply="applyServerValue('spec.payments.mode')"
+                    />
+                  </div>
+                  <input
+                    :value="getTextField('spec.payments.mode')"
+                    type="text"
+                    @input="
+                      updateField(
+                        'spec.payments.mode',
+                        ($event.target as HTMLInputElement).value,
+                      )
+                    "
+                  />
+                </label>
+                <label
+                  :class="
+                    checkboxFieldClasses(
+                      'spec.payments.zeroAmountCheckoutAllowed',
+                    )
                   "
-                  :previous-server="
-                    conflictFor('spec.payments.zeroAmountCheckoutAllowed')
-                      ?.previousServer
-                  "
-                  @apply="
-                    applyServerValue('spec.payments.zeroAmountCheckoutAllowed')
-                  "
+                >
+                  <input
+                    :checked="
+                      getBooleanField('spec.payments.zeroAmountCheckoutAllowed')
+                    "
+                    type="checkbox"
+                    @change="
+                      updateField(
+                        'spec.payments.zeroAmountCheckoutAllowed',
+                        ($event.target as HTMLInputElement).checked,
+                      )
+                    "
+                  />
+                  <div class="field__checkbox-copy">
+                    <span>Zero amount checkout allowed</span>
+                    <FieldStateMarker
+                      :state="
+                        fieldState('spec.payments.zeroAmountCheckoutAllowed')
+                      "
+                      :server-value="
+                        serverValueFor(
+                          'spec.payments.zeroAmountCheckoutAllowed',
+                        )
+                      "
+                      :previous-server="
+                        conflictFor('spec.payments.zeroAmountCheckoutAllowed')
+                          ?.previousServer
+                      "
+                      @apply="
+                        applyServerValue(
+                          'spec.payments.zeroAmountCheckoutAllowed',
+                        )
+                      "
+                    />
+                  </div>
+                </label>
+                <ApiKeyField
+                  id="payments-api-key"
+                  :value="pendingKeys[paymentsKey.secret]"
+                  :stored="storedKey(paymentsKey)"
+                  :disabled="!mayReplaceKey(paymentsKey) && !tryKeysAnyway"
+                  @update="setPendingKey(paymentsKey, $event)"
+                  @revert="discardKey(paymentsKey)"
                 />
               </div>
-            </label>
-          </div>
-
-          <div class="form-grid">
-            <label :class="fieldClasses('spec.mail.apiKeySecretRef.name')">
-              <div class="field__heading">
-                <span>Mail secret name</span>
-                <FieldStateMarker
-                  :state="fieldState('spec.mail.apiKeySecretRef.name')"
-                  :server-value="
-                    serverValueFor('spec.mail.apiKeySecretRef.name')
-                  "
-                  :previous-server="
-                    conflictFor('spec.mail.apiKeySecretRef.name')
-                      ?.previousServer
-                  "
-                  @apply="applyServerValue('spec.mail.apiKeySecretRef.name')"
-                />
-              </div>
-              <input
-                :value="getTextField('spec.mail.apiKeySecretRef.name')"
-                type="text"
-                @input="
-                  updateField(
-                    'spec.mail.apiKeySecretRef.name',
-                    ($event.target as HTMLInputElement).value,
-                  )
-                "
-              />
-            </label>
-            <label :class="fieldClasses('spec.mail.apiKeySecretRef.key')">
-              <div class="field__heading">
-                <span>Mail secret key</span>
-                <FieldStateMarker
-                  :state="fieldState('spec.mail.apiKeySecretRef.key')"
-                  :server-value="
-                    serverValueFor('spec.mail.apiKeySecretRef.key')
-                  "
-                  :previous-server="
-                    conflictFor('spec.mail.apiKeySecretRef.key')?.previousServer
-                  "
-                  @apply="applyServerValue('spec.mail.apiKeySecretRef.key')"
-                />
-              </div>
-              <input
-                :value="getTextField('spec.mail.apiKeySecretRef.key')"
-                type="text"
-                @input="
-                  updateField(
-                    'spec.mail.apiKeySecretRef.key',
-                    ($event.target as HTMLInputElement).value,
-                  )
-                "
-              />
-            </label>
-            <label :class="fieldClasses('spec.payments.apiKeySecretRef.name')">
-              <div class="field__heading">
-                <span>Payment secret name</span>
-                <FieldStateMarker
-                  :state="fieldState('spec.payments.apiKeySecretRef.name')"
-                  :server-value="
-                    serverValueFor('spec.payments.apiKeySecretRef.name')
-                  "
-                  :previous-server="
-                    conflictFor('spec.payments.apiKeySecretRef.name')
-                      ?.previousServer
-                  "
-                  @apply="
-                    applyServerValue('spec.payments.apiKeySecretRef.name')
-                  "
-                />
-              </div>
-              <input
-                :value="getTextField('spec.payments.apiKeySecretRef.name')"
-                type="text"
-                @input="
-                  updateField(
-                    'spec.payments.apiKeySecretRef.name',
-                    ($event.target as HTMLInputElement).value,
-                  )
-                "
-              />
-            </label>
-            <label :class="fieldClasses('spec.payments.apiKeySecretRef.key')">
-              <div class="field__heading">
-                <span>Payment secret key</span>
-                <FieldStateMarker
-                  :state="fieldState('spec.payments.apiKeySecretRef.key')"
-                  :server-value="
-                    serverValueFor('spec.payments.apiKeySecretRef.key')
-                  "
-                  :previous-server="
-                    conflictFor('spec.payments.apiKeySecretRef.key')
-                      ?.previousServer
-                  "
-                  @apply="applyServerValue('spec.payments.apiKeySecretRef.key')"
-                />
-              </div>
-              <input
-                :value="getTextField('spec.payments.apiKeySecretRef.key')"
-                type="text"
-                @input="
-                  updateField(
-                    'spec.payments.apiKeySecretRef.key',
-                    ($event.target as HTMLInputElement).value,
-                  )
-                "
-              />
-            </label>
-          </div>
-          <div class="row-actions">
-            <button
-              v-for="slot in KEY_SLOTS"
-              :key="slot.secret"
-              class="button button--secondary"
-              :disabled="!mayReplaceKey(slot) && !tryKeysAnyway"
-              @click="openKeyDialog(slot)"
-            >
-              {{ slot.button }}
-            </button>
+            </section>
           </div>
           <p v-if="!mayReplaceAnyKey" class="metadata-copy">
             <template v-if="tryKeysAnyway">
@@ -1467,46 +1470,6 @@ onBeforeUnmount(clearAllFlashes)
               </button>
             </template>
           </p>
-          <dialog
-            ref="keyDialog"
-            class="key-dialog panel"
-            aria-labelledby="key-dialog-title"
-            @cancel="keyDialogValue = ''"
-          >
-            <form method="dialog" @submit.prevent="closeKeyDialog(true)">
-              <h3 id="key-dialog-title">{{ keyDialogSlot?.button }}</h3>
-              <p class="metadata-copy">
-                It waits with your other changes until you save, and is never
-                shown again, not even to you. Saving writes
-                <code class="inline-code">{{ keyDialogSlot?.secret }}</code
-                >, which is committed encrypted.
-              </p>
-              <label class="field">
-                <span>{{ keyDialogSlot?.label }}</span>
-                <input
-                  v-model="keyDialogValue"
-                  type="password"
-                  autocomplete="off"
-                />
-              </label>
-              <div class="row-actions">
-                <button
-                  class="button"
-                  type="submit"
-                  :disabled="keyDialogValue === ''"
-                >
-                  OK
-                </button>
-                <button
-                  class="button button--ghost"
-                  type="button"
-                  @click="closeKeyDialog(false)"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </dialog>
         </article>
 
         <div class="admin-sidebar admin-sidebar-stack">
@@ -1622,7 +1585,7 @@ onBeforeUnmount(clearAllFlashes)
                     </p>
                     <SaveRefusal
                       v-if="keyErrors[slot.secret]"
-                      headline="Not saved. Your new key is still here."
+                      headline="Not saved"
                       :message="keyErrors[slot.secret]!.message"
                       :answer="keyErrors[slot.secret]!.answer"
                     />
@@ -1669,11 +1632,7 @@ onBeforeUnmount(clearAllFlashes)
                      the top of the page went unseen below a long menu. -->
                 <SaveRefusal
                   v-if="loadError && state.status === 'live'"
-                  :headline="
-                    saveFailure
-                      ? 'Not saved. Your changes are still here.'
-                      : 'Request failed'
-                  "
+                  :headline="saveFailure ? 'Not saved' : 'Request failed'"
                   :message="loadError"
                   :answer="saveFailure?.answer"
                 />
@@ -1684,7 +1643,7 @@ onBeforeUnmount(clearAllFlashes)
                   class="button save-summary__button"
                   :disabled="
                     !canSave ||
-                    keysSaving ||
+                    pressingSave ||
                     dirtyFieldCount === 0 ||
                     notWholeNumbers.length > 0 ||
                     noProducts
@@ -1697,26 +1656,55 @@ onBeforeUnmount(clearAllFlashes)
               <!-- A commit that did NOT happen is news and keeps the panel. A commit
                    that did is a footnote, and reads as one: see .commit-trail. -->
               <section
-                v-if="commitNotice || commitState === 'failed'"
+                v-if="
+                  commitNotice || settingsCommitNotice || failedCommits.length
+                "
                 class="panel panel--warning"
               >
                 <h3>Git commit status</h3>
-                <p>{{ commitNotice || commitDetail || failedCommitCopy }}</p>
+                <p v-if="commitNotice">{{ commitNotice }}</p>
+                <p
+                  v-if="
+                    settingsCommitNotice &&
+                    settingsCommitNotice !== commitNotice
+                  "
+                >
+                  {{ settingsCommitNotice }}
+                </p>
+                <p v-for="trail in failedCommits" :key="trail.name">
+                  {{ trail.name }}: {{ trail.detail || failedCommitCopy }}
+                </p>
               </section>
-              <p v-else-if="commitState === 'pending'" class="commit-trail">
-                Committing to Git…
-              </p>
-              <p v-else-if="commitState === 'committed'" class="commit-trail">
-                Committed to Git<template v-if="commitSha">
-                  ·
-                  <a
-                    v-if="commitLink"
-                    class="text-link"
-                    :href="commitLink"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    >{{ shortSha(commitSha) }}</a
-                  ><template v-else>{{ shortSha(commitSha) }}</template>
+              <p
+                v-if="committedTrails.length || committingTrails.length"
+                class="commit-trail"
+              >
+                <template v-if="committedTrails.length">
+                  Committed to
+                  <template
+                    v-for="(trail, index) in committedTrails"
+                    :key="trail.name"
+                  >
+                    <template v-if="index > 0"> and </template>
+                    <a
+                      v-if="trail.link"
+                      class="text-link"
+                      :href="trail.link"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      >{{ trail.name }}</a
+                    ><template v-else>{{ trail.name }}</template>
+                  </template>
+                </template>
+                <template v-if="committingTrails.length">
+                  {{
+                    committedTrails.length
+                      ? ' · committing to'
+                      : 'Committing to'
+                  }}
+                  {{
+                    committingTrails.map((trail) => trail.name).join(' and ')
+                  }}…
                 </template>
               </p>
             </section>

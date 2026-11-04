@@ -137,3 +137,36 @@ narrowing for dirty fields.
 The lesson for maintainers: annotating the CRD does nothing on its own, and
 nothing tells you. A store that is handed no schema could say so, or a host
 could be given the schema through the stream rather than copying it by hand.
+
+## 4. A removed object is reported field by field, and a merge patch cannot remove it that way
+
+Against **0.10.0**.
+
+Voter removes `spec.mail.apiKeySecretRef` with `removeKey`. `patch()` then sends:
+
+```json
+{"spec": {"mail": {"apiKeySecretRef": {"key": null, "name": null}}}}
+```
+
+In a merge patch that empties the object and keeps it, so what the API server
+validates is `apiKeySecretRef: {}`. The CRD requires `name` and `key`, and answers
+`spec.mail.apiKeySecretRef.name: Required value`. There is no way to save the
+removal the person asked for.
+
+The cause is in `#diff`. It filters `undefined` out of `[srv, drf]` before asking
+whether both sides are objects, so "object on the server, nothing in the draft"
+passes that check and recurses into the keys. The comment below it says the
+opposite ("shape changes are one atomic value"), and so does `merge.ts` ("an added
+or deleted entry is an atomic user intent"), so what is dirty and what was merged
+can disagree here.
+
+We think the library should change: a key that exists on one side only is one
+change at that key, `kind: delete` or `kind: add`, and the patch is `null` there.
+An added object is reported leaf by leaf too, which saves correctly but counts as
+several changes.
+
+`removeReferencesWhole` in `liveCoffeeConfig.ts` rewrites this one field until
+then. Pinned by `removes a key reference whole, which is the only way the CRD
+allows` in `liveCoffeeConfig.test.ts`, and on a real API server by `a provider
+brings its key reference with it, and takes it away again` in
+`test/browser/live-stream.spec.js`.

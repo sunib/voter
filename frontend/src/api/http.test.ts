@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { createApiError, kubernetesAnswer } from './http'
+import { briefRefusal, createApiError, kubernetesAnswer } from './http'
 
 // Bodies as the API server answered them on the fixture (k3d 1.37).
 describe('createApiError', () => {
@@ -80,5 +80,20 @@ describe('kubernetesAnswer', () => {
       kubernetesAnswer(createApiError(409, { error: 'stale' })),
     ).toBeUndefined()
     expect(kubernetesAnswer(new Error('network'))).toBeUndefined()
+  })
+})
+
+describe('briefRefusal', () => {
+  it('keeps what RBAC refused, without the username around it', () => {
+    expect(
+      briefRefusal(
+        'coffeeconfigs.examples.configbutler.ai "demo-coffee" is forbidden: User "demo:ChpzaG9OLTE3OTM3" cannot patch resource "coffeeconfigs" in API group "examples.configbutler.ai" in the namespace "voter"',
+      ),
+    ).toBe('You cannot patch resource "coffeeconfigs"')
+  })
+
+  it("leaves a policy's sentence as it is", () => {
+    const sentence = 'Nobody pays more than €10 for a coffee: Flat White.'
+    expect(briefRefusal(sentence)).toBe(sentence)
   })
 })

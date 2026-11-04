@@ -335,7 +335,7 @@ test("a price over €10 is refused by admission, in the policy's words", async 
     // Kubernetes' whole answer, word for word, is one click away.
     const answer = refusal.locator("pre");
     await expect(answer).toBeHidden();
-    await refusal.getByText("More...").click();
+    await refusal.getByRole("button", { name: "Show JSON" }).click();
     await expect(answer).toContainText("ValidatingAdmissionPolicy 'voter-coffee-price'");
     await expect(answer).toContainText('"kind": "Status"');
 
@@ -350,6 +350,45 @@ test("a price over €10 is refused by admission, in the policy's words", async 
     await expect(refusal).toHaveCount(0);
   } finally {
     await editor.context.close();
+  }
+});
+
+// Nobody picks a key reference: each integration has one key in one fixed Secret,
+// so the page sends the reference with the provider and takes it away with it, as
+// the CRD asks. Neither shows up as something to choose or to review.
+test("a provider brings its key reference with it, and takes it away again", async ({ browser }) => {
+  const editor = await signIn(browser, "provider-reference");
+  const pane = editor.page.getByRole("region", { name: "Mail integration" });
+  const provider = pane.locator("label", { hasText: "Provider" }).locator("input");
+  const summary = editor.page.locator(".save-summary");
+  const mail = () => coffeeConfig().spec.mail ?? {};
+  const before = coffeeConfig().spec.mail;
+  const patchMail = (value) => kube("-n", "voter", "patch", "coffeeconfig", "demo-coffee", "--type=merge", "-p", JSON.stringify({ spec: { mail: value } }));
+  try {
+    patchMail(null);
+    await expect(provider).toHaveValue("");
+    await expect(pane.getByText(/secret/i)).toHaveCount(0);
+
+    // Reverting the provider takes the reference back too: nothing is left over.
+    await provider.fill("postmark");
+    await expect(summary).toContainText("1 change(s) ready to save");
+    await summary.getByRole("button", { name: "Revert" }).click();
+    await expect(summary).toContainText("No pending changes");
+
+    await provider.fill("postmark");
+    await summary.getByRole("button", { name: "Save 1 Change" }).click();
+    await expect.poll(mail).toEqual({ provider: "postmark", apiKeySecretRef: { name: "coffee-mail", key: "apiKey" } });
+    // The page has seen its own save come back, reference included.
+    await expect(summary).toContainText("No pending changes");
+
+    await provider.fill("");
+    await summary.getByRole("button", { name: "Save 1 Change" }).click();
+    await expect.poll(() => mail().apiKeySecretRef).toBeUndefined();
+    await expect(summary.getByRole("alert")).toHaveCount(0);
+  } finally {
+    await editor.context.close();
+    patchMail(null);
+    if (before) patchMail(before);
   }
 });
 

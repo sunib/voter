@@ -8,10 +8,12 @@ export const TEST_CONFIG: AppConfig = {
   roomName: 'demo',
   seatingPlanName: 'mission2',
   commitURLTemplate: '',
+  settingsCommitURLTemplate: '',
   participantConnector: 'room-pass',
   gitTargetName: 'voter-demo',
   databaseGitTargetName: '',
   seatGitTargetName: '',
+  settingsGitTargetName: '',
   commitRequestNamespace: '',
   // No lead: a test waits for nothing. kube.test covers the sleep itself.
   commitLeadMillis: 0,

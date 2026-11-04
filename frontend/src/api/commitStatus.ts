@@ -89,6 +89,15 @@ export function commitURL(template: string, sha: string): string {
 }
 
 /**
+ * What a commit's address calls its repository, which is what a person knows it
+ * by: a GitTarget's name means nothing outside the cluster. "" when the template
+ * does not say, and the caller falls back on the target.
+ */
+export function repositoryName(template: string): string {
+  return /([^/]+)\/commit\/\{sha\}$/.exec(template)?.[1] ?? ''
+}
+
+/**
  * Follows one CommitRequest at a time.
  *
  * Pinned by name, so the stream carries this participant's own receipt and not

@@ -101,6 +101,13 @@ func main() {
 		go newSeatReconciler(serviceAccount, deps.defaultNS, requestNS, target).Run(context.Background())
 	}
 
+	// Whether the menu's keys are set, onto the menu's status
+	// (coffee_keys_reconciler.go). Not in a shop-only deployment: it has no
+	// editor, and its ServiceAccount may not read those Secrets.
+	if !cfg.ShopOnly {
+		go newCoffeeKeysReconciler(serviceAccount, deps.defaultNS, cfg.CoffeeConfigName).Run(context.Background())
+	}
+
 	addr := net.JoinHostPort(cfg.Host, cfg.Port)
 	srv := &http.Server{
 		Addr:              addr,

@@ -17,6 +17,8 @@ export interface AppConfig {
    *  deployment has not been told where its audit trail is readable, in which
    *  case a sha is shown as plain text -- a dead link would be worse. */
   commitURLTemplate: string
+  /** The same for the settings repository's commits. */
+  settingsCommitURLTemplate: string
   /** The Dex connector whose logins are the audience, and so may vote. */
   participantConnector: string
   /** The ConfigButler GitTarget a CoffeeConfig save asks to commit; empty for
@@ -27,6 +29,9 @@ export interface AppConfig {
   /** The same for claiming or changing a seat, whose why becomes the commit
    *  message; empty for none. */
   seatGitTargetName: string
+  /** The settings repository's target, which holds the menu and its keys, so a
+   *  save on the menu editor asks it too; empty for none. */
+  settingsGitTargetName: string
   /** Where CommitRequests are created; empty means `namespace`. */
   commitRequestNamespace: string
   /** How long a save waits between its CommitRequest and its write (kube.ts,

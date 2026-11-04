@@ -75,7 +75,8 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			"seatingPlanName":  deps.cfg.SeatingPlanName,
 			// So a save can link the commit it became. Empty when unset, which
 			// the page renders as a plain sha rather than a dead link.
-			"commitURLTemplate": deps.cfg.AuditTrailCommitURLTemplate,
+			"commitURLTemplate":         deps.cfg.AuditTrailCommitURLTemplate,
+			"settingsCommitURLTemplate": deps.cfg.SettingsCommitURLTemplate,
 			// Which logins are the audience, for what the page shows. The rule
 			// that counts is admission's; this is so a page explaining a
 			// refusal agrees with it, without a second copy in the browser.
@@ -85,6 +86,7 @@ func registerHandlers(mux *http.ServeMux, deps handlerDeps) {
 			"gitTargetName":          strings.TrimSpace(deps.cfg.ConfigButlerGitTargetName),
 			"databaseGitTargetName":  strings.TrimSpace(deps.cfg.ConfigButlerDatabaseGitTargetName),
 			"seatGitTargetName":      strings.TrimSpace(deps.cfg.ConfigButlerSeatGitTargetName),
+			"settingsGitTargetName":  strings.TrimSpace(deps.cfg.ConfigButlerSettingsGitTargetName),
 			"commitRequestNamespace": strings.TrimSpace(deps.cfg.ConfigButlerCommitRequestNamespace),
 			"commitLeadMillis":       deps.cfg.ConfigButlerCommitLeadMillis,
 			// The Role the operator binds the audience to, and the binding's name.
