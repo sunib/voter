@@ -238,7 +238,7 @@ test('the operator gives one person the keys from /room, and takes them back', a
     await summary.getByRole('button', { name: 'Save 1 Change' }).click();
     await expect.poll(() => JSON.parse(kube('get', 'secret', 'coffee-mail', '-o', 'json')).data).toEqual({ apiKey: b64('taart') });
     await expect(summary).toContainText('No pending changes');
-    await expect(holder.getByRole('status').filter({ hasText: 'Saved to Kubernetes' })).toBeVisible();
+    await expect(holder.getByRole('status').filter({ hasText: /^Saved$/ })).toBeVisible();
     expect(paymentsSecret().metadata.resourceVersion).toBe(paymentsVersion);
 
     // Set, for the page and for whoever reads the menu: one bit, and the dots are

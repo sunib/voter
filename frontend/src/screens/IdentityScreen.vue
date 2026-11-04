@@ -9,8 +9,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import AppShell from '../components/layout/AppShell.vue'
-import AuthorizationTable from '../components/AuthorizationTable.vue'
-import { useAuthorization } from '../api/useAuthorization'
+import PermissionsPanel from '../components/PermissionsPanel.vue'
 import {
   currentSession,
   canVote,
@@ -19,16 +18,9 @@ import {
   type Session,
 } from '../api/session'
 import { getWhoAmI, type WhoAmI } from '../api/whoami'
+import { menuFromFolder } from '../shopOnly'
 
 const router = useRouter()
-// Live, not fetched once: an operator can widen the audience's grant while
-// this page is open, and the row that changes should change here too.
-const {
-  authz,
-  error: authzError,
-  loading: authzLoading,
-  mode: authzMode,
-} = useAuthorization()
 const session = ref<Session | null>(currentSession())
 const whoami = ref<WhoAmI | null>(null)
 const signingOut = ref(false)
@@ -209,35 +201,8 @@ onMounted(async () => {
       </p>
     </section>
 
-    <section class="panel">
-      <div class="section-heading">
-        <h2>What you may do</h2>
-      </div>
-      <p class="hero-copy">
-        <code class="inline-code">kubectl auth can-i --list</code>, answered by
-        the API server with your own token. This app decides none of it.
-      </p>
-      <AuthorizationTable
-        :authz="authz"
-        :loading="authzLoading"
-        :error="authzError"
-      />
-      <p class="metadata-copy" data-testid="authz-mode">
-        {{
-          authzMode === 'watch'
-            ? 'Asked again whenever a RoleBinding in this namespace changes.'
-            : 'Asked again every few seconds: the RoleBindings here cannot be watched right now.'
-        }}
-      </p>
-      <details v-if="authz" class="raw-answer">
-        <summary>The raw answer</summary>
-        <pre>{{ JSON.stringify(authz.review, null, 2) }}</pre>
-      </details>
-      <p class="hero-copy">
-        It refreshes by itself. When someone grants you something, a new row
-        shows up within seconds.
-      </p>
-    </section>
+    <!-- It reads /k8s, which a host with its menu in a folder does not have. -->
+    <PermissionsPanel v-if="!menuFromFolder()" />
 
     <!-- Deliberately plain, deliberately last, and the warning comes before the
          button rather than after it. Nothing here is styled to invite a press:

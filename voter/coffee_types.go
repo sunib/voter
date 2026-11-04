@@ -67,6 +67,8 @@ type storefrontResponse struct {
 	Shop     storefrontShop      `json:"shop"`
 	Voucher  storefrontVoucher   `json:"voucher"`
 	Products []storefrontProduct `json:"products"`
+	// Revision is the menu's, when it comes from a folder (settings.go).
+	Revision string `json:"revision,omitempty"`
 }
 
 type storefrontShop struct {

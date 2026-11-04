@@ -70,7 +70,12 @@ func registerParticipantStorefrontHandlers(mux *http.ServeMux, deps handlerDeps)
 			return
 		}
 
-		writeJSON(w, http.StatusOK, buildStorefront(cc, r.URL.Query().Get("voucher")))
+		storefront := buildStorefront(cc, r.URL.Query().Get("voucher"))
+		// Says which pod's menu this is. A poll and this request can reach
+		// different pods during a rollout, so the browser compares a poll with
+		// this and not with the poll before it.
+		storefront.Revision = deps.settings.menuRevision()
+		writeJSON(w, http.StatusOK, storefront)
 	}))
 
 	// GET /public/vouchers
@@ -137,10 +142,13 @@ func registerParticipantStorefrontHandlers(mux *http.ServeMux, deps handlerDeps)
 	}))
 }
 
-// readCoffeeConfig fetches the one configured CoffeeConfig with Voter's own
-// ServiceAccount, which may get exactly that object (the voter Role). Both
-// endpoints go through it.
+// readCoffeeConfig is the menu: from the folder when there is one, otherwise the
+// one configured CoffeeConfig, fetched with Voter's own ServiceAccount, which may
+// get exactly that object (the voter Role). Both endpoints go through it.
 func (d handlerDeps) readCoffeeConfig(ctx context.Context) (coffeeConfig, error) {
+	if d.settings != nil {
+		return d.settings.menu, nil
+	}
 	if d.serviceAccount == nil {
 		return coffeeConfig{}, errors.New("no Kubernetes client configured")
 	}

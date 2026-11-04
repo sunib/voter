@@ -85,6 +85,9 @@ export type StorefrontResponse = {
     state: string
   }
   products: StorefrontProduct[]
+  /** The menu's revision, from the pod that answered, when it comes from a folder
+   *  (menuRevision.ts). */
+  revision?: string
 }
 
 export type CoffeeOrderItemRequest = {

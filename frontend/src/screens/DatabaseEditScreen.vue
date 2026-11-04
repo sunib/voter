@@ -175,7 +175,7 @@ function keepMine(path: string) {
 const savedToast = ref<InstanceType<typeof SavedToast> | null>(null)
 async function save() {
   if (await live.save(changeReason.value))
-    savedToast.value?.show('Saved to Kubernetes')
+    savedToast.value?.show('Saved')
 }
 
 async function refreshFromServer() {

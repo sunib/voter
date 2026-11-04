@@ -13,7 +13,7 @@ describe('shopOnlyRedirect', () => {
 
   it('sends everything but the shop to the order page when shop-only', async () => {
     await useTestAppConfig({ shopOnly: true })
-    for (const name of ['order', 'thanks', 'login', 'me']) {
+    for (const name of ['order', 'thanks', 'login', 'identity']) {
       expect(shopOnlyRedirect(name)).toBeNull()
     }
     for (const name of [

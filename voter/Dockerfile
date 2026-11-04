@@ -63,6 +63,9 @@ RUN apt-get update \
 
 COPY --from=build /out/voter /voter
 COPY --from=frontend /app/dist /srv/www
+# Opens the settings folder's encrypted Secrets, and is unused unless SETTINGS_KEYS
+# is set. The same pin as coffee-settings; a static binary, so it runs on this base.
+COPY --from=ghcr.io/getsops/sops:v3.13.3-alpine@sha256:ae501277bf742f1662e0f881f43dd8fd6798b489a8058e921dbf6cda597140ea /usr/local/bin/sops /usr/local/bin/sops
 
 EXPOSE 8080
 ENV HOST=0.0.0.0

@@ -7,10 +7,16 @@ import { appConfig } from './api/appConfig'
 
 /** The routes a shop-only deployment serves: ordering, its thank-you page,
  *  signing in, and who you are signed in as. */
-const SHOP_ROUTES = new Set(['order', 'thanks', 'login', 'me'])
+const SHOP_ROUTES = new Set(['order', 'thanks', 'login', 'identity'])
 
 export function shopOnly(): boolean {
   return appConfig().shopOnly === true
+}
+
+/** The menu comes from a folder in the pod (SETTINGS_DIR, /config.json
+ *  `menuSource`), so this host has no /k8s or /stream to read it through. */
+export function menuFromFolder(): boolean {
+  return appConfig().menuSource === 'folder'
 }
 
 /** Where a shop-only deployment sends a route it does not serve, or null to

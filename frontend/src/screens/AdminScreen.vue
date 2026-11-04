@@ -329,7 +329,7 @@ async function saveConfig() {
     const refused = Object.keys(keyErrors.value).length
     const wroteSomething = menuChanged || refused < keys.length
     if (refused === 0) {
-      savedToast.value?.show('Saved to Kubernetes')
+      savedToast.value?.show('Saved')
       // That was this change's reason. Left here it would be the next one's too,
       // unseen, and a commit message in a public repository. A key still refused
       // is still this change, so its reason waits with it.

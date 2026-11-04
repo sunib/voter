@@ -454,7 +454,7 @@ test("a real Kubernetes 409 on a non-overlapping edit re-sends itself", async ({
     expect(stored.spec.bannerText).toBe("Reviewed local banner");
     // Nobody had to press anything a second time, and nobody was shown a refusal.
     expect(patches).toBe(2);
-    await expect(editor.page.getByText(/Saved to Kubernetes/)).toBeVisible();
+    await expect(editor.page.getByRole("status").filter({ hasText: /^Saved$/ })).toBeVisible();
     await expect(editor.page.getByText(/review and save again/)).toHaveCount(0);
     await expect(bannerText(editor.page)).toHaveValue("Reviewed local banner");
     expect(coffeeConfig().spec.bannerText).toBe("Reviewed local banner");

@@ -11,10 +11,12 @@ import {
   type ApiError,
 } from '../api/coffee'
 import { useLiveCoffeeConfig } from '../api/liveCoffeeConfig'
+import { useMenuRevision } from '../api/menuRevision'
 import { appConfig } from '../api/appConfig'
 import { loginURL } from '../api/session'
 import { useCartStore } from '../stores/cart'
-import { shopOnly } from '../shopOnly'
+import { menuFromFolder, shopOnly } from '../shopOnly'
+import { invalidCartItems } from '../stores/invalidCartItems'
 
 const cart = useCartStore()
 const route = useRoute()
@@ -44,20 +46,14 @@ const cartRows = computed(() =>
 )
 
 const invalidItems = computed(() => {
-  const configProducts = new Map(
-    (cart.activeConfig?.spec.products ?? []).map((product) => [product.sku, product]),
-  )
-
-  return Object.entries(cart.items)
-    .filter(([, quantity]) => quantity > 0)
-    .map(([sku, quantity]) => {
-      const product = configProducts.get(sku)
-      if (!product || !product.enabled) {
-        return { sku, quantity }
-      }
-      return undefined
-    })
-    .filter((value): value is { sku: string; quantity: number } => value !== undefined)
+  if (live) {
+    return invalidCartItems(cart.items, cart.activeConfig?.spec.products ?? [])
+  }
+  // Only the stream fills activeConfig. Without one the storefront is the menu,
+  // and until it has loaded nothing can be called invalid.
+  return storefront.value
+    ? invalidCartItems(cart.items, storefront.value.products)
+    : []
 })
 
 const orderTotalCents = computed(() =>
@@ -147,18 +143,24 @@ async function placeOrder() {
 // is the authority on pricing and voucher state. The stream then keeps it
 // current -- when the object changes, the storefront is recomputed from the new
 // spec with the same pure function the backend uses.
-const live = useLiveCoffeeConfig(
-  appConfig().namespace,
-  appConfig().coffeeConfigName,
-)
+//
+// A menu from a folder has no stream: a new menu is a new pod, and this asks
+// which menu the pods hold (menuRevision.ts).
+const live = menuFromFolder()
+  ? null
+  : useLiveCoffeeConfig(appConfig().namespace, appConfig().coffeeConfigName)
 
-watch(live.draft, (config) => {
-  if (!config) return
-  cart.setActiveConfig(config)
-  cart.setStorefront(
-    buildStorefrontFromConfig(config, voucherCode.value || undefined),
-  )
-})
+if (live) {
+  watch(live.draft, (config) => {
+    if (!config) return
+    cart.setActiveConfig(config)
+    cart.setStorefront(
+      buildStorefrontFromConfig(config, voucherCode.value || undefined),
+    )
+  })
+} else {
+  useMenuRevision(() => cart.storefront?.revision, refreshStorefront)
+}
 
 onMounted(() => {
   cart.ensureLoaded()
@@ -176,7 +178,7 @@ watch(
 
 <template>
   <AppShell title="Coffee bar">
-    <section v-if="!live.synced.value" class="panel" role="status">
+    <section v-if="live && !live.synced.value" class="panel" role="status">
       <p>
         {{
           live.error.value ||
