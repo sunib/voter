@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.12.0](https://github.com/sunib/voter/compare/v2.11.1...v2.12.0) (2026-11-04)
+
+
+### Features
+
+* a shop-only deployment can take its menu and keys from a folder ([#64](https://github.com/sunib/voter/issues/64)) ([e5d6b2d](https://github.com/sunib/voter/commit/e5d6b2d4cfbfed1915f7ff643190771183249eca))
+
 ## [2.11.1](https://github.com/sunib/voter/compare/v2.11.0...v2.11.1) (2026-11-04)
 
 
