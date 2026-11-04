@@ -95,10 +95,18 @@ func newCoffeeKeysReconciler(client dynamic.Interface, namespace, config string)
 
 // withoutKeyValue is all of a Secret this process keeps: its identity and whether
 // it holds a key. Base64 of a value is empty only for an empty value.
+//
+// client-go may run this twice over one object: a watch-list (API servers with
+// WatchList on, not the fixture's) transforms into a temporary store and then
+// again into the informer's. The second pass finds the bit, not the value, and
+// must leave it: reading it as no value would call every set key not set.
 func withoutKeyValue(obj any) (any, error) {
 	secret, ok := obj.(*unstructured.Unstructured)
 	if !ok {
 		return obj, nil
+	}
+	if _, done := secret.Object["set"]; done {
+		return secret, nil
 	}
 	value, _, _ := unstructured.NestedString(secret.Object, "data", "apiKey")
 	return &unstructured.Unstructured{Object: map[string]any{

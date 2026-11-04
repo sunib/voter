@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -138,4 +140,62 @@ func jsonEqual(a, b any) bool {
 	left, _ := json.Marshal(a)
 	right, _ := json.Marshal(b)
 	return string(left) == string(right)
+}
+
+// client-go may run a transform over an object twice, and the second time the
+// value is already gone: that must not read as a key that is not set.
+func TestWithoutKeyValueCanRunTwice(t *testing.T) {
+	once, err := withoutKeyValue(&unstructured.Unstructured{Object: map[string]any{
+		"metadata": map[string]any{"name": "coffee-mail", "namespace": "voter"},
+		"data":     map[string]any{"apiKey": "dGFhcnQ="},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	twice, err := withoutKeyValue(once)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if set, _, _ := unstructured.NestedBool(twice.(*unstructured.Unstructured).Object, "set"); !set {
+		t.Fatalf("a set key reads as not set after a second pass: %v", twice)
+	}
+}
+
+// A key that is already set when Voter starts arrives in the informer's first
+// list, not in a watch event. The fake ignores field selectors, so only the mail
+// informer's answer means anything here.
+func TestCoffeeKeysSeesAKeyAlreadySetAtStart(t *testing.T) {
+	client, _ := coffeeKeysFixture(nil)
+	secret := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "Secret",
+		"metadata": map[string]any{"name": "coffee-mail", "namespace": "voter"},
+		"data":     map[string]any{"apiKey": "dGFhcnQ="},
+	}}
+	if _, err := client.Resource(secretResource).Namespace("voter").Create(context.Background(), secret, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	go newCoffeeKeysReconciler(client, "voter", "demo-coffee").Run(ctx)
+
+	for ctx.Err() == nil {
+		for _, patch := range statusPatches(client) {
+			var got struct {
+				Status struct {
+					Keys map[string]struct {
+						Set bool `json:"set"`
+					} `json:"keys"`
+				} `json:"status"`
+			}
+			if err := json.Unmarshal(patch.GetPatch(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if !got.Status.Keys["mail"].Set {
+				t.Fatalf("the mail key is set, and the status says not: %s", patch.GetPatch())
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("no status was written")
 }
