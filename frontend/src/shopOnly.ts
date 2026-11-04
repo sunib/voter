@@ -7,7 +7,7 @@ import { appConfig } from './api/appConfig'
 
 /** The routes a shop-only deployment serves: ordering, its thank-you page,
  *  signing in, and who you are signed in as. */
-const SHOP_ROUTES = new Set(['order', 'thanks', 'login', 'me'])
+const SHOP_ROUTES = new Set(['order', 'thanks', 'login', 'identity'])
 
 export function shopOnly(): boolean {
   return appConfig().shopOnly === true
