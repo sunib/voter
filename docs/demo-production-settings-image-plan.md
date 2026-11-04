@@ -88,7 +88,10 @@ Voter in both namespaces, which forgets orders and voucher counts. Talks are Thu
 
 All under `k8s.koudijs.dev/2-gitops/`, pushed to `main` after `git pull --rebase`.
 
-### OpenBao: a second reader of the same key (by hand, you)
+### OpenBao: a second reader of the same key (by hand)
+
+Done 2026-11-04, and recorded in the comment in `openbao/cluster/openbao.yaml`. Checked as `demo-production/voter`: it logs
+in and may read this path and nothing else, while another ServiceAccount or another audience is refused.
 
 ```text
 sys/policies/acl/voter-demo-production
@@ -101,8 +104,6 @@ auth/kubernetes/role/voter-demo-production
   token_policies: [voter-demo-production]
   token_ttl: 5m
 ```
-
-Record it in the comment in `openbao/cluster/openbao.yaml`, beside coffee-settings'.
 
 ### Cutover: one commit
 
@@ -233,7 +234,7 @@ The menu visibly changes at this moment: production shows "Koudijs Demo Coffee" 
 | --- | --- | --- | --- |
 | 1 | [The Voter plan](voter-settings-mode-plan.md), on a branch and in a PR | sunib/voter | None |
 | 2 | **After Friday 11:55:** merge, 2.12.0 reaches both namespaces | sunib/voter | Voter restarts in both, switch off |
-| 3 | OpenBao policy and role | By hand, you | None |
+| 3 | OpenBao policy and role. **Done 2026-11-04** | By hand | None |
 | 4 | Cutover, and the branch setting | `external/k8s`, you | Production switches, menu changes |
 | 5 | Check "Done when" | | None |
 | 6 | Clean-up, then the GitHub clean-up | `external/k8s`, you | None |
