@@ -34,10 +34,13 @@ test('the menu says how it is, live, without disturbing whoever is editing it', 
     await expect.poll(() => menu().status.observedGeneration).toBe(menu().metadata.generation);
 
     kube('create', 'rolebinding', 'voter-audience-coffee-admin', '--role=voter-audience-coffee-admin', '--group=demo:voter-audience');
-    // Until the edge can reach the pod the restart made, /admin hangs and then
-    // answers 502. Short tries, so that a hung one does not use up the test.
+    // For a moment after a restart the edge still has the old pod among its servers,
+    // so /admin can answer 200 and its script 502, which is a blank page and no retry.
+    // Only the form itself says the page works. Short tries, so that a hung one does
+    // not use up the test.
     await expect(async () => {
-      expect((await page.goto(`${APP}/admin`, { timeout: 5000 })).status()).toBeLessThan(500);
+      await page.goto(`${APP}/admin`, { timeout: 5000 });
+      await expect(page.getByLabel('Room code')).toBeVisible({ timeout: 5000 });
     }).toPass({ timeout: 120000 });
     await page.getByLabel('Room code').fill(JSON.parse(kube('get', 'room', 'demo', '-o', 'json')).status.joinCode.code);
     await page.getByLabel('Display name').fill(displayName);
