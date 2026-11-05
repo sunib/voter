@@ -201,32 +201,46 @@ func TestCoffeeConditions(t *testing.T) {
 		},
 		{
 			name: "no provider needs no key", spec: coffeeConfigSpec{Products: []coffeeProductSpec{product}}, keys: noneSet,
-			kind: coffeeConditionKeys, status: metav1.ConditionTrue, reason: coffeeReasonNoKeysRequired, readyReason: coffeeReasonShopReady,
+			kind: coffeeConditionMailKey, status: metav1.ConditionTrue, reason: coffeeReasonNoKeyRequired, readyReason: coffeeReasonShopReady,
 		},
 		{
-			name: "both named and set", keys: bothSet,
+			name: "a key set that the menu does not name is still not needed", spec: coffeeConfigSpec{Products: []coffeeProductSpec{product}}, keys: bothSet,
+			kind: coffeeConditionPaymentsKey, status: metav1.ConditionTrue, reason: coffeeReasonNoKeyRequired, readyReason: coffeeReasonShopReady,
+		},
+		{
+			name: "the mail key named and set", keys: bothSet,
 			spec: coffeeConfigSpec{Products: []coffeeProductSpec{product}, Mail: coffeeMailSpec{Provider: "sendgrid", APIKeySecretRef: ref}, Payments: coffeePaymentsSpec{Provider: "stripe", APIKeySecretRef: ref}},
-			kind: coffeeConditionKeys, status: metav1.ConditionTrue, reason: coffeeReasonAllKeysSet, readyReason: coffeeReasonShopReady,
+			kind: coffeeConditionMailKey, status: metav1.ConditionTrue, reason: coffeeReasonKeySet, readyReason: coffeeReasonShopReady,
+		},
+		{
+			name: "the payments key named and set", keys: bothSet,
+			spec: coffeeConfigSpec{Products: []coffeeProductSpec{product}, Mail: coffeeMailSpec{Provider: "sendgrid", APIKeySecretRef: ref}, Payments: coffeePaymentsSpec{Provider: "stripe", APIKeySecretRef: ref}},
+			kind: coffeeConditionPaymentsKey, status: metav1.ConditionTrue, reason: coffeeReasonKeySet, readyReason: coffeeReasonShopReady,
 		},
 		{
 			name: "the mail key is named and empty", keys: map[string]coffeeKeyStatus{"payments": {Set: true}},
 			spec: coffeeConfigSpec{Products: []coffeeProductSpec{product}, Mail: coffeeMailSpec{Provider: "sendgrid", APIKeySecretRef: ref}},
-			kind: coffeeConditionKeys, status: metav1.ConditionFalse, reason: coffeeReasonMailKeyMissing, readyReason: coffeeReasonMailKeyMissing,
+			kind: coffeeConditionMailKey, status: metav1.ConditionFalse, reason: coffeeReasonMailKeyMissing, readyReason: coffeeReasonMailKeyMissing,
 		},
 		{
 			name: "the payments key is named and empty", keys: map[string]coffeeKeyStatus{"mail": {Set: true}},
 			spec: coffeeConfigSpec{Products: []coffeeProductSpec{product}, Payments: coffeePaymentsSpec{Provider: "stripe", APIKeySecretRef: ref}},
-			kind: coffeeConditionKeys, status: metav1.ConditionFalse, reason: coffeeReasonPaymentsKeyMissing, readyReason: coffeeReasonPaymentsKeyMissing,
+			kind: coffeeConditionPaymentsKey, status: metav1.ConditionFalse, reason: coffeeReasonPaymentsKeyMissing, readyReason: coffeeReasonPaymentsKeyMissing,
 		},
 		{
-			name: "both named and empty", keys: noneSet,
+			name: "one key missing leaves the other condition alone", keys: map[string]coffeeKeyStatus{"payments": {Set: true}},
 			spec: coffeeConfigSpec{Products: []coffeeProductSpec{product}, Mail: coffeeMailSpec{Provider: "sendgrid", APIKeySecretRef: ref}, Payments: coffeePaymentsSpec{Provider: "stripe", APIKeySecretRef: ref}},
-			kind: coffeeConditionKeys, status: metav1.ConditionFalse, reason: coffeeReasonKeysMissing, readyReason: coffeeReasonKeysMissing,
+			kind: coffeeConditionPaymentsKey, status: metav1.ConditionTrue, reason: coffeeReasonKeySet, readyReason: coffeeReasonMailKeyMissing,
+		},
+		{
+			name: "both empty: each says so, and Ready gives the first", keys: noneSet,
+			spec: coffeeConfigSpec{Products: []coffeeProductSpec{product}, Mail: coffeeMailSpec{Provider: "sendgrid", APIKeySecretRef: ref}, Payments: coffeePaymentsSpec{Provider: "stripe", APIKeySecretRef: ref}},
+			kind: coffeeConditionPaymentsKey, status: metav1.ConditionFalse, reason: coffeeReasonPaymentsKeyMissing, readyReason: coffeeReasonMailKeyMissing,
 		},
 		{
 			name: "a provider on a menu older than the reference rule", keys: noneSet,
 			spec: coffeeConfigSpec{Products: []coffeeProductSpec{product}, Mail: coffeeMailSpec{Provider: "sendgrid"}},
-			kind: coffeeConditionKeys, status: metav1.ConditionFalse, reason: coffeeReasonMailKeyMissing, readyReason: coffeeReasonMailKeyMissing,
+			kind: coffeeConditionMailKey, status: metav1.ConditionFalse, reason: coffeeReasonMailKeyMissing, readyReason: coffeeReasonMailKeyMissing,
 		},
 		{
 			name: "no voucher enabled", spec: coffeeConfigSpec{Products: []coffeeProductSpec{product}, Vouchers: []coffeeVoucherSpec{{Code: "OFF", MaximumUsage: 1}}},

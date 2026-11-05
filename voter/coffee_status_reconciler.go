@@ -57,19 +57,19 @@ var coffeeKeySecrets = map[string]string{"mail": "coffee-mail", "payments": "cof
 // good state. The voucher reasons are the names an order is refused under
 // (coffee_logic.go).
 const (
-	coffeeConditionReady    = "Ready"
-	coffeeConditionMenu     = "MenuAvailable"
-	coffeeConditionKeys     = "KeysAvailable"
-	coffeeConditionVouchers = "VouchersAvailable"
+	coffeeConditionReady       = "Ready"
+	coffeeConditionMenu        = "MenuAvailable"
+	coffeeConditionMailKey     = "MailKeyAvailable"
+	coffeeConditionPaymentsKey = "PaymentsKeyAvailable"
+	coffeeConditionVouchers    = "VouchersAvailable"
 
 	coffeeReasonShopReady          = "ShopReady"
 	coffeeReasonProductsEnabled    = "ProductsEnabled"
 	coffeeReasonNoEnabledProducts  = "NoEnabledProducts"
-	coffeeReasonAllKeysSet         = "AllKeysSet"
-	coffeeReasonNoKeysRequired     = "NoKeysRequired"
+	coffeeReasonKeySet             = "KeySet"
+	coffeeReasonNoKeyRequired      = "NoKeyRequired"
 	coffeeReasonMailKeyMissing     = "MailKeyMissing"
 	coffeeReasonPaymentsKeyMissing = "PaymentsKeyMissing"
-	coffeeReasonKeysMissing        = "KeysMissing"
 	coffeeReasonVouchersRedeemable = "VouchersRedeemable"
 	coffeeReasonNoVouchers         = "NoVouchers"
 )
@@ -362,7 +362,8 @@ func (r *coffeeStatusReconciler) keyBits() map[string]coffeeKeyStatus {
 func computeCoffeeStatus(generation int64, spec coffeeConfigSpec, previous coffeeStatus, keys map[string]coffeeKeyStatus, vouchers *voucherLedger, now metav1.Time) coffeeStatus {
 	parts := []metav1.Condition{
 		menuCondition(spec),
-		keysCondition(spec, keys),
+		keyCondition(coffeeConditionMailKey, "mail", coffeeReasonMailKeyMissing, spec.Mail.Provider, spec.Mail.APIKeySecretRef, keys),
+		keyCondition(coffeeConditionPaymentsKey, "payments", coffeeReasonPaymentsKeyMissing, spec.Payments.Provider, spec.Payments.APIKeySecretRef, keys),
 		vouchersCondition(spec, vouchers),
 	}
 	ready := metav1.Condition{
@@ -410,34 +411,31 @@ func menuCondition(spec coffeeConfigSpec) metav1.Condition {
 	}
 }
 
-// keysCondition says a value is there, never that it works: that is all anything
-// here can know. A key counts only when the menu names it, so an empty Secret is
-// no fault on a menu without that provider. It is made from the bits in status.keys,
-// so it says nothing about a key those do not. A menu stored before the CRD tied a
-// provider to its reference may have only the provider, and needs its key as much.
-func keysCondition(spec coffeeConfigSpec, keys map[string]coffeeKeyStatus) metav1.Condition {
-	named := func(provider string, ref *secretKeyRef) bool {
-		return strings.TrimSpace(provider) != "" || ref != nil
-	}
-	mailNamed := named(spec.Mail.Provider, spec.Mail.APIKeySecretRef)
-	paymentsNamed := named(spec.Payments.Provider, spec.Payments.APIKeySecretRef)
-	mailMissing := mailNamed && !keys["mail"].Set
-	paymentsMissing := paymentsNamed && !keys["payments"].Set
-
-	condition := metav1.Condition{Type: coffeeConditionKeys, Status: metav1.ConditionFalse}
+// keyCondition says a value is there, never that it works: that is all anything
+// here can know. A key counts only when the menu names it, so an empty Secret is no
+// fault on a menu without that provider. That is why status.keys stays beside this:
+// the editor shows whether a key is set before any provider is chosen, and "not
+// needed" here cannot tell it. This is made from those bits, so it says nothing about
+// a key they do not. A menu stored before the CRD tied a provider to its reference
+// may have only the provider, and needs its key as much. The missing reason names
+// the key, because it is also what Ready gives.
+func keyCondition(kind, section, missingReason, provider string, ref *secretKeyRef, keys map[string]coffeeKeyStatus) metav1.Condition {
 	switch {
-	case mailMissing && paymentsMissing:
-		condition.Reason, condition.Message = coffeeReasonKeysMissing, "The mail key and the payments key the menu names have no value."
-	case mailMissing:
-		condition.Reason, condition.Message = coffeeReasonMailKeyMissing, "The mail key the menu names has no value."
-	case paymentsMissing:
-		condition.Reason, condition.Message = coffeeReasonPaymentsKeyMissing, "The payments key the menu names has no value."
-	case !mailNamed && !paymentsNamed:
-		condition.Status, condition.Reason, condition.Message = metav1.ConditionTrue, coffeeReasonNoKeysRequired, "The menu names no keys."
-	default:
-		condition.Status, condition.Reason, condition.Message = metav1.ConditionTrue, coffeeReasonAllKeysSet, "Every key the menu names has a value."
+	case strings.TrimSpace(provider) == "" && ref == nil:
+		return metav1.Condition{
+			Type: kind, Status: metav1.ConditionTrue, Reason: coffeeReasonNoKeyRequired,
+			Message: fmt.Sprintf("The menu names no %s key.", section),
+		}
+	case keys[section].Set:
+		return metav1.Condition{
+			Type: kind, Status: metav1.ConditionTrue, Reason: coffeeReasonKeySet,
+			Message: fmt.Sprintf("The %s key the menu names has a value.", section),
+		}
 	}
-	return condition
+	return metav1.Condition{
+		Type: kind, Status: metav1.ConditionFalse, Reason: missingReason,
+		Message: fmt.Sprintf("The %s key the menu names has no value.", section),
+	}
 }
 
 // vouchersCondition says whether the menu can keep its promises, and states the

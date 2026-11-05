@@ -4,7 +4,8 @@ import type { CoffeeConfig, CoffeeStatusCondition } from './coffeeTypes'
  *  one that fails is the reason `Ready` gives. */
 const PARTS = [
   { type: 'MenuAvailable', label: 'Menu' },
-  { type: 'KeysAvailable', label: 'Keys' },
+  { type: 'MailKeyAvailable', label: 'Mail' },
+  { type: 'PaymentsKeyAvailable', label: 'Payments' },
   { type: 'VouchersAvailable', label: 'Vouchers' },
 ] as const
 

@@ -26,10 +26,15 @@ status:
       reason: ProductsEnabled
       message: "1 of 2 products can be ordered."
       lastTransitionTime: "2026-11-05T20:00:00Z"
-    - type: KeysAvailable
+    - type: MailKeyAvailable
       status: "True"
-      reason: AllKeysSet
-      message: "Both keys the menu names have a value."
+      reason: KeySet
+      message: "The mail key the menu names has a value."
+      lastTransitionTime: "2026-11-05T20:00:00Z"
+    - type: PaymentsKeyAvailable
+      status: "True"
+      reason: KeySet
+      message: "The payments key the menu names has a value."
       lastTransitionTime: "2026-11-05T20:00:00Z"
     - type: VouchersAvailable
       status: "False"
@@ -44,7 +49,7 @@ status:
 | --- | --- | --- |
 | `observedGeneration` | The `metadata.generation` all of this was worked out from | Without it nobody can tell "Ready" from "was Ready before your edit". Behind `metadata.generation` for more than a moment means Voter is not looking |
 | `conditions` | The judgements, each with a reason and a sentence | `kubectl wait --for=condition=Ready` works, and generic tooling can read them |
-| `keys` | The one bit per key. Unchanged | The editor's "Set" / "Not set" pills read it. The conditions judge it; they do not replace it |
+| `keys` | The one bit per key. Unchanged | The editor's "Set" / "Not set" pills read it, and they answer before a provider is chosen. A condition cannot carry that: on a menu without a provider it says `NoKeyRequired` whether the Secret is empty or not |
 | `firstOrderTime` | When the first order since this Voter started was placed | The answer to "has anyone ordered yet?", without a count |
 
 Only one `observedGeneration`, at the top. All conditions come from a single reconcile, so a copy
@@ -58,9 +63,10 @@ All are positive: True is the good state. That is the repo's own convention
 | Type | True means | True reasons | False reasons |
 | --- | --- | --- | --- |
 | `MenuAvailable` | At least one product can be ordered | `ProductsEnabled` | `NoEnabledProducts` |
-| `KeysAvailable` | Every key the menu names has a value | `AllKeysSet`, `NoKeysRequired` | `MailKeyMissing`, `PaymentsKeyMissing`, `KeysMissing` |
+| `MailKeyAvailable` | The menu names no mail key, or that key has a value | `KeySet`, `NoKeyRequired` | `MailKeyMissing` |
+| `PaymentsKeyAvailable` | The menu names no payments key, or that key has a value | `KeySet`, `NoKeyRequired` | `PaymentsKeyMissing` |
 | `VouchersAvailable` | Every enabled voucher can be honoured | `VouchersRedeemable`, `NoVouchers` | `VoucherDepleted`, `VoucherNotApplicable` |
-| `Ready` | All three above are True | `ShopReady` | The first failing condition's reason, in the order above |
+| `Ready` | All four above are True | `ShopReady` | The first failing condition's reason, in the order above |
 
 How each one is decided:
 
@@ -69,7 +75,7 @@ How each one is decided:
   run out.
 - **A key counts only if the menu names it.** A menu without `spec.mail.provider` needs no mail key,
   so an empty `coffee-mail` is not a fault.
-- **`KeysAvailable` means "a value is there", never "the key works".** It is computed from the bits
+- **A key condition means "a value is there", never "the key works".** It is computed from the bits
   in `status.keys`, so it reveals nothing new about a key. In cluster mode Voter does not use the keys
   at all, so a missing key does not stop an order, and `Ready` can be False while orders still work.
   `Ready` means "this bar is as its menu says", not "this request will succeed".

@@ -20,7 +20,8 @@ const healthy = [
   condition('Ready', 'True', 'ShopReady'),
   condition('VouchersAvailable', 'True', 'NoVouchers'),
   condition('MenuAvailable', 'True', 'ProductsEnabled'),
-  condition('KeysAvailable', 'True', 'AllKeysSet'),
+  condition('PaymentsKeyAvailable', 'True', 'KeySet'),
+  condition('MailKeyAvailable', 'True', 'NoKeyRequired'),
 ]
 const config = (
   status: CoffeeConfig['status'],
@@ -91,7 +92,8 @@ describe('summarizeCoffeeStatus', () => {
     )
     expect(summary?.parts.map((part) => part.label)).toEqual([
       'Menu',
-      'Keys',
+      'Mail',
+      'Payments',
       'Vouchers',
     ])
   })
