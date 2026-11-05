@@ -291,8 +291,12 @@ Voter's ServiceAccount may get `coffeeconfigs/demo-coffee` for storefront prices
 get/list/watch quizsessions, list/watch quizsubmissions, and get/patch
 `quizsessions/status` for the tally; and list/watch seats and commitrequests and
 patch `seats/status`, for the seat reconciler, which copies a seat's last
-committed why onto `status.lastCommit` (`voter/seat_reconciler.go`). Nothing else. Any signed-in person can see the
-storefront now, since Voter reads the menu as itself.
+committed why onto `status.lastCommit` (`voter/seat_reconciler.go`); and list/watch
+`coffeeconfigs/demo-coffee` and the two key Secrets by name and patch
+`coffeeconfigs/status`, for the reconciler that keeps the menu's status
+(`voter/coffee_status_reconciler.go`, [docs/coffee-status-design.md](docs/coffee-status-design.md)).
+Nothing else. Any signed-in person can see the storefront now, since Voter reads the
+menu as itself. A shop-only deployment runs none of these reconcilers.
 
 ## Live streams
 

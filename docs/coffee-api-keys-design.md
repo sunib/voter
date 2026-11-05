@@ -382,7 +382,7 @@ could ship before the cluster had the Role; P2 shipped first instead.
   the refusal stays until the person changes what was refused or saves again.
 
 Showing whether a key is set needs something that can read the Secret, so Voter
-does it (`voter/coffee_keys_reconciler.go`): its ServiceAccount may list and watch
+does it (`voter/coffee_status_reconciler.go`): its ServiceAccount may list and watch
 the two Secrets by name, keeps one bit of each, and writes it to the menu's
 `status.keys.{mail,payments}.set`, which every reader of the menu streams. The
 field shows dots with a "Set" pill or is empty with "Not set", and the dots are a

@@ -10,7 +10,7 @@ metadata:
   name: voter
   namespace: voter
 # Must mirror the platform repo's voter Role. Voter acts as itself for four
-# things only: whether the menu's keys are set, on the menu's status; the storefront reads the one CoffeeConfig, the tally reconciler
+# things only: the menu's status, which watches the menu and its two keys; the storefront reads the one CoffeeConfig, the tally reconciler
 # reads rounds and ballots and writes a round's status, and the seat reconciler
 # reads seats and their CommitRequests and writes a seat's status (idle here:
 # the fixture sets no seat GitTarget). Everything a
@@ -20,7 +20,7 @@ rules:
   - apiGroups: [examples.configbutler.ai]
     resources: [coffeeconfigs]
     resourceNames: [demo-coffee]
-    verbs: [get]
+    verbs: [get, list, watch]
   - apiGroups: [examples.configbutler.ai]
     resources: [quizsessions]
     verbs: [get, list, watch]
@@ -46,7 +46,7 @@ rules:
   - apiGroups: [examples.configbutler.ai]
     resources: [seats/status]
     verbs: [patch]
-  # Whether the menu's keys are set (coffee_keys_reconciler.go): watch the two
+  # The menu's status (coffee_status_reconciler.go): watch the menu and the two
   # Secrets by name, and write the answer to the menu's STATUS only. The grant
   # reads their values; the reconciler keeps one bit of each and drops the rest
   # before it is cached.

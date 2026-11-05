@@ -55,11 +55,31 @@ export type CoffeeConfigSpec = {
   payments?: CoffeePaymentsSpec
 }
 
+/** One judgement of Voter's on the menu (coffee_status_reconciler.go). */
+export type CoffeeStatusCondition = {
+  type: string
+  status: 'True' | 'False' | 'Unknown'
+  reason: string
+  message?: string
+  lastTransitionTime?: string
+}
+
+/** Written by Voter and nobody else, and absent where no Voter reports on the
+ *  object. docs/coffee-status-design.md. */
+export type CoffeeConfigStatus = {
+  observedGeneration?: number
+  /** The first order since this Voter started. */
+  firstOrderTime?: string
+  keys?: Record<string, { set?: boolean }>
+  conditions?: CoffeeStatusCondition[]
+}
+
 export type CoffeeConfig = {
   apiVersion?: string
   kind?: string
   metadata?: KubeObjectMeta
   spec: CoffeeConfigSpec
+  status?: CoffeeConfigStatus
 }
 
 export type StorefrontProduct = {
