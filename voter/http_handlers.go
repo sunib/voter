@@ -32,6 +32,10 @@ type handlerDeps struct {
 	// custom resource, and deliberately so -- coffee_orders.go says why.
 	orders *orderLog
 
+	// coffeeStatus keeps the menu's status, and is nil in a shop-only deployment,
+	// where nothing is told about an order (coffee_status_reconciler.go).
+	coffeeStatus *coffeeStatusReconciler
+
 	// settings is the menu and keys from SETTINGS_DIR, and nil when the menu is
 	// read from Kubernetes (settings.go).
 	settings *settings

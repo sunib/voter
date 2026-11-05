@@ -273,7 +273,8 @@ Writes never go through the shared identity: a vote, a menu save, a Database
 request and a CommitRequest are the person's own request through `/k8s`, so
 audit events — and gitops-reverser's commits — name the person. Voter's own
 ServiceAccount no longer streams anything; its grants are the tally reconciler's,
-the seat reconciler's and `get` on `coffeeconfigs/demo-coffee` for the storefront.
+the seat reconciler's, the menu status reconciler's and `get` on
+`coffeeconfigs/demo-coffee` for the storefront.
 
 The seat reconciler shows why the label on a CommitRequest can be the phone's
 word. A seat's request carries `voter.configbutler.ai/seat: <seat>`, which

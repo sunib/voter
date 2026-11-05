@@ -20,6 +20,7 @@ import { kubernetesAnswer } from '../api/http'
 import { SECRETS, mergePatch, waitCommitLead } from '../api/kube'
 import { useAuthorization } from '../api/useAuthorization'
 import AdminNav from '../components/admin/AdminNav.vue'
+import CoffeeStatusPanel from '../components/admin/CoffeeStatusPanel.vue'
 import AppShell from '../components/layout/AppShell.vue'
 import PermissionRequirements from '../components/PermissionRequirements.vue'
 import FieldStateMarker from '../components/admin/FieldStateMarker.vue'
@@ -140,7 +141,7 @@ const fieldChanges = computed(() =>
 // part of the CoffeeConfig: each is a Secret of its own that the menu names.
 // Only the one person /room gave the keys to may replace them (patch on those
 // two Secrets, never get). Everybody sees whether a key is set, which Voter puts
-// on the menu's status (coffee_keys_reconciler.go), and the fields; they open for
+// on the menu's status (coffee_status_reconciler.go), and the fields; they open for
 // that person the moment /room picks them, which is how they find out. "Try anyway"
 // lifts this page's own check and nothing else: Save then gets the API
 // server's real refusal, which is the point of the demo. A new key waits here,
@@ -165,10 +166,7 @@ type KeySlot = (typeof KEY_SLOTS)[number]
 const [mailKey, paymentsKey] = KEY_SLOTS
 const pendingKeys = ref<Partial<Record<KeySlot['secret'], string>>>({})
 const storedKey = (slot: KeySlot) =>
-  (
-    serverConfig.value as
-      { status?: { keys?: Record<string, { set?: boolean }> } } | undefined
-  )?.status?.keys?.[slot.section]?.set
+  serverConfig.value?.status?.keys?.[slot.section]?.set
 const mayReplaceKey = (slot: KeySlot) =>
   allowsNamed(authz.value, '', SECRETS.resource, 'patch', slot.secret)
 const mayReplaceAnyKey = computed(() => KEY_SLOTS.some(mayReplaceKey))
@@ -700,17 +698,12 @@ onBeforeUnmount(clearAllFlashes)
         <p>{{ voucherUsageError }}</p>
       </section>
 
+      <CoffeeStatusPanel :config="serverConfig" />
+
       <section class="admin-grid">
         <article class="panel">
           <div class="section-heading">
             <h2>Storefront config</h2>
-          </div>
-
-          <div class="config-meta">
-            <span class="config-meta__item">
-              <strong>Generation</strong>
-              <code>{{ draftConfig.metadata?.generation ?? 'unknown' }}</code>
-            </span>
           </div>
 
           <div class="form-grid">

@@ -274,6 +274,26 @@ func TestStorefrontFromAFolder(t *testing.T) {
 	}
 }
 
+// A deployment that gets its menu from an image has no object to report on and no
+// client to do it with. Its orders go through the same handler that tells the status
+// about them, and that must be nothing at all here.
+func TestAnOrderFromAFolderIsPlacedWithNoStatusToTell(t *testing.T) {
+	mux := folderStorefront(t)
+	req := withIdentity(t, httptest.NewRequest(http.MethodPost, "/public/orders", strings.NewReader(orderBody("", "tea"))))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body)
+	}
+	var body coffeeOrderResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Status != coffeeOrderPlaced {
+		t.Fatalf("body = %+v", body)
+	}
+}
+
 // The folder changes where the menu comes from, and nothing about who may ask.
 func TestAFolderStillRequiresAnIdentity(t *testing.T) {
 	mux := folderStorefront(t)

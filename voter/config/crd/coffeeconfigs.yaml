@@ -21,13 +21,33 @@ spec:
         - name: Shop
           type: string
           jsonPath: .spec.shopName
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Reason
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].reason
+        - name: Gen
+          type: integer
+          jsonPath: .metadata.generation
+        - name: Observed
+          type: integer
+          jsonPath: .status.observedGeneration
+        - name: First Order
+          type: date
+          jsonPath: .status.firstOrderTime
         - name: Currency
           type: string
+          priority: 1
           jsonPath: .spec.currency
+        - name: Message
+          type: string
+          priority: 1
+          jsonPath: .status.conditions[?(@.type=="Ready")].message
         - name: Created
           type: date
           jsonPath: .metadata.creationTimestamp
-      # Voter writes status.keys; with the subresource, nobody writing the menu
+      # Voter writes the status; with the subresource, nobody writing the menu
       # itself can, and a status write moves no generation.
       subresources:
         status: {}
@@ -192,8 +212,46 @@ spec:
             status:
               type: object
               properties:
+                # Written by Voter and nobody else (coffee_status_reconciler.go in
+                # sunib/voter, docs/coffee-status-design.md). No enum on a
+                # condition's type or reason: adding one must not be a breaking
+                # change.
+                observedGeneration:
+                  type: integer
+                  format: int64
+                firstOrderTime:
+                  type: string
+                  format: date-time
+                conditions:
+                  type: array
+                  x-kubernetes-list-type: map
+                  x-kubernetes-list-map-keys:
+                    - type
+                  items:
+                    type: object
+                    required:
+                      - type
+                      - status
+                      - reason
+                      - lastTransitionTime
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      observedGeneration:
+                        type: integer
+                        format: int64
                 # Whether each key's Secret holds a value, and nothing else about
-                # it (coffee_keys_reconciler.go in sunib/voter).
+                # it (coffee_status_reconciler.go in sunib/voter).
                 keys:
                   type: object
                   properties:

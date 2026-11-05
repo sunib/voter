@@ -138,6 +138,9 @@ func registerParticipantStorefrontHandlers(mux *http.ServeMux, deps handlerDeps)
 		// Recorded whether it was placed or refused. The feed is a log of what
 		// the room did, and a refusal is something the room did.
 		deps.orders.record(record)
+		if record.Status == coffeeOrderPlaced {
+			deps.coffeeStatus.orderPlaced(time.Now())
+		}
 		writeJSON(w, http.StatusOK, response)
 	}))
 }

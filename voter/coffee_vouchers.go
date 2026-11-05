@@ -10,8 +10,9 @@ package main
 //
 // So something has to count redemptions. The honest options were:
 //
-//   - A status subresource on CoffeeConfig. There isn't one, and adding it
-//     means owning a controller.
+//   - A count on CoffeeConfig's status. Each order would then be a write to an
+//     object the whole room streams. The status says whether a voucher is used
+//     up (coffee_status_reconciler.go), and never how many times it was used.
 //   - An Order custom resource per submission. There is no such CRD in the
 //     cluster, and participants have no permission to create one.
 //   - Count here, in the process.
@@ -60,11 +61,28 @@ func (l *voucherLedger) redeem(code string, limit int) (used int, ok bool) {
 	defer l.mu.Unlock()
 
 	current := l.count[key]
-	if limit > 0 && current >= limit {
+	if voucherAtLimit(current, limit) {
 		return current, false
 	}
 	l.count[key] = current + 1
 	return l.count[key], true
+}
+
+// voucherAtLimit is the one comparison the till and the status share, so the two
+// cannot disagree about a voucher.
+func voucherAtLimit(used, limit int) bool {
+	return limit > 0 && used >= limit
+}
+
+// depleted reports whether redeem would now refuse code, without counting anything.
+func (l *voucherLedger) depleted(code string, limit int) bool {
+	key := normalizeVoucherCode(code)
+	if key == "" {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return voucherAtLimit(l.count[key], limit)
 }
 
 // used reports the redemption count without changing it, for the storefront's

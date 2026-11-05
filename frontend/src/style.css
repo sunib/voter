@@ -627,6 +627,48 @@ p {
   letter-spacing: 0.08em;
 }
 
+.coffee-status {
+  margin-bottom: 1rem;
+}
+
+.coffee-status__lead {
+  margin: 0 0 0.9rem;
+}
+
+.coffee-status__parts {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coffee-status__parts li {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.coffee-status__parts .pill {
+  justify-content: center;
+}
+
+.coffee-status__parts code {
+  color: rgb(var(--muted));
+  font-size: 0.76rem;
+}
+
+@media (max-width: 640px) {
+  .coffee-status__parts li {
+    grid-template-columns: 6.5rem 1fr;
+  }
+
+  .coffee-status__parts code {
+    grid-column: 2;
+  }
+}
+
 .product-grid,
 .stack-list {
   display: grid;
