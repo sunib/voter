@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.13.0](https://github.com/sunib/voter/compare/v2.12.0...v2.13.0) (2026-11-05)
+
+
+### Features
+
+* the menu says how it is on its status, and the editor shows it ([#66](https://github.com/sunib/voter/issues/66)) ([7c0b633](https://github.com/sunib/voter/commit/7c0b6338bfaa926d04d6fee7850f1dcb69f0144f))
+
 ## [2.12.0](https://github.com/sunib/voter/compare/v2.11.1...v2.12.0) (2026-11-04)
 
 
