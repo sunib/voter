@@ -2,8 +2,8 @@
 # coffee-payments, and what a person may do to them
 # (docs/coffee-api-keys-design.md, decision 5).
 #
-# The grant is `patch` on those two names and nothing else
-# (voter-audience-coffee-keys), so this policy is about the patch itself. Every
+# The grant is `patch` and `create` on those two names and nothing else
+# (voter-audience-coffee-keys), so these policies are about the write itself. Every
 # write passes through the API server with the person's own token, gets audited
 # under their name, and is mirrored, encrypted, into the public coffee-settings
 # repository. What stops a write here stops it everywhere.
@@ -77,6 +77,60 @@ metadata:
   name: voter-coffee-keys
 spec:
   policyName: voter-coffee-keys
+  validationActions: [Deny]
+---
+# When one of them is gone, the person who holds the grant brings it back by setting
+# a value: a server-side apply, which is a patch that may create (kube.ts,
+# applyObject). Flux would seed it empty again within minutes, but somebody is typing
+# a key now. Only what the seed in Git would have made, with their value in it, or
+# the key is not published with the menu, or something beside it reaches a public
+# repository in plain text. No dry run rule and no comparison: there is nothing
+# stored to find out about.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: voter-coffee-keys-create
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ['']
+        apiVersions: ['*']
+        resources: [secrets]
+        operations: [CREATE]
+        resourceNames: [coffee-mail, coffee-payments]
+  matchConditions:
+    - name: a-person
+      expression: >-
+        !request.userInfo.username.startsWith('system:')
+  variables:
+    - name: which
+      expression: >-
+        {'coffee-mail': 'mail key', 'coffee-payments': 'payments key'}[object.metadata.name]
+    - name: data
+      expression: "object.?data.orValue({})"
+  validations:
+    - expression: "variables.data.size() == 1 && 'apiKey' in variables.data"
+      messageExpression: >-
+        'The ' + variables.which + ' holds one entry, apiKey, and nothing else.'
+      reason: Invalid
+    - expression: >-
+        object.metadata.?labels.orValue({}) == {'voter.configbutler.ai/coffee-settings': 'true'}
+          && object.metadata.?annotations.orValue({}).size() == 0
+          && object.metadata.?finalizers.orValue([]).size() == 0
+          && object.metadata.?ownerReferences.orValue([]).size() == 0
+          && object.?type.orValue('') == 'Opaque'
+          && !object.?immutable.orValue(false)
+      messageExpression: >-
+        'Only the value of the ' + variables.which + ' can be chosen here: the rest is managed by GitOps.'
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: voter-coffee-keys-create
+spec:
+  policyName: voter-coffee-keys-create
   validationActions: [Deny]
 ---
 # The converse, for everyone: the label that publishes a Secret to

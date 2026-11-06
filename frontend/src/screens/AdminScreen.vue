@@ -7,6 +7,7 @@ import {
   formatMoney,
   getVoucherUsage,
   requestSettingsCommit,
+  setCoffeeKey,
 } from '../api/coffee'
 import {
   coffeeConfigKeyedLists,
@@ -17,7 +18,7 @@ import { loginURL } from '../api/session'
 import { commitURL, repositoryName, useCommitStatus } from '../api/commitStatus'
 import { ADMIN_REQUIREMENTS, allowsNamed } from '../api/authz'
 import { kubernetesAnswer } from '../api/http'
-import { SECRETS, mergePatch, waitCommitLead } from '../api/kube'
+import { SECRETS, waitCommitLead } from '../api/kube'
 import { useAuthorization } from '../api/useAuthorization'
 import AdminNav from '../components/admin/AdminNav.vue'
 import CoffeeStatusPanel from '../components/admin/CoffeeStatusPanel.vue'
@@ -310,9 +311,7 @@ async function saveConfig() {
     }
     for (const slot of keys) {
       try {
-        await mergePatch(SECRETS, slot.secret, {
-          stringData: { apiKey: pendingKeys.value[slot.secret] },
-        })
+        await setCoffeeKey(slot.secret, pendingKeys.value[slot.secret] ?? '')
         discardKey(slot)
       } catch (e) {
         keyErrors.value = {
@@ -697,8 +696,6 @@ onBeforeUnmount(clearAllFlashes)
         <h2>Voucher usage unavailable</h2>
         <p>{{ voucherUsageError }}</p>
       </section>
-
-      <CoffeeStatusPanel :config="serverConfig" />
 
       <section class="admin-grid">
         <article class="panel">
@@ -1702,6 +1699,8 @@ onBeforeUnmount(clearAllFlashes)
               </p>
             </section>
           </article>
+
+          <CoffeeStatusPanel :config="serverConfig" />
         </div>
       </section>
     </template>

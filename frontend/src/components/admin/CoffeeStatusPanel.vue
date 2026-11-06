@@ -55,8 +55,10 @@ const summary = computed(() => summarizeCoffeeStatus(props.config))
           :class="part.healthy ? 'pill--good' : 'pill--danger'"
           >{{ part.label }}</span
         >
-        <span>{{ part.message }}</span>
-        <code>{{ part.reason }}</code>
+        <span>
+          {{ part.message }}
+          <code v-if="!part.healthy">{{ part.reason }}</code>
+        </span>
       </li>
     </ul>
   </article>
