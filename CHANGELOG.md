@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.14.0](https://github.com/sunib/voter/compare/v2.13.0...v2.14.0) (2026-11-06)
+
+
+### Features
+
+* setting a key whose Secret is gone brings it back, and the status moves beside the save ([#68](https://github.com/sunib/voter/issues/68)) ([7c41c5c](https://github.com/sunib/voter/commit/7c41c5cec345bda306b59f3d8ec0d3063af40c38))
+
 ## [2.13.0](https://github.com/sunib/voter/compare/v2.12.0...v2.13.0) (2026-11-05)
 
 
