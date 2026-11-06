@@ -135,8 +135,12 @@ rules:
     verbs: [patch]
 ```
 
-- **`patch` only, on two names.** No `create`, because RBAC cannot restrict
-  `create` by name. That is also why the Secrets are pre-created. No `get`,
+- **`patch` and `create`, on two names.** RBAC cannot restrict the `create` of a
+  plain POST by name, so that stays refused, and the Secrets are pre-created. A
+  server-side apply has the name in its URL and is restricted: when a Secret is
+  gone, setting a value brings it back that way, and `voter-coffee-keys-create`
+  holds it to what the seed in Git would have made. Proven on the fixture on
+  2026-11-06: a POST and an apply of any other name are both refused. No `get`,
   `list`, `watch` or `delete`.
 - **Bound from `/room` to one person at a time** (`…-coffee-keys-person`), the
   same picker and code path as `voter-audience-coffee-admin-person`

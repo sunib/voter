@@ -99,7 +99,11 @@ export function objectURL(
   name: string,
   namespace?: string,
 ): string {
-  return nativeObjectURL(K8S, { ...ref, namespace: namespaceOr(namespace), name })
+  return nativeObjectURL(K8S, {
+    ...ref,
+    namespace: namespaceOr(namespace),
+    name,
+  })
 }
 
 export function collectionURL(ref: ResourceRef, namespace?: string): string {
@@ -142,7 +146,9 @@ export async function getObject<T>(
   namespace?: string,
 ): Promise<T> {
   return project(
-    await requestJson<T>(objectURL(ref, name, namespace), { cache: 'no-store' }),
+    await requestJson<T>(objectURL(ref, name, namespace), {
+      cache: 'no-store',
+    }),
   )
 }
 
@@ -193,6 +199,25 @@ export async function mergePatch<T>(
     headers: { 'content-type': 'application/merge-patch+json' },
     body: JSON.stringify(patch),
   })
+}
+
+/** A server-side apply: a patch that may create. RBAC can limit this `create` by
+ *  name, because the name is in the URL, and cannot limit a POST's. Forced, because
+ *  the object may have come back meanwhile with a field somebody else owns. */
+export async function applyObject<T>(
+  ref: ResourceRef,
+  name: string,
+  object: unknown,
+  namespace?: string,
+): Promise<T> {
+  return await requestJson<T>(
+    objectURL(ref, name, namespace) + WRITER + '&force=true',
+    {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/apply-patch+yaml' },
+      body: JSON.stringify(object),
+    },
+  )
 }
 
 export async function deleteObject(

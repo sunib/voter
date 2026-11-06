@@ -8,9 +8,12 @@ import type {
   StorefrontResponse,
 } from './coffeeTypes'
 import { appConfig } from './appConfig'
+import type { ApiError } from './http'
 import { requestJson } from './http'
 import {
   COFFEECONFIGS,
+  SECRETS,
+  applyObject,
   changeReason,
   conditionalPatch,
   getObject,
@@ -104,15 +107,23 @@ export async function patchAdminCoffeeConfig(
 /** The two halves of patchAdminCoffeeConfig, for the live editor, which asks
  *  once per press of Save and may then patch more than once (a 409 it retries;
  *  liveEditableResource.ts). */
-export async function requestCoffeeCommit(reason?: string): Promise<CommitReceipt> {
-  return await requestCommitAhead(appConfig().gitTargetName, 'coffee-save-', changeReason(reason))
+export async function requestCoffeeCommit(
+  reason?: string,
+): Promise<CommitReceipt> {
+  return await requestCommitAhead(
+    appConfig().gitTargetName,
+    'coffee-save-',
+    changeReason(reason),
+  )
 }
 
 /** The same request for the settings repository's target, without the lead: the
  *  screen sends it first, and whatever it writes next waits the lead itself. It
  *  is the screen's because it follows from everything one press writes, the
  *  menu and the keys, and only the screen knows all of that. */
-export async function requestSettingsCommit(reason?: string): Promise<CommitReceipt> {
+export async function requestSettingsCommit(
+  reason?: string,
+): Promise<CommitReceipt> {
   return await requestCommit(
     appConfig().settingsGitTargetName,
     'coffee-settings-save-',
@@ -120,8 +131,14 @@ export async function requestSettingsCommit(reason?: string): Promise<CommitRece
   )
 }
 
-export async function writeAdminCoffeeConfig(intent: SaveRequest): Promise<void> {
-  await mergePatch(COFFEECONFIGS, appConfig().coffeeConfigName, conditionalPatch(intent))
+export async function writeAdminCoffeeConfig(
+  intent: SaveRequest,
+): Promise<void> {
+  await mergePatch(
+    COFFEECONFIGS,
+    appConfig().coffeeConfigName,
+    conditionalPatch(intent),
+  )
 }
 
 /** How many times each voucher has been redeemed, keyed by the lower-cased
@@ -249,5 +266,30 @@ export function formatMoney(currency: string, cents: number): string {
     }).format(cents / 100)
   } catch {
     return `${currency || '???'} ${(cents / 100).toFixed(2)}`
+  }
+}
+
+/** Sets a menu key: a patch of its Secret, as the person. When the Secret is gone,
+ *  which lasts until Flux seeds it again, the same value brings it back, exactly as
+ *  that seed would make it (coffee-keys.yaml in the platform repository, and
+ *  voter-coffee-keys-create for what admission holds it to). */
+export async function setCoffeeKey(
+  secret: string,
+  apiKey: string,
+): Promise<void> {
+  try {
+    await mergePatch(SECRETS, secret, { stringData: { apiKey } })
+  } catch (cause) {
+    if ((cause as ApiError).status !== 404) throw cause
+    await applyObject(SECRETS, secret, {
+      apiVersion: 'v1',
+      kind: 'Secret',
+      metadata: {
+        name: secret,
+        labels: { 'voter.configbutler.ai/coffee-settings': 'true' },
+      },
+      type: 'Opaque',
+      stringData: { apiKey },
+    })
   }
 }

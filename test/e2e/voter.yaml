@@ -176,10 +176,12 @@ metadata:
   name: voter-audience-coffee-keys
   namespace: voter
 rules:
+    # create is only ever a server-side apply of one of these names, for when the
+    # Secret is gone. A plain POST has no name for RBAC to match, and stays refused.
   - apiGroups: ['']
     resources: [secrets]
     resourceNames: [coffee-mail, coffee-payments]
-    verbs: [patch]
+    verbs: [patch, create]
 ---
 # The two Secrets the menu's key references name, empty ("not configured")
 # until someone with the grant above sets one. The cluster seeds them from Git

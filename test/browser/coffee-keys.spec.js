@@ -345,3 +345,92 @@ test('a key being set does not disturb an edit of the menu', async ({ browser })
     for (const p of participants) if (p.spec.displayName === displayName) kube('delete', 'participant', p.metadata.name);
   }
 });
+
+// Somebody deleted the Secret, and Flux has not seeded it again yet. Typing a key is
+// what they came for, so the save brings it back: a server-side apply, the one
+// `create` RBAC can limit by name, and admission holds it to what the seed would make.
+test('setting a key whose Secret is gone brings the Secret back, and nothing else', async ({ browser }) => {
+  const displayName = `keys-gone-${Date.now()}`;
+  const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+  page.on('pageerror', error => { throw error; });
+  const label = { 'voter.configbutler.ai/coffee-settings': 'true' };
+  const seed = { apiVersion: 'v1', kind: 'Secret', metadata: { name: 'coffee-mail', labels: label }, type: 'Opaque', stringData: { apiKey: 'taart' } };
+  const write = (name, method, body, contentType = 'application/apply-patch+yaml', path = `/${name}?fieldManager=voter&force=true`) => page.evaluate(async ({ method, body, contentType, path }) => {
+    const s = await (await fetch('/auth/session')).json();
+    const res = await fetch(`/k8s/api/v1/namespaces/voter/secrets${path}`, {
+      method, headers: { 'content-type': contentType, [s.csrfHeader]: s.csrfToken }, body: JSON.stringify(body),
+    });
+    return { status: res.status, message: (await res.json()).message ?? '' };
+  }, { method, body, contentType, path });
+  const gone = () => { kube('delete', 'secret', 'coffee-mail', '--ignore-not-found'); };
+  try {
+    kube('create', 'rolebinding', 'voter-audience-coffee-admin', '--role=voter-audience-coffee-admin', '--group=demo:voter-audience');
+    kube('create', 'rolebinding', 'voter-audience-coffee-keys', '--role=voter-audience-coffee-keys', '--group=demo:voter-audience');
+    await page.goto(`${APP}/admin`);
+    await page.getByLabel('Room code').fill(JSON.parse(kube('get', 'room', 'demo', '-o', 'json')).status.joinCode.code);
+    await page.getByLabel('Display name').fill(displayName);
+    await page.getByRole('radio', { name: 'Vue' }).check();
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await page.waitForURL(`${APP}/admin`);
+
+    const mailPane = page.getByRole('region', { name: 'Mail integration' });
+    const mailKey = mailPane.getByLabel('API key');
+    const summary = page.locator('.save-summary');
+    await expect(mailKey).toBeEditable();
+    gone();
+
+    // A plain POST has no name for RBAC to match, whatever it says it is.
+    const post = await write('', 'POST', seed, 'application/json', '');
+    expect(post.status).toBe(403);
+    expect(post.message).toContain('cannot create resource "secrets"');
+    // And an apply is only ever one of the two names.
+    const otherName = await write('krm-foyer-session-keys2', 'PATCH', { ...seed, metadata: { ...seed.metadata, name: 'krm-foyer-session-keys2' } });
+    expect(otherName.status).toBe(403);
+
+    // Only what the seed would have made, or it is not published with the menu, or
+    // something beside the key reaches a public repository in plain text.
+    for (const [body, words] of [
+      [{ ...seed, stringData: { apiKey: 'taart', other: 'x' } }, 'The mail key holds one entry, apiKey, and nothing else.'],
+      [{ ...seed, metadata: { name: 'coffee-mail' } }, 'Only the value of the mail key can be chosen here'],
+      [{ ...seed, metadata: { ...seed.metadata, labels: { ...label, sneaky: 'yes' } } }, 'Only the value of the mail key can be chosen here'],
+      [{ ...seed, metadata: { ...seed.metadata, annotations: { note: 'x' } } }, 'Only the value of the mail key can be chosen here'],
+      [{ ...seed, immutable: true }, 'Only the value of the mail key can be chosen here'],
+      [{ ...seed, type: 'example.com/other' }, 'Only the value of the mail key can be chosen here'],
+    ]) {
+      const refused = await write('coffee-mail', 'PATCH', body);
+      expect(refused.status, JSON.stringify(body)).toBeGreaterThanOrEqual(400);
+      expect(refused.message).toContain(words);
+    }
+    expect(() => kube('get', 'secret', 'coffee-mail')).toThrow();
+
+    // The save itself, as a person does it.
+    await mailKey.fill('taart');
+    await summary.getByRole('button', { name: 'Save 1 Change' }).click();
+    await expect(summary).toContainText('No pending changes');
+    await expect(summary.getByRole('alert')).toHaveCount(0);
+    const made = JSON.parse(kube('get', 'secret', 'coffee-mail', '-o', 'json'));
+    expect(made.data).toEqual({ apiKey: b64('taart') });
+    expect(made.type).toBe('Opaque');
+    expect(made.metadata.labels).toEqual(label);
+    expect(made.metadata.annotations).toBeUndefined();
+    await expect(mailPane.getByText('Set', { exact: true })).toBeVisible();
+    await expect(mailKey).toHaveValue('');
+
+    // From here it is an ordinary key: an ordinary patch, under the ordinary rules.
+    const same = await write('coffee-mail', 'PATCH', { stringData: { apiKey: 'taart' } }, 'application/merge-patch+json', '/coffee-mail');
+    expect(same.status).toBe(422);
+    expect(same.message).toContain('That is the mail key already set');
+    expect((await write('coffee-mail', 'PATCH', { stringData: { apiKey: 'koek' } }, 'application/merge-patch+json', '/coffee-mail')).status).toBe(200);
+  } finally {
+    await context.close().catch(() => {});
+    kube('delete', 'rolebinding', 'voter-audience-coffee-admin', '--ignore-not-found');
+    kube('delete', 'rolebinding', 'voter-audience-coffee-keys', '--ignore-not-found');
+    // Back to the fixture's seed, whichever way the test ended.
+    gone();
+    kube('create', 'secret', 'generic', 'coffee-mail', '--from-literal=apiKey=');
+    kube('label', 'secret', 'coffee-mail', 'voter.configbutler.ai/coffee-settings=true');
+    const participants = JSON.parse(kube('get', 'participants', '-o', 'json')).items;
+    for (const p of participants) if (p.spec.displayName === displayName) kube('delete', 'participant', p.metadata.name);
+  }
+});

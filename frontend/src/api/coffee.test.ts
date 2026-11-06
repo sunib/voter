@@ -6,6 +6,7 @@ import {
   getVoucherUsage,
   patchAdminCoffeeConfig,
   requestSettingsCommit,
+  setCoffeeKey,
   submitOrder,
 } from './coffee'
 import { getSession } from './session'
@@ -226,7 +227,11 @@ describe('CSRF proof', () => {
       spec: {
         gitTargetRef: { name: 'voter-demo' },
         message: 'raise the limit',
-        window: { attach: 'CurrentOrNext', attachTimeout: '3s', maxDuration: '1s' },
+        window: {
+          attach: 'CurrentOrNext',
+          attachTimeout: '3s',
+          maxDuration: '1s',
+        },
       },
     })
     expect(result).toEqual({
@@ -237,7 +242,10 @@ describe('CSRF proof', () => {
   })
 
   it('asks the settings target with the same message, and no lead of its own', async () => {
-    await useTestAppConfig({ settingsGitTargetName: 'coffee-settings', commitLeadMillis: 60000 })
+    await useTestAppConfig({
+      settingsGitTargetName: 'coffee-settings',
+      commitLeadMillis: 60000,
+    })
     await signIn()
     route(() => ({ body: { metadata: { name: 'coffee-settings-save-x' } } }))
 
@@ -250,10 +258,17 @@ describe('CSRF proof', () => {
       spec: {
         gitTargetRef: { name: 'coffee-settings' },
         message: 'raise the limit',
-        window: { attach: 'CurrentOrNext', attachTimeout: '3s', maxDuration: '1s' },
+        window: {
+          attach: 'CurrentOrNext',
+          attachTimeout: '3s',
+          maxDuration: '1s',
+        },
       },
     })
-    expect(receipt).toEqual({ commitRequested: true, commitRequest: 'coffee-settings-save-x' })
+    expect(receipt).toEqual({
+      commitRequested: true,
+      commitRequest: 'coffee-settings-save-x',
+    })
   })
 
   it('asks the settings target nothing when the deployment names none', async () => {
@@ -361,5 +376,52 @@ describe('voucher usage', () => {
     // next to each voucher's maximumUsage.
     expect(usage.voucherUsage.testnet).toBe(3)
     expect(usage.scope).toBe('process')
+  })
+})
+
+describe('setCoffeeKey', () => {
+  const apply = 'application/apply-patch+yaml'
+
+  it('only patches a key whose Secret is there', async () => {
+    stubFetch({})
+    await setCoffeeKey('coffee-mail', 'taart')
+    expect(only().url).toContain('/secrets/coffee-mail?fieldManager=voter')
+    expect(headerOf('content-type')).toBe('application/merge-patch+json')
+    expect(JSON.parse(String(only().init.body))).toEqual({
+      stringData: { apiKey: 'taart' },
+    })
+  })
+
+  // Flux seeds it again within minutes, but somebody is typing a key now.
+  it('brings a Secret that is gone back as the seed in Git would make it', async () => {
+    route((_url, _method) =>
+      calls.length === 1 ? { status: 404, body: {} } : { body: {} },
+    )
+    await setCoffeeKey('coffee-mail', 'taart')
+    expect(calls).toHaveLength(2)
+    const created = calls[1]!
+    expect(created.url).toContain(
+      '/secrets/coffee-mail?fieldManager=voter&force=true',
+    )
+    expect(created.init.method).toBe('PATCH')
+    expect(new Headers(created.init.headers).get('content-type')).toBe(apply)
+    expect(JSON.parse(String(created.init.body))).toEqual({
+      apiVersion: 'v1',
+      kind: 'Secret',
+      metadata: {
+        name: 'coffee-mail',
+        labels: { 'voter.configbutler.ai/coffee-settings': 'true' },
+      },
+      type: 'Opaque',
+      stringData: { apiKey: 'taart' },
+    })
+  })
+
+  it('answers any other refusal as it is, and creates nothing', async () => {
+    stubFetch({ message: 'That is the mail key already set' }, 422)
+    await expect(setCoffeeKey('coffee-mail', 'taart')).rejects.toMatchObject({
+      status: 422,
+    })
+    expect(calls).toHaveLength(1)
   })
 })
